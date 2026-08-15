@@ -111,12 +111,10 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 
 ## 供应链策略
 
-外部 GitHub Actions 固定到完整 commit SHA。ChatGPT code-task 的 Codex
-executor 使用固定 SHA 的 OpenAI 官方 Codex Action；未指定
-`codex-version`，因此 Action 内安装的 Codex CLI 仍遵循该 Action 的当前默认版本。
-其他运行时工具则刻意遵循一次性开发环境的当前上游入口：
+外部 GitHub Actions 固定到完整 commit SHA。运行时工具刻意遵循一次性开发环境的当前上游入口：
 
 - Private T3 Session 的 Codex、Claude Code 和 Grok Build 使用各自官方安装器；
+- ChatGPT code-task 的 Codex 使用官方 CLI 安装器；
 - ChatGPT code-task 的 Claude Code 使用官方安装器；
 - ChatGPT code-task 的 Grok Build 使用 xAI 官方 CLI 安装器；
 - Tailscale 使用官方 Linux 安装器；

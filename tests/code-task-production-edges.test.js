@@ -159,7 +159,7 @@ test("workflow selects exactly one target checkout authorization path", async ()
   assert.doesNotMatch(workflow, /continue-on-error:/);
 });
 
-test("workflow skips delivery steps when an executor produces no changes", async () => {
+test("workflow returns the driver result and skips delivery when no files changed", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/execute-task.yml", import.meta.url),
     "utf8",
@@ -174,10 +174,31 @@ test("workflow skips delivery steps when an executor produces no changes", async
     workflow,
     /if: \$\{\{ inputs\.mode == 'pull_request' && steps\.changes\.outputs\.changed == 'true' \}\}/,
   );
-  assert.match(workflow, /summary="No changes produced\."/);
+  assert.match(workflow, /summary="\$\(< "\$RUNNER_TEMP\/executor\.result"\)"/);
+  assert.doesNotMatch(workflow, /summary="No changes produced\."/);
 });
 
-test("Codex executor uses the pinned Codex Action with forwarding credentials", async () => {
+test("Codex executor uses the native CLI driver", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/execute-task.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workflow, /https:\/\/chatgpt\.com\/codex\/install\.sh/);
+  assert.match(workflow, /secrets\.MINI_CODEX_BASE_URL/);
+  assert.match(workflow, /env_key = "MINI_END_USER_KEY"/);
+  assert.match(workflow, /working-directory: target-workspace/);
+  assert.match(
+    workflow,
+    /codex exec --ephemeral --sandbox workspace-write --output-last-message "\$RUNNER_TEMP\/executor\.result"/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /openai\/codex-action|allow-bots:|allow-bot-users:|OPENAI_API_KEY|CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT/,
+  );
+});
+
+test("Grok executor writes its native headless result to the driver result", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/execute-task.yml", import.meta.url),
     "utf8",
@@ -185,28 +206,7 @@ test("Codex executor uses the pinned Codex Action with forwarding credentials", 
 
   assert.match(
     workflow,
-    /uses: openai\/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56/,
-  );
-  assert.match(
-    workflow,
-    /openai-api-key: \$\{\{ secrets\.MINI_END_USER_KEY \}\}/,
-  );
-  assert.match(
-    workflow,
-    /responses-api-endpoint: \$\{\{ secrets\.MINI_CODEX_BASE_URL \}\}\/responses/,
-  );
-  assert.match(workflow, /model: gpt-5\.6-sol/);
-  assert.match(workflow, /prompt-file: \$\{\{ runner\.temp \}\}\/task\.prompt/);
-  assert.match(workflow, /working-directory: target-workspace/);
-  assert.match(workflow, /permission-profile: ":workspace"/);
-  assert.match(
-    workflow,
-    /allow-bot-users: "harness-x-harness-task-runner\[bot\]"/,
-  );
-  assert.doesNotMatch(workflow, /allow-bots:/);
-  assert.doesNotMatch(
-    workflow,
-    /OPENAI_API_KEY|CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT|chatgpt\.com\/codex\/install\.sh/,
+    /grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format plain --prompt-file "\$RUNNER_TEMP\/task\.prompt" > "\$RUNNER_TEMP\/executor\.result"/,
   );
 });
 

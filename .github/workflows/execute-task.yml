@@ -121,19 +121,33 @@ jobs:
           task-id: ${{ env.TASK_ID }}
           output-file: ${{ runner.temp }}/task.prompt
 
+      - name: Prepare executor result
+        shell: bash
+        run: install -m 0600 /dev/null "$RUNNER_TEMP/executor.result"
+
+      - name: Install Codex
+        if: ${{ inputs.executor == 'codex' }}
+        shell: bash
+        run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+      - name: Configure Codex
+        if: ${{ inputs.executor == 'codex' }}
+        shell: bash
+        env:
+          MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
+        run: |
+          install -d -m 0700 "$HOME/.codex"
+          printf 'model = "gpt-5.6-sol"\nmodel_provider = "mini_codex"\n\n[model_providers.mini_codex]\nname = "Mini Codex"\nbase_url = "%s"\nwire_api = "responses"\nenv_key = "MINI_END_USER_KEY"\n' \
+            "$MINI_CODEX_BASE_URL" > "$HOME/.codex/config.toml"
+          chmod 600 "$HOME/.codex/config.toml"
+
       - name: Run Codex
         if: ${{ inputs.executor == 'codex' }}
-        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
-        with:
-          openai-api-key: ${{ secrets.MINI_END_USER_KEY }}
-          responses-api-endpoint: ${{ secrets.MINI_CODEX_BASE_URL }}/responses
-          model: gpt-5.6-sol
-          prompt-file: ${{ runner.temp }}/task.prompt
-          working-directory: target-workspace
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
-          allow-bot-users: "harness-x-harness-task-runner[bot]"
-          codex-args: '["--ephemeral"]'
+        shell: bash
+        env:
+          MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
+        working-directory: target-workspace
+        run: codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result" - < "$RUNNER_TEMP/task.prompt" > /dev/null
 
       - name: Install Claude Code
         if: ${{ inputs.executor == 'claude' }}
@@ -146,7 +160,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         working-directory: target-workspace
-        run: claude --dangerously-skip-permissions -p "$(< "$RUNNER_TEMP/task.prompt")"
+        run: claude --dangerously-skip-permissions -p "$(< "$RUNNER_TEMP/task.prompt")" > "$RUNNER_TEMP/executor.result"
 
       - name: Install Grok Build
         if: ${{ inputs.executor == 'grok' }}
@@ -170,7 +184,7 @@ jobs:
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
         working-directory: target-workspace
-        run: grok --no-auto-update --always-approve -m mini-grok-4-6 -p "$(< "$RUNNER_TEMP/task.prompt")"
+        run: grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format plain --prompt-file "$RUNNER_TEMP/task.prompt" > "$RUNNER_TEMP/executor.result"
 
       - name: Report testing
         uses: ./.github/actions/task-control
@@ -255,14 +269,9 @@ jobs:
           commit="$(git -C "$WORKSPACE" rev-parse HEAD)"
           changed="${{ steps.changes.outputs.changed }}"
           branch=""
-          if [[ "$TASK_MODE" == "analyze" ]]; then
-            summary="$(git -C "$WORKSPACE" status --short)"
-            [[ -n "$summary" ]] || summary="No changes produced."
-          elif [[ "$changed" == "true" ]]; then
+          summary="$(< "$RUNNER_TEMP/executor.result")"
+          if [[ "$TASK_MODE" != "analyze" && "$changed" == "true" ]]; then
             branch="task/$TASK_ID"
-            summary="$(git -C "$WORKSPACE" show --stat --oneline --format=short HEAD)"
-          else
-            summary="No changes produced."
           fi
           jq -n \
             --arg commit "$commit" \
