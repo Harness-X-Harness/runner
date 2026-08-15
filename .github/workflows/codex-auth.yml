@@ -12,10 +12,22 @@ jobs:
   auth:
     runs-on: ubuntu-24.04
     steps:
-      - name: Verify Codex provider authentication
+      - name: Install Codex
+        shell: bash
+        run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+      - name: Configure Codex
+        shell: bash
+        env:
+          MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
+        run: |
+          install -d -m 0700 "$HOME/.codex"
+          printf 'model = "gpt-5.6-sol"\nmodel_provider = "mini_codex"\n\n[model_providers.mini_codex]\nname = "Mini Codex"\nbase_url = "%s"\nwire_api = "responses"\nenv_key = "MINI_END_USER_KEY"\n' \
+            "$MINI_CODEX_BASE_URL" > "$HOME/.codex/config.toml"
+          chmod 600 "$HOME/.codex/config.toml"
+
+      - name: Verify Codex authentication
         shell: bash
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-          MINI_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
-        run: >-
-          curl -fsS -o /dev/null -H "Authorization: Bearer $MINI_END_USER_KEY" "$MINI_BASE_URL/models"
+        run: codex exec --ephemeral --skip-git-repo-check --sandbox read-only "Reply exactly OK." > /dev/null

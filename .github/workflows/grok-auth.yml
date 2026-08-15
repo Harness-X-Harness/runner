@@ -12,10 +12,22 @@ jobs:
   auth:
     runs-on: ubuntu-24.04
     steps:
-      - name: Verify Grok provider authentication
+      - name: Install Grok Build
+        shell: bash
+        run: curl -fsSL https://x.ai/cli/install.sh | bash
+
+      - name: Configure Grok Build
+        shell: bash
+        env:
+          MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
+        run: |
+          install -d -m 0700 "$HOME/.grok"
+          printf '[models]\ndefault = "mini-grok-4-6"\n\n[model.mini-grok-4-6]\nmodel = "grok-4.6"\nbase_url = "%s"\nname = "Mini Grok 4.6"\ndescription = "Grok through Mini"\nenv_key = "MINI_END_USER_KEY"\napi_backend = "responses"\n' \
+            "$MINI_GROK_BASE_URL" > "$HOME/.grok/config.toml"
+          chmod 600 "$HOME/.grok/config.toml"
+
+      - name: Verify Grok authentication
         shell: bash
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-          MINI_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
-        run: >-
-          curl -fsS -o /dev/null -H "Authorization: Bearer $MINI_END_USER_KEY" "$MINI_BASE_URL/models"
+        run: grok --no-auto-update --always-approve -m mini-grok-4-6 -p "Reply exactly OK." > /dev/null

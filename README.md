@@ -50,11 +50,11 @@ token permissions, and uses a path-scoped temporary Git credential store.
 The Lark session card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
 `LARK_CHAT_NAME` secrets. See [Lark session card](docs/lark-reporting.md).
 
-The two auth badges report separate daily provider checks. Each workflow can
-also be dispatched manually. They call the provider's `/models` endpoint with
-the shared key, discard the response body, and never store an endpoint or key
-in the repository. Codex and Grok use their native user configuration under
-`~/.codex` and `~/.grok`; no first-party Grok login is used.
+The two auth badges report separate daily native-CLI checks. Each workflow can
+also be dispatched manually. It installs the current official CLI, loads the
+provider endpoint and shared key through native user configuration, executes a
+minimal model request, and discards the model output. No endpoint or key is
+stored in the repository. Grok does not use first-party login.
 
 Protect both the default branch and every session Environment. In particular,
 restrict Environment deployment branches and require reviewers before granting
