@@ -100,7 +100,5 @@ See the [operations runbook](docs/runner-operations-runbook.md) for the concise
 operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 
 For ChatGPT-driven code tasks, see the [ChatGPT code-task app](docs/chatgpt-app.md).
-Verified cross-cutting facts and documentation ownership are indexed in
-[project memory](project-memory.md).
 It adds a stable Cloudflare Worker `/mcp` control plane while keeping the
 existing temporary T3 session workflow available as a separate path.

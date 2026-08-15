@@ -134,9 +134,6 @@ user agent. OAuth subjects passed to the pinned Cloudflare provider use
 `github-<id>` because that provider's opaque authorization-code format uses
 colon delimiters.
 
-Current verified acceptance state and unresolved external checks are recorded
-in [ChatGPT app acceptance memory](chatgpt-app-acceptance.md).
-
 ## Local checks
 
 ```bash
