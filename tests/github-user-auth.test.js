@@ -124,7 +124,7 @@ test("GitHub callback completes OAuth with a delimiter-safe user id", async () =
   });
   assert.equal(completedAuthorization.props.githubUserId, 123);
   assert.equal(completedAuthorization.props.githubLogin, "octocat");
-  assert.equal(profileRequest.headers["user-agent"], "WeaverTaskRunner");
+  assert.equal(profileRequest.headers["user-agent"], "HarnessXHarnessTaskRunner");
 });
 
 test("GitHub callback rejects a non-JSON profile error before creating a grant", async () => {

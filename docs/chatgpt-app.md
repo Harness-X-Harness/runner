@@ -129,7 +129,7 @@ No separate GitHub OAuth App or broad `repo` OAuth scope is required.
 
 All requests to `api.github.com`, whether authenticated by a user token, App
 JWT, or installation token, use the shared GitHub headers including
-`User-Agent: WeaverTaskRunner`. GitHub rejects REST requests without a valid
+`User-Agent: HarnessXHarnessTaskRunner`. GitHub rejects REST requests without a valid
 user agent. OAuth subjects passed to the pinned Cloudflare provider use
 `github-<id>` because that provider's opaque authorization-code format uses
 colon delimiters.

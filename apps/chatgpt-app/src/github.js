@@ -114,7 +114,7 @@ export function githubHeaders(token) {
   return {
     accept: "application/vnd.github+json",
     authorization: `Bearer ${token}`,
-    "user-agent": "WeaverTaskRunner",
+    "user-agent": "HarnessXHarnessTaskRunner",
     "x-github-api-version": API_VERSION,
   };
 }

@@ -40,7 +40,7 @@ function createOAuthProvider(env) {
     resourceMetadata: {
       scopes_supported: OAUTH_SCOPES,
       bearer_methods_supported: ["header"],
-      resource_name: "WeaverGroup code task runner",
+      resource_name: "Harness X Harness Task Runner",
     },
     allowImplicitFlow: false,
     allowPlainPKCE: false,
@@ -171,7 +171,7 @@ async function authorizePage(request, env) {
   });
 
   return html(
-    "Authorize WeaverGroup runner",
+    "Authorize Harness X Harness Task Runner",
     `<p><strong>${escapeHtml(client.clientName ?? "ChatGPT")}</strong> requests access to run code tasks.</p>
      <p>Requested scopes: ${escapeHtml(authRequest.scope.join(", ") || "none")}</p>
      <form method="post" action="/authorize/consent">

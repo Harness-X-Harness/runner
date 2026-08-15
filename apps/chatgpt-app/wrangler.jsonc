@@ -1,5 +1,5 @@
 {
-  "name": "weavergroup-runner-control-plane",
+  "name": "harness-x-harness-task-runner-control-plane",
   "main": "src/index.js",
   "compatibility_date": "2026-07-23",
   "compatibility_flags": [
@@ -31,6 +31,6 @@
     "GITHUB_WORKFLOW_ID": "execute-task.yml",
     "GITHUB_RUNNER_REF": "main",
     "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
-    "TASK_CONTROL_PLANE_URL": "https://weavergroup-runner-control-plane.ron-huafeng.workers.dev"
+    "TASK_CONTROL_PLANE_URL": "https://harness-x-harness-task-runner-control-plane.ron-huafeng.workers.dev"
   }
 }
