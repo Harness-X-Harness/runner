@@ -1,0 +1,44 @@
+name: Repository tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck and actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          shellcheck --version
+          ./actionlint -version
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: ./actionlint -color
+
+      - name: ShellCheck scripts and tests
+        shell: bash
+        run: shellcheck --severity=warning tests/*.sh
+
+      - name: Test workflow security contract
+        shell: bash
+        run: bash tests/workflow-security.test.sh
+
+      - name: Test Node actions
+        shell: bash
+        run: node --test tests/*.test.js

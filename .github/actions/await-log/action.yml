@@ -1,0 +1,17 @@
+name: Await log value
+description: Wait until a log file contains a value matching a regular expression.
+
+inputs:
+  path:
+    description: Log file to observe.
+    required: true
+  pattern:
+    description: JavaScript regular expression whose first capture is written.
+    required: true
+  destination:
+    description: File that receives the matched value with mode 0600.
+    required: true
+
+runs:
+  using: node20
+  main: index.js

@@ -1,0 +1,266 @@
+name: Execute code task
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Control-plane task identifier
+        required: true
+        type: string
+      repo:
+        description: Target repository in owner/repository form
+        required: true
+        type: string
+      ref:
+        description: Branch, tag, or commit to check out
+        required: true
+        type: string
+      executor:
+        description: Coding executor
+        required: true
+        type: choice
+        options:
+          - codex
+          - claude
+          - grok
+      mode:
+        description: How changes should be delivered
+        required: true
+        type: choice
+        options:
+          - analyze
+          - edit
+          - pull_request
+run-name: Code task · ${{ inputs.task_id }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  execute:
+    runs-on: ubuntu-24.04
+    env:
+      TASK_ID: ${{ inputs.task_id }}
+      TARGET_REPO: ${{ inputs.repo }}
+      TARGET_REF: ${{ inputs.ref }}
+      EXECUTOR: ${{ inputs.executor }}
+      TASK_MODE: ${{ inputs.mode }}
+      TASK_CONTROL_PLANE_URL: ${{ vars.TASK_CONTROL_PLANE_URL }}
+      WORKSPACE: ${{ github.workspace }}/target-workspace
+
+    steps:
+      - name: Check out runner workflow
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve target repository
+        id: target
+        shell: bash
+        run: |
+          echo "owner=${TARGET_REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${TARGET_REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create target repository token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.RUNNER_GITHUB_APP_ID }}
+          private-key: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+
+      - name: Check out target repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-workspace
+          persist-credentials: false
+
+      - name: Report running
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: running
+          run-id: ${{ github.run_id }}
+
+      - name: Fetch private task prompt
+        uses: ./.github/actions/task-control
+        with:
+          operation: fetch
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          output-file: ${{ runner.temp }}/task.prompt
+
+      - name: Run Codex
+        if: ${{ inputs.executor == 'codex' }}
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          openai-api-key: ${{ secrets.CODEX_API_KEY }}
+          responses-api-endpoint: ${{ secrets.CODEX_RESPONSES_API_ENDPOINT }}
+          model: gpt-5.3-codex-spark
+          prompt-file: ${{ runner.temp }}/task.prompt
+          working-directory: target-workspace
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          allow-bot-users: "weavertaskrunner[bot]"
+          codex-args: '["--ephemeral"]'
+
+      - name: Install Claude Code
+        if: ${{ inputs.executor == 'claude' }}
+        shell: bash
+        run: curl -fsSL https://claude.ai/install.sh | bash
+
+      - name: Run Claude Code
+        if: ${{ inputs.executor == 'claude' }}
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        working-directory: target-workspace
+        run: claude --dangerously-skip-permissions -p "$(< "$RUNNER_TEMP/task.prompt")"
+
+      - name: Install Grok Build
+        if: ${{ inputs.executor == 'grok' }}
+        shell: bash
+        run: curl -fsSL https://x.ai/cli/install.sh | bash
+
+      - name: Run Grok Build
+        if: ${{ inputs.executor == 'grok' }}
+        shell: bash
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        working-directory: target-workspace
+        run: grok --no-auto-update --always-approve -p "$(< "$RUNNER_TEMP/task.prompt")"
+
+      - name: Report testing
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: testing
+
+      - name: Check task diff
+        shell: bash
+        run: git -C "$WORKSPACE" diff --check
+
+      - name: Detect task changes
+        id: changes
+        shell: bash
+        run: |
+          if [[ -n "$(git -C "$WORKSPACE" status --porcelain)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start task branch
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
+        shell: bash
+        working-directory: target-workspace
+        run: git switch -c "task/$TASK_ID"
+
+      - name: Report committing
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: committing
+
+      - name: Commit task changes
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
+        shell: bash
+        working-directory: target-workspace
+        run: |
+          git config user.name "weavergroup-runner[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Execute code task $TASK_ID"
+
+      - name: Push task branch
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          TARGET_TOKEN: ${{ steps.app-token.outputs.token }}
+        working-directory: target-workspace
+        run: |
+          git config credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
+          printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' \
+            "$TARGET_REPO" "$TARGET_TOKEN" | git credential approve
+          git push origin "task/$TASK_ID"
+
+      - name: Open pull request
+        if: ${{ inputs.mode == 'pull_request' && steps.changes.outputs.changed == 'true' }}
+        id: pull-request
+        shell: bash
+        env:
+          TARGET_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          response="$(curl -fsSL -X POST \
+            "https://api.github.com/repos/$TARGET_REPO/pulls" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $TARGET_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg title "Execute code task $TASK_ID" --arg head "task/$TASK_ID" --arg base "$TARGET_REF" \
+              '{title:$title,head:$head,base:$base,body:"Created by the WeaverGroup runner."}')")"
+          echo "url=$(jq -r .html_url <<<"$response")" >> "$GITHUB_OUTPUT"
+
+      - name: Report completed
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          commit="$(git -C "$WORKSPACE" rev-parse HEAD)"
+          changed="${{ steps.changes.outputs.changed }}"
+          branch=""
+          if [[ "$TASK_MODE" == "analyze" ]]; then
+            summary="$(git -C "$WORKSPACE" status --short)"
+            [[ -n "$summary" ]] || summary="No changes produced."
+          elif [[ "$changed" == "true" ]]; then
+            branch="task/$TASK_ID"
+            summary="$(git -C "$WORKSPACE" show --stat --oneline --format=short HEAD)"
+          else
+            summary="No changes produced."
+          fi
+          jq -n \
+            --arg commit "$commit" \
+            --arg branch "$branch" \
+            --arg summary "$summary" \
+            --arg pullRequest "${{ steps.pull-request.outputs.url }}" \
+            '{commit:$commit,summary:$summary} + (if $branch == "" then {} else {branch:$branch} end) + (if $pullRequest == "" then {} else {pullRequest:$pullRequest} end)' \
+            > "$RUNNER_TEMP/task.result.json"
+
+      - name: Publish completed
+        if: ${{ success() }}
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: completed
+          result-file: ${{ runner.temp }}/task.result.json
+
+      - name: Report failed
+        if: ${{ failure() }}
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: failed
+
+      - name: Report cancelled
+        if: ${{ cancelled() }}
+        uses: ./.github/actions/task-control
+        with:
+          operation: event
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
+          status: cancelled
