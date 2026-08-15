@@ -152,11 +152,15 @@ test("Codex executor uses the pinned Codex Action with forwarding credentials", 
     workflow,
     /uses: openai\/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56/,
   );
-  assert.match(workflow, /openai-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}/);
   assert.match(
     workflow,
-    /responses-api-endpoint: \$\{\{ secrets\.CODEX_RESPONSES_API_ENDPOINT \}\}/,
+    /openai-api-key: \$\{\{ secrets\.MINI_END_USER_KEY \}\}/,
   );
+  assert.match(
+    workflow,
+    /responses-api-endpoint: \$\{\{ secrets\.MINI_CODEX_BASE_URL \}\}\/responses/,
+  );
+  assert.match(workflow, /model: gpt-5\.6-sol/);
   assert.match(workflow, /prompt-file: \$\{\{ runner\.temp \}\}\/task\.prompt/);
   assert.match(workflow, /working-directory: target-workspace/);
   assert.match(workflow, /permission-profile: ":workspace"/);
@@ -165,7 +169,10 @@ test("Codex executor uses the pinned Codex Action with forwarding credentials", 
     /allow-bot-users: "harness-x-harness-task-runner\[bot\]"/,
   );
   assert.doesNotMatch(workflow, /allow-bots:/);
-  assert.doesNotMatch(workflow, /OPENAI_API_KEY|chatgpt\.com\/codex\/install\.sh/);
+  assert.doesNotMatch(
+    workflow,
+    /OPENAI_API_KEY|CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT|chatgpt\.com\/codex\/install\.sh/,
+  );
 });
 
 test("runner GitHub App credentials avoid GitHub's reserved secret prefix", async () => {
@@ -199,6 +206,17 @@ test("Cloudflare credential template documents the deployment permission boundar
     "CLOUDFLARE_API_TOKEN",
     "CLOUDFLARE_ACCOUNT_ID",
   ]);
+});
+
+test("CI type-checks the Worker JavaScript source", async () => {
+  const [configuration, workflow] = await Promise.all([
+    readFile(new URL("../apps/chatgpt-app/tsconfig.json", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/test.yml", import.meta.url), "utf8"),
+  ]);
+
+  assert.equal(JSON.parse(configuration).compilerOptions.checkJs, true);
+  assert.match(workflow, /npm ci --prefix apps\/chatgpt-app/);
+  assert.match(workflow, /npm --prefix apps\/chatgpt-app run typecheck/);
 });
 
 test("submit_task records a failed state when workflow dispatch fails", async () => {

@@ -8,6 +8,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 TASK_WORKFLOW="$ROOT_DIR/.github/workflows/execute-task.yml"
+CODEX_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/codex-auth.yml"
+GROK_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/grok-auth.yml"
 TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
@@ -24,6 +26,8 @@ fail() {
 
 [[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
 [[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
+[[ -f "$CODEX_AUTH_WORKFLOW" ]] || fail "missing workflow: $CODEX_AUTH_WORKFLOW"
+[[ -f "$GROK_AUTH_WORKFLOW" ]] || fail "missing workflow: $GROK_AUTH_WORKFLOW"
 for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$LARK_ACTION" "$CONTROL_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
@@ -83,8 +87,57 @@ if rg -q 'secrets[.]GITHUB_' "$TASK_WORKFLOW"; then
 fi
 grep -Fq 'https://x.ai/cli/install.sh' "$TASK_WORKFLOW" || \
   fail 'task workflow must use the official Grok Build installer'
+grep -Fq 'https://x.ai/cli/install.sh' "$TOOLS_ACTION" || \
+  fail 'private session must use the official Grok Build installer'
 grep -Fq 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' "$TASK_WORKFLOW" || \
   fail 'task workflow must use a SHA-pinned GitHub App token action'
+
+# Codex and Grok share one scoped Mini key. Provider endpoints remain GitHub
+# Secrets, and each CLI resolves that key through its native user config.
+for file in "$WORKFLOW" "$TASK_WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
+  if rg -q 'CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT|XAI_API_KEY' "$file"; then
+    fail "workflow still uses a superseded executor credential: $file"
+  fi
+done
+grep -Fq 'secrets.MINI_END_USER_KEY' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use the shared Mini end-user key'
+grep -Fq 'secrets.MINI_CODEX_BASE_URL' "$TASK_WORKFLOW" || \
+  fail 'Codex endpoint must come from its GitHub Secret'
+grep -Fq 'secrets.MINI_GROK_BASE_URL' "$TASK_WORKFLOW" || \
+  fail 'Grok endpoint must come from its GitHub Secret'
+grep -Fq 'env_key = "MINI_END_USER_KEY"' "$TASK_WORKFLOW" || \
+  fail 'Grok native config must resolve the shared key from the environment'
+grep -Fq '[model.mini-grok-4-6]' "$TASK_WORKFLOW" || \
+  fail 'Grok native config must select the Mini Grok model'
+
+for auth_workflow in "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
+  grep -Fq 'workflow_dispatch:' "$auth_workflow" || \
+    fail "auth workflow must support manual dispatch: $auth_workflow"
+  grep -Fq 'schedule:' "$auth_workflow" || \
+    fail "auth workflow must run daily: $auth_workflow"
+  grep -Fq 'permissions:' "$auth_workflow" || \
+    fail "auth workflow must declare permissions: $auth_workflow"
+  grep -Fq 'contents: read' "$auth_workflow" || \
+    fail "auth workflow permissions must be read-only: $auth_workflow"
+  grep -Fq 'Authorization: Bearer $MINI_END_USER_KEY' "$auth_workflow" || \
+    fail "auth workflow must use the shared Mini key: $auth_workflow"
+  grep -Fq '"$MINI_BASE_URL/models"' "$auth_workflow" || \
+    fail "auth workflow must probe the secret provider endpoint: $auth_workflow"
+  grep -Fq -- '-o /dev/null' "$auth_workflow" || \
+    fail "auth workflow must discard the model response: $auth_workflow"
+  if rg -q '^  (push|pull_request|pull_request_target):' "$auth_workflow"; then
+    fail "auth workflow must not run for source changes: $auth_workflow"
+  fi
+done
+grep -Fq 'secrets.MINI_CODEX_BASE_URL' "$CODEX_AUTH_WORKFLOW" || \
+  fail 'Codex auth workflow must use the secret endpoint'
+grep -Fq 'secrets.MINI_GROK_BASE_URL' "$GROK_AUTH_WORKFLOW" || \
+  fail 'Grok auth workflow must use the secret endpoint'
+
+if rg -q 'experimental_bearer_token|auth[.]json|api_key\s*=' \
+  "$WORKFLOW" "$TASK_WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; then
+  fail 'workflow must not persist executor credentials or use login-session files'
+fi
 
 grep -Fq 'securitySchemes: SECURITY_SCHEMES' "$ROOT_DIR/apps/chatgpt-app/src/mcp.js" || \
   fail 'MCP tools must advertise their OAuth security schemes'

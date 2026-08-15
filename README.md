@@ -1,5 +1,8 @@
 # Private T3 session
 
+[![Codex auth](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml)
+[![Grok auth](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml)
+
 This public repository starts a one-time GitHub-hosted Ubuntu runner for a
 private repository, optionally joins it to Headscale, and serves that checkout
 through T3 Code and a temporary Cloudflare Quick Tunnel.
@@ -8,6 +11,7 @@ The workflow is deliberately declarative and happy-path:
 
 - Codex uses its official standalone installer.
 - Claude Code uses its official native installer.
+- Grok Build uses its official native installer.
 - T3 Code runs with `npx --yes t3@latest`.
 - cloudflared uses Cloudflare's official package repository and system default
   install location.
@@ -35,6 +39,9 @@ Environment secrets:
 | `TARGET_REPO` | Private repository in `owner/repository` form |
 | `TARGET_REPO_AUTH` | Token restricted to that repository |
 | `HEADSCALE_AUTHKEY` | Tagged ephemeral Headscale/Tailscale auth key, when SSH is enabled |
+| `MINI_END_USER_KEY` | Shared scoped bearer key used by the Codex and Grok providers |
+| `MINI_CODEX_BASE_URL` | Confidential Codex provider base URL |
+| `MINI_GROK_BASE_URL` | Confidential Grok provider base URL |
 
 Configure `HEADSCALE_URL` as a repository or Environment secret when SSH is
 enabled. The workflow only accepts `workflow_dispatch`, has read-only GitHub
@@ -42,6 +49,12 @@ token permissions, and uses a path-scoped temporary Git credential store.
 
 The Lark session card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
 `LARK_CHAT_NAME` secrets. See [Lark session card](docs/lark-reporting.md).
+
+The two auth badges report separate daily provider checks. Each workflow can
+also be dispatched manually. They call the provider's `/models` endpoint with
+the shared key, discard the response body, and never store an endpoint or key
+in the repository. Codex and Grok use their native user configuration under
+`~/.codex` and `~/.grok`; no first-party Grok login is used.
 
 Protect both the default branch and every session Environment. In particular,
 restrict Environment deployment branches and require reviewers before granting
