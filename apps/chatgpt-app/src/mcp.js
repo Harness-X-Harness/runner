@@ -1,6 +1,5 @@
-import { createMcpHandler } from "agents/mcp";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
+import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { cancelWorkflow, dispatchWorkflow } from "./github.js";
@@ -25,7 +24,7 @@ const SECURITY_SCHEMES = Object.freeze({
 });
 
 const statusSchema = z.enum(TASK_STATUSES);
-const taskOutputSchema = {
+const taskOutputSchema = z.object({
   id: z.string(),
   repo: z.string(),
   ref: z.string(),
@@ -38,7 +37,7 @@ const taskOutputSchema = {
   authorizationUrl: z.string().optional(),
   requiredPermissions: z.array(z.string()).optional(),
   result: z.record(z.string(), z.unknown()).optional(),
-};
+});
 
 export function createServer(env, props) {
   const server = new McpServer(
@@ -49,19 +48,20 @@ export function createServer(env, props) {
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "submit_task",
     {
       title: "Submit code task",
       description: "Use this when the user wants an authorized repository task executed by a selected coding agent.",
-      inputSchema: {
+      inputSchema: z.object({
         repo: z.string().describe("GitHub repository in owner/repository form."),
         prompt: z.string().describe("The coding task instructions; they are retained privately by the control plane."),
         executor: z.enum(EXECUTORS).describe("Coding executor to run."),
         ref: z.string().optional().describe("Branch, tag, or commit; defaults to main."),
         mode: z.enum(MODES).optional().describe("analyze, edit, or pull_request; defaults to analyze."),
-      },
-      outputSchema: {
+      }),
+      outputSchema: z.object({
         taskId: z.string(),
         status: statusSchema,
         repo: z.string(),
@@ -69,21 +69,22 @@ export function createServer(env, props) {
         createdAt: z.string(),
         authorizationUrl: z.string().optional(),
         requiredPermissions: z.array(z.string()).optional(),
-      },
-      _meta: { securitySchemes: SECURITY_SCHEMES.submit_task },
+      }),
+      securitySchemes: SECURITY_SCHEMES.submit_task,
       annotations: annotations("submit_task"),
     },
     async (input) => {
-      requireScopes(props, SECURITY_SCHEMES.submit_task[0].scopes);
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.submit_task[0].scopes);
       const taskInput = validateSubmitInput(input);
       const baseTask = {
         id: `task_${crypto.randomUUID()}`,
         ...taskInput,
-        ownerId: String(props?.githubUserId ?? props?.userId ?? "unknown"),
+        ownerId: String(requestProps?.githubUserId ?? requestProps?.userId ?? "unknown"),
         runnerRepository: env.GITHUB_RUNNER_REPOSITORY,
         createdAt: new Date().toISOString(),
       };
-      const access = await resolveRepositoryAccess(env, props, baseTask);
+      const access = await resolveRepositoryAccess(env, requestProps, baseTask);
       if (access.kind === "installation_required") {
         const authorization = await createInstallationRequest(env, baseTask);
         const task = {
@@ -130,36 +131,40 @@ export function createServer(env, props) {
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "get_task",
     {
       title: "Get task status",
       description: "Use this when the user wants the current status of a previously submitted code task.",
-      inputSchema: { taskId: z.string() },
+      inputSchema: z.object({ taskId: z.string() }),
       outputSchema: taskOutputSchema,
-      _meta: { securitySchemes: SECURITY_SCHEMES.get_task },
+      securitySchemes: SECURITY_SCHEMES.get_task,
       annotations: annotations("get_task"),
     },
     async ({ taskId }) => {
-      requireScopes(props, SECURITY_SCHEMES.get_task[0].scopes);
-      const task = await readOwnedTask(env, taskId, props);
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.get_task[0].scopes);
+      const task = await readOwnedTask(env, taskId, requestProps);
       return result(publicTask(task), `Task ${task.id} is ${task.status}.`);
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "cancel_task",
     {
       title: "Cancel code task",
       description: "Use this when the user explicitly wants a queued or running code task cancelled.",
-      inputSchema: { taskId: z.string() },
+      inputSchema: z.object({ taskId: z.string() }),
       outputSchema: taskOutputSchema,
-      _meta: { securitySchemes: SECURITY_SCHEMES.cancel_task },
+      securitySchemes: SECURITY_SCHEMES.cancel_task,
       annotations: annotations("cancel_task"),
     },
     async ({ taskId }) => {
-      requireScopes(props, SECURITY_SCHEMES.cancel_task[0].scopes);
-      const task = await readOwnedTask(env, taskId, props);
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.cancel_task[0].scopes);
+      const task = await readOwnedTask(env, taskId, requestProps);
       if (["completed", "failed", "cancelled"].includes(task.status)) {
         return result(publicTask(task), `Task ${task.id} is already ${task.status}.`);
       }
@@ -172,33 +177,102 @@ export function createServer(env, props) {
     },
   );
 
-  server.registerTool(
+  registerAppTool(
+    server,
     "get_task_result",
     {
       title: "Get task result",
       description: "Use this when a code task has completed and the user wants its summary, commit, or pull request.",
-      inputSchema: { taskId: z.string() },
+      inputSchema: z.object({ taskId: z.string() }),
       outputSchema: taskOutputSchema,
-      _meta: { securitySchemes: SECURITY_SCHEMES.get_task_result },
+      securitySchemes: SECURITY_SCHEMES.get_task_result,
       annotations: annotations("get_task_result"),
     },
     async ({ taskId }) => {
-      requireScopes(props, SECURITY_SCHEMES.get_task_result[0].scopes);
-      const task = await readOwnedTask(env, taskId, props);
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.get_task_result[0].scopes);
+      const task = await readOwnedTask(env, taskId, requestProps);
       return result(publicTask(task), `Task ${task.id} is ${task.status}.`);
     },
   );
 
-  exposeSecuritySchemes(server);
   return server;
 }
 
-export function handleMcpRequest(request, env, props, ctx) {
-  return createMcpHandler(createServer(env, props), {
+export async function handleMcpRequest(request, env, props, ctx) {
+  const toolsListRequest = request.method === "POST" && await isToolsListRequest(request);
+  const handler = createMcpHandler(() => createServer(env, currentProps(props)), {
     route: "/mcp",
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  })(request, env, ctx);
+    authContext: { props: props ?? {} },
+  });
+  const response = await handler(request, env, ctx);
+  return toolsListRequest
+    ? addAppsSecuritySchemes(response)
+    : response;
+}
+
+function currentProps(fallback) {
+  return getMcpAuthContext()?.props ?? fallback ?? {};
+}
+
+function registerAppTool(server, name, config, handler) {
+  const { securitySchemes, ...serverConfig } = config;
+  server.registerTool(name, {
+    ...serverConfig,
+    _meta: { securitySchemes },
+  }, handler);
+}
+
+async function isToolsListRequest(request) {
+  try {
+    return (await request.clone().json())?.method === "tools/list";
+  } catch {
+    return false;
+  }
+}
+
+async function addAppsSecuritySchemes(response) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const body = await response.json();
+    return copyResponse(response, JSON.stringify(withAppsSecuritySchemes(body)));
+  }
+  if (contentType.includes("text/event-stream") && response.body) {
+    const text = await new Response(response.body).text();
+    const body = text.replace(/^data: (.+)$/gm, (line, data) => {
+      try {
+        return `data: ${JSON.stringify(withAppsSecuritySchemes(JSON.parse(data)))}`;
+      } catch {
+        return line;
+      }
+    });
+    return copyResponse(response, body);
+  }
+  return response;
+}
+
+function copyResponse(response, body) {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function withAppsSecuritySchemes(body) {
+  if (!body?.result?.tools) return body;
+  return {
+    ...body,
+    result: {
+      ...body.result,
+      tools: body.result.tools.map((tool) => ({
+        ...tool,
+        securitySchemes: SECURITY_SCHEMES[tool.name],
+      })),
+    },
+  };
 }
 
 async function readOwnedTask(env, taskId, props) {
@@ -230,27 +304,4 @@ function requireScopes(props, required) {
   const granted = new Set(props?.oauthScopes ?? []);
   const missing = required.filter((scope) => !granted.has(scope));
   if (missing.length > 0) throw new Error(`Missing OAuth scope: ${missing.join(", ")}`);
-}
-
-function exposeSecuritySchemes(server) {
-  // The pinned MCP SDK serializes extension fields under `_meta`; preserve
-  // that compatibility mirror and add the Apps SDK top-level field as well.
-  const listHandler = server.server?._requestHandlers?.get("tools/list");
-  if (!listHandler) throw new Error("MCP tools/list handler is unavailable");
-
-  server.server.removeRequestHandler("tools/list");
-  server.server.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
-    const result = await listHandler(request, extra);
-    return {
-      ...result,
-      tools: result.tools.map((tool) => ({
-        ...tool,
-        securitySchemes: SECURITY_SCHEMES[tool.name],
-        _meta: {
-          ...(tool._meta ?? {}),
-          securitySchemes: SECURITY_SCHEMES[tool.name],
-        },
-      })),
-    };
-  });
 }
