@@ -147,7 +147,7 @@ jobs:
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
         working-directory: target-workspace
-        run: codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result" - < "$RUNNER_TEMP/task.prompt" > /dev/null
+        run: codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result" - < "$RUNNER_TEMP/task.prompt" > /dev/null 2>&1
 
       - name: Install Claude Code
         if: ${{ inputs.executor == 'claude' }}
@@ -184,7 +184,7 @@ jobs:
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
         working-directory: target-workspace
-        run: grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format plain --prompt-file "$RUNNER_TEMP/task.prompt" > "$RUNNER_TEMP/executor.result"
+        run: grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format json --prompt-file "$RUNNER_TEMP/task.prompt" | jq -r .text > "$RUNNER_TEMP/executor.result"
 
       - name: Report testing
         uses: ./.github/actions/task-control

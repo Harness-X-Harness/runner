@@ -190,7 +190,7 @@ test("Codex executor uses the native CLI driver", async () => {
   assert.match(workflow, /working-directory: target-workspace/);
   assert.match(
     workflow,
-    /codex exec --ephemeral --sandbox workspace-write --output-last-message "\$RUNNER_TEMP\/executor\.result"/,
+    /codex exec --ephemeral --sandbox workspace-write --output-last-message "\$RUNNER_TEMP\/executor\.result"[\s\S]*> \/dev\/null 2>&1/,
   );
   assert.doesNotMatch(
     workflow,
@@ -206,7 +206,7 @@ test("Grok executor writes its native headless result to the driver result", asy
 
   assert.match(
     workflow,
-    /grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format plain --prompt-file "\$RUNNER_TEMP\/task\.prompt" > "\$RUNNER_TEMP\/executor\.result"/,
+    /grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format json --prompt-file "\$RUNNER_TEMP\/task\.prompt" \| jq -r \.text > "\$RUNNER_TEMP\/executor\.result"/,
   );
 });
 
