@@ -56,7 +56,6 @@ export function createServer(env, props) {
         executor: z.enum(EXECUTORS),
         createdAt: z.string(),
       },
-      securitySchemes: SECURITY_SCHEMES.submit_task,
       _meta: { securitySchemes: SECURITY_SCHEMES.submit_task },
       annotations: annotations("submit_task"),
     },
@@ -99,7 +98,6 @@ export function createServer(env, props) {
       description: "Use this when the user wants the current status of a previously submitted code task.",
       inputSchema: { taskId: z.string() },
       outputSchema: taskOutputSchema,
-      securitySchemes: SECURITY_SCHEMES.get_task,
       _meta: { securitySchemes: SECURITY_SCHEMES.get_task },
       annotations: annotations("get_task"),
     },
@@ -117,7 +115,6 @@ export function createServer(env, props) {
       description: "Use this when the user explicitly wants a queued or running code task cancelled.",
       inputSchema: { taskId: z.string() },
       outputSchema: taskOutputSchema,
-      securitySchemes: SECURITY_SCHEMES.cancel_task,
       _meta: { securitySchemes: SECURITY_SCHEMES.cancel_task },
       annotations: annotations("cancel_task"),
     },
@@ -143,7 +140,6 @@ export function createServer(env, props) {
       description: "Use this when a code task has completed and the user wants its summary, commit, or pull request.",
       inputSchema: { taskId: z.string() },
       outputSchema: taskOutputSchema,
-      securitySchemes: SECURITY_SCHEMES.get_task_result,
       _meta: { securitySchemes: SECURITY_SCHEMES.get_task_result },
       annotations: annotations("get_task_result"),
     },
@@ -196,15 +192,21 @@ function taskStub(env, taskId) {
   return env.TASKS.get(env.TASKS.idFromName(taskId));
 }
 
+/**
+ * @param {Record<string, unknown>} structuredContent
+ * @param {string} text
+ */
 function result(structuredContent, text) {
   return {
     structuredContent,
-    content: [{ type: "text", text }],
+    content: [{ type: /** @type {const} */ ("text"), text }],
   };
 }
 
 function annotations(name) {
-  const { name: _name, ...hints } = TOOL_CONTRACT.find((tool) => tool.name === name);
+  const contract = TOOL_CONTRACT.find((tool) => tool.name === name);
+  if (!contract) throw new Error(`Unknown tool contract: ${name}`);
+  const { name: _name, ...hints } = contract;
   return hints;
 }
 

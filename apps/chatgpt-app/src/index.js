@@ -36,9 +36,9 @@ function createOAuthProvider(env) {
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/oauth/token",
     clientRegistrationEndpoint: "/oauth/register",
-    scopesSupported: OAUTH_SCOPES,
+    scopesSupported: [...OAUTH_SCOPES],
     resourceMetadata: {
-      scopes_supported: OAUTH_SCOPES,
+      scopes_supported: [...OAUTH_SCOPES],
       bearer_methods_supported: ["header"],
       resource_name: "Harness X Harness Task Runner",
     },

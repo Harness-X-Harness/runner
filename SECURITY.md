@@ -44,14 +44,21 @@ repository variables 中，并作为 OIDC audience 精确匹配。
 | `RUNNER_GITHUB_APP_ID` | Runner repository secret | 目标仓库授权使用的同一个 GitHub App；避开 GitHub 保留的 `GITHUB_` secret 前缀 |
 | `RUNNER_GITHUB_APP_PRIVATE_KEY` | Runner repository secret | 目标仓库授权使用的 GitHub App 私钥；只注入 token 创建 Action |
 | `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
-| `CODEX_API_KEY` | Runner repository secret | Codex executor 的上游 bearer token，仅传给 Codex Action |
-| `CODEX_RESPONSES_API_ENDPOINT` | Runner repository secret | Codex executor 的完整 Responses endpoint，仅传给 Codex Action |
+| `MINI_END_USER_KEY` | Runner repository 或 Environment secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
+| `MINI_CODEX_BASE_URL` | Runner repository 或 Environment secret | Codex provider base URL；不得写入仓库、日志或 artifact |
+| `MINI_GROK_BASE_URL` | Runner repository 或 Environment secret | Grok provider base URL；不得写入仓库、日志或 artifact |
 | `ANTHROPIC_API_KEY` | Runner repository secret | Claude Code executor，仅在对应步骤注入 |
-| `XAI_API_KEY` | Runner repository secret | Grok Build executor，仅在对应步骤注入 |
 
 应为 Environment 配置 required reviewers、prevent self-review 和只允许受保护默认分支部署的规则。`TARGET_REPO_AUTH` 不得使用组织管理员 token 或具有宽泛仓库权限的 classic PAT。
 
 目标仓库凭证存放在 runner 本地的 path-scoped Git credential store 中。它不会成为全局 Git 凭证，但这不是进程隔离：以 runner 用户运行的目标代码和工具仍可能读取它。
+
+`MINI_END_USER_KEY` 同时具有 Codex 与 Grok provider scope。两个 provider
+endpoint 是机密配置。Codex 与 Grok 在默认用户 home 中使用各自原生
+`config.toml`，并通过 `env_key = "MINI_END_USER_KEY"` 读取同一把 key。不得把
+key 写入 config，不得提交 provider endpoint，也不得为 Grok 配置 first-party
+login、`auth.json` 或 `XAI_API_KEY` fallback。独立 auth workflows 只请求 secret
+base URL 下的 `/models` 并丢弃 response body。
 
 Lark secrets 当前作为 job 环境变量提供，因此 workflow 中的所有步骤和 local action 进程都属于其信任边界。Online 卡片包含 pairing URL，因此目标 Lark 群的所有成员也属于凭证信任边界。仅允许受信任代码进入可访问这些 secrets 的分支与 Environment，并限制目标群成员资格。
 
@@ -96,9 +103,9 @@ executor 使用固定 SHA 的 OpenAI 官方 Codex Action；未指定
 `codex-version`，因此 Action 内安装的 Codex CLI 仍遵循该 Action 的当前默认版本。
 其他运行时工具则刻意遵循一次性开发环境的当前上游入口：
 
-- Private T3 Session 的 Codex 和 Claude Code 使用各自官方安装器；
+- Private T3 Session 的 Codex、Claude Code 和 Grok Build 使用各自官方安装器；
 - ChatGPT code-task 的 Claude Code 使用官方安装器；
-- Grok Build 使用 xAI 官方 CLI 安装器；
+- ChatGPT code-task 的 Grok Build 使用 xAI 官方 CLI 安装器；
 - Tailscale 使用官方 Linux 安装器；
 - cloudflared 使用 Cloudflare 官方软件源；
 - T3 Code 使用 `npx --yes t3@latest`。

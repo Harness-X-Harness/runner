@@ -1,0 +1,21 @@
+name: Codex auth
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  auth:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify Codex provider authentication
+        shell: bash
+        env:
+          MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
+          MINI_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
+        run: >-
+          curl -fsS -o /dev/null -H "Authorization: Bearer $MINI_END_USER_KEY" "$MINI_BASE_URL/models"

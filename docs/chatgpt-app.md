@@ -40,8 +40,10 @@ The public tools are:
 
 `executor` currently accepts `codex`, `claude`, and `grok`. Each executor has
 an independent workflow step. Codex uses the pinned official Codex Action;
-Claude Code and Grok Build use their current official installers. Grok Build
-requires the `XAI_API_KEY` secret. `mode=analyze` leaves the checkout unchanged;
+Claude Code and Grok Build use their current official installers. Codex and
+Grok share `MINI_END_USER_KEY` while their confidential endpoints remain in
+`MINI_CODEX_BASE_URL` and `MINI_GROK_BASE_URL`. Grok uses its native custom-model
+configuration and does not use first-party login. `mode=analyze` leaves the checkout unchanged;
 `edit` pushes a task branch; `pull_request` also creates a PR.
 
 ## Cloudflare setup
@@ -109,10 +111,12 @@ selected task mode. The workflow also needs the App ID as
 `RUNNER_GITHUB_APP_ID` and the private key as
 `RUNNER_GITHUB_APP_PRIVATE_KEY` in runner-repository secrets. GitHub reserves
 the `GITHUB_` prefix, so these Actions secret names intentionally differ from
-the Worker's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` bindings. The Codex
-executor uses the pinned official Codex Action with `CODEX_API_KEY` and the
-full Responses endpoint in `CODEX_RESPONSES_API_ENDPOINT`. Put
-`ANTHROPIC_API_KEY` and `XAI_API_KEY` there for the other executors you enable.
+the Worker's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` bindings. Configure
+`MINI_END_USER_KEY`, `MINI_CODEX_BASE_URL`, and `MINI_GROK_BASE_URL` as runner
+repository secrets. The Codex Action receives the shared key and constructs its
+Responses endpoint from the secret base URL. Grok resolves the same key through
+`env_key` in its native user config. Put `ANTHROPIC_API_KEY` there only when the
+Claude executor is enabled.
 These credentials are scoped to their individual workflow steps and are not
 needed by the Worker.
 
