@@ -69,8 +69,8 @@ grep -Fq 'uses: ./.github/actions/task-control' "$TASK_WORKFLOW" || \
   fail 'task workflow must use the OIDC task-control action'
 grep -Fq 'status: task.status' "$ROOT_DIR/apps/chatgpt-app/src/index.js" || \
   fail 'runner prompt fetch must expose cancellation status'
-grep -Fq 'git -C "$WORKSPACE" status --short' "$TASK_WORKFLOW" || \
-  fail 'analyze result must include untracked files'
+grep -Fq 'summary="$(< "$RUNNER_TEMP/executor.result")"' "$TASK_WORKFLOW" || \
+  fail 'task callback must publish the native driver result'
 grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$CONTROL_SCRIPT" || \
   fail 'task-control action must obtain a GitHub OIDC token'
 grep -Fq '::add-mask::' "$CONTROL_SCRIPT" || \
@@ -120,6 +120,15 @@ grep -Fq 'env_key = "MINI_END_USER_KEY"' "$TASK_WORKFLOW" || \
   fail 'Grok native config must resolve the shared key from the environment'
 grep -Fq '[model.mini-grok-4-6]' "$TASK_WORKFLOW" || \
   fail 'Grok native config must select the Mini Grok model'
+grep -Fq 'https://chatgpt.com/codex/install.sh' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use the official Codex CLI installer'
+grep -Fq 'codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result"' "$TASK_WORKFLOW" || \
+  fail 'Codex driver must write its native final answer'
+grep -Fq 'grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format plain --prompt-file "$RUNNER_TEMP/task.prompt" > "$RUNNER_TEMP/executor.result"' "$TASK_WORKFLOW" || \
+  fail 'Grok driver must write its native headless result'
+if grep -Fq 'openai/codex-action' "$TASK_WORKFLOW"; then
+  fail 'task workflow must use the native Codex CLI, not the Codex Action'
+fi
 
 for auth_workflow in "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
   grep -Fq 'workflow_dispatch:' "$auth_workflow" || \
