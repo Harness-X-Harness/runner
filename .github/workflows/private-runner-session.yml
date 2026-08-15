@@ -1,0 +1,58 @@
+name: Private T3 Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target GitHub Environment
+        required: true
+        type: environment
+      enable_ssh:
+        default: false
+        type: boolean
+      non_durable:
+        default: false
+        type: boolean
+run-name: Private T3 session · ${{ inputs.environment }}
+
+permissions:
+  contents: read
+
+jobs:
+  session:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    env:
+      WORKSPACE: ${{ github.workspace }}/target-workspace
+      SESSION_TARGET_ID: ${{ inputs.environment }}
+      LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+      LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+      LARK_CHAT_NAME: ${{ secrets.LARK_CHAT_NAME }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - uses: ./.github/actions/lark-session
+        with:
+          status: starting
+
+      - uses: ./.github/actions/development-tools
+
+      - if: ${{ inputs.enable_ssh }}
+        uses: ./.github/actions/private-network
+        with:
+          headscale-url: ${{ secrets.HEADSCALE_URL }}
+          auth-key: ${{ secrets.HEADSCALE_AUTHKEY }}
+
+      - uses: ./.github/actions/t3-session
+        with:
+          repository: ${{ secrets.TARGET_REPO }}
+          token: ${{ secrets.TARGET_REPO_AUTH }}
+          non-durable: ${{ inputs.non_durable }}
+          ssh-online: ${{ inputs.enable_ssh }}

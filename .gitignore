@@ -1,0 +1,10 @@
+.secrets.env
+*.secrets.env
+*.private-key.pem
+.lark.env
+headscale/policy.private.hujson
+headscale/config.private.yaml
+__pycache__/
+*.pyc
+node_modules/
+apps/chatgpt-app/.wrangler/

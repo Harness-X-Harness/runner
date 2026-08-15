@@ -1,0 +1,27 @@
+name: Task control-plane callback
+description: Fetch private task input or publish one task lifecycle event
+inputs:
+  operation:
+    description: fetch or event
+    required: true
+  control-plane-url:
+    description: Worker control-plane URL
+    required: true
+  task-id:
+    description: Control-plane task identifier
+    required: true
+  status:
+    description: Lifecycle status for an event operation
+    required: false
+  run-id:
+    description: GitHub Actions run ID for the initial running event
+    required: false
+  result-file:
+    description: JSON result file for a completed event
+    required: false
+  output-file:
+    description: File receiving the private prompt for a fetch operation
+    required: false
+runs:
+  using: node20
+  main: index.js

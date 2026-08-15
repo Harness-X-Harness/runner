@@ -1,0 +1,18 @@
+# Merge these values into the deployed Headscale configuration. Do not expose
+# the Headscale admin API, metrics/debug endpoints, or an admin UI publicly.
+server_url: https://headscale.example.com
+
+dns:
+  # Keep MagicDNS available for clients that want it. Clients that coexist
+  # with another DNS-managing tunnel should join with --accept-dns=false.
+  magic_dns: true
+  base_domain: mesh.example.net
+  override_local_dns: true
+  nameservers:
+    global:
+      - 1.1.1.1
+      - 1.0.0.1
+
+policy:
+  mode: file
+  path: /etc/headscale/policy.hujson

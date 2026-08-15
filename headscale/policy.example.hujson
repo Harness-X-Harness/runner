@@ -1,0 +1,69 @@
+{
+  // Replace these example identities. Keep real member identities out of this
+  // public repository; deploy the resulting policy on the Headscale host.
+  "groups": {
+    "group:platform-admins": [
+      "operator@example.com"
+    ]
+  },
+
+  "tagOwners": {
+    "tag:gha-runner": [
+      "group:platform-admins"
+    ]
+  },
+
+  // Replace these example addresses with the current Headscale IPv4
+  // addresses of personal macOS nodes that coexist with Quantumult X. Host
+  // aliases keep disable-ipv4 scoped to individual devices instead of every
+  // device owned by the same user.
+  "hosts": {
+    "quantumult-workstation-1": "100.64.0.10/32",
+    "quantumult-workstation-2": "100.64.0.11/32"
+  },
+
+  // Publish IPv6 MagicDNS records as well as IPv4. This avoids collisions
+  // when a local network also routes the CGNAT 100.64.0.0/10 range.
+  "nodeAttrs": [
+    {
+      "target": ["*"],
+      "attr": ["magicdns-aaaa"]
+    },
+    {
+      // Tailscale's supported CGNAT-conflict solution is an IPv6-only
+      // tailnet path. Quantumult X keeps IPv4 and system DNS ownership while
+      // the workstations and ephemeral runner avoid 100.64.0.0/10 entirely.
+      "target": [
+        "quantumult-workstation-1",
+        "quantumult-workstation-2",
+        "tag:gha-runner"
+      ],
+      "attr": ["disable-ipv4"]
+    }
+  ],
+
+  "grants": [
+    // A non-empty grants array is default-deny. This rule preserves full
+    // connectivity among administrator-owned personal devices. Add separate
+    // CIDR destinations for any subnet routes that must remain reachable.
+    {
+      "src": ["group:platform-admins"],
+      "dst": ["group:platform-admins"],
+      "ip": ["*"]
+    },
+    {
+      "src": ["group:platform-admins"],
+      "dst": ["tag:gha-runner"],
+      "ip": ["tcp:22"]
+    }
+  ],
+
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["group:platform-admins"],
+      "dst": ["tag:gha-runner"],
+      "users": ["runner"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+name: Development tools
+description: Install the native Codex and Claude Code CLIs.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        curl -fsSL https://chatgpt.com/codex/install.sh | sh
+        curl -fsSL https://claude.ai/install.sh | bash

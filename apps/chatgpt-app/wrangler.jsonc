@@ -1,0 +1,36 @@
+{
+  "name": "harness-x-harness-task-runner-control-plane",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-23",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TASKS",
+        "class_name": "TaskObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TaskObject"]
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "64bbcdb21ec14e2ba1c93be3c8f537a4"
+    }
+  ],
+  "vars": {
+    "GITHUB_RUNNER_REPOSITORY": "Harness-X-Harness/runner",
+    "GITHUB_WORKFLOW_ID": "execute-task.yml",
+    "GITHUB_RUNNER_REF": "main",
+    "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
+    "TASK_CONTROL_PLANE_URL": "https://harness-x-harness-task-runner-control-plane.ron-huafeng.workers.dev"
+  }
+}

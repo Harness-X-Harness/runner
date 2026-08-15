@@ -1,0 +1,84 @@
+name: T3 session
+description: Clone the target repository and start T3 Code through a Quick Tunnel.
+
+inputs:
+  repository:
+    description: Target repository in owner/repository form.
+    required: true
+  token:
+    description: Token restricted to the target repository.
+    required: true
+  non-durable:
+    description: Whether to exit after T3 reports online.
+    required: true
+  ssh-online:
+    description: Whether the runner is reachable over SSH.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TARGET_REPO: ${{ inputs.repository }}
+        TARGET_REPO_AUTH: ${{ inputs.token }}
+      run: |
+        git config --global credential.https://github.com.useHttpPath true
+        git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
+        printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' \
+          "$TARGET_REPO" "$TARGET_REPO_AUTH" | git credential approve
+        git clone "https://github.com/${TARGET_REPO}.git" "$WORKSPACE"
+
+    - shell: bash
+      run: |
+        curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | \
+          sudo tee /usr/share/keyrings/cloudflare-main.gpg > /dev/null
+        echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared noble main' | \
+          sudo tee /etc/apt/sources.list.d/cloudflared.list > /dev/null
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq cloudflared
+
+    - shell: bash
+      run: |
+        install -d -m 0700 "$HOME/private-runner-session/t3code"
+        npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$WORKSPACE" \
+          > "$RUNNER_TEMP/t3code.log" 2>&1 &
+        cloudflared tunnel --url http://127.0.0.1:3773 \
+          > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
+
+    - uses: ./.github/actions/await-log
+      with:
+        path: ${{ runner.temp }}/cloudflared.log
+        pattern: '(https://[-a-z0-9]+[.]trycloudflare[.]com)'
+        destination: ${{ runner.temp }}/t3-url
+
+    - uses: ./.github/actions/await-log
+      with:
+        path: ${{ runner.temp }}/t3code.log
+        pattern: '^Pairing URL: ([^\r\n]+)$'
+        destination: ${{ runner.temp }}/pairing-url
+
+    - shell: bash
+      env:
+        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
+      run: |
+        backend_url="$(cat "$RUNNER_TEMP/t3-url")"
+        pairing_url="$(cat "$RUNNER_TEMP/pairing-url")"
+        umask 077
+        printf '%s\n' "$backend_url" > "$HOME/private-runner-session/t3code/t3-url"
+        printf '%s\n' "$pairing_url" > "$HOME/private-runner-session/t3code/pairing-url"
+        printf 'T3_URL=%s\nPAIRING_URL=%s\n' "$backend_url" "$pairing_url" \
+          > "$HOME/private-runner-session/t3code/connection.txt"
+        chmod 600 "$HOME/private-runner-session/t3code/t3-url" \
+          "$HOME/private-runner-session/t3code/pairing-url" \
+          "$HOME/private-runner-session/t3code/connection.txt"
+
+    - uses: ./.github/actions/lark-session
+      env:
+        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
+      with:
+        status: online
+
+    - if: ${{ inputs.non-durable != 'true' }}
+      shell: bash
+      run: sleep infinity

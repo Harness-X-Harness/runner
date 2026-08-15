@@ -1,0 +1,9 @@
+# Security-sensitive changes must be reviewed by a collaborator with write access.
+# The default-branch ruleset must also require review from Code Owners.
+* @ronhuafeng
+/.github/ @ronhuafeng
+/scripts/ @ronhuafeng
+/headscale/ @ronhuafeng
+/tests/ @ronhuafeng
+/SECURITY.md @ronhuafeng
+/docs/ @ronhuafeng
