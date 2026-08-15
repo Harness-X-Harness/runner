@@ -108,7 +108,7 @@ jobs:
           working-directory: target-workspace
           permission-profile: ":workspace"
           safety-strategy: drop-sudo
-          allow-bot-users: "weavertaskrunner[bot],harness-x-harness-task-runner[bot]"
+          allow-bot-users: "harness-x-harness-task-runner[bot]"
           codex-args: '["--ephemeral"]'
 
       - name: Install Claude Code
