@@ -1,6 +1,8 @@
 export const EXECUTORS = ["codex", "claude", "grok"];
 export const MODES = ["analyze", "edit", "pull_request"];
 export const TASK_STATUSES = [
+  "awaiting_installation",
+  "dispatching",
   "queued",
   "running",
   "testing",
@@ -40,7 +42,7 @@ export function validateSubmitInput(input) {
 
 export function publicTask(task) {
   const safeTask = {};
-  for (const field of ["id", "repo", "ref", "executor", "mode", "status", "createdAt", "updatedAt", "runId", "result"]) {
+  for (const field of ["id", "repo", "ref", "executor", "mode", "status", "createdAt", "updatedAt", "runId", "authorizationUrl", "requiredPermissions", "result"]) {
     if (field === "result") {
       if (task.result !== undefined) safeTask.result = publicResult(task.result);
     } else if (task[field] !== undefined) {
@@ -48,6 +50,38 @@ export function publicTask(task) {
     }
   }
   return safeTask;
+}
+
+export function claimTaskDispatch(task, repositoryAccess) {
+  if (repositoryAccess !== "installation") {
+    throw new TypeError("awaiting tasks require verified installation access");
+  }
+  if (task.status !== "awaiting_installation") {
+    return { claimed: false, task };
+  }
+  const {
+    authorizationUrl: _authorizationUrl,
+    requiredPermissions: _requiredPermissions,
+    ...rest
+  } = task;
+  return {
+    claimed: true,
+    task: {
+      ...rest,
+      status: "dispatching",
+      repositoryAccess,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export function commitTaskDispatch(task) {
+  if (task.status !== "dispatching") return task;
+  return {
+    ...task,
+    status: "queued",
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function publicResult(result) {

@@ -1,8 +1,8 @@
 const API = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 
-export async function dispatchWorkflow(env, task) {
-  const token = await installationToken(env);
+export async function dispatchWorkflow(env, task, fetchImpl = fetch) {
+  const token = await installationToken(env, fetchImpl);
   const [owner, repository] = runnerRepository(env);
   const workflow = env.GITHUB_WORKFLOW_ID ?? "execute-task.yml";
   const response = await githubFetch(
@@ -18,9 +18,11 @@ export async function dispatchWorkflow(env, task) {
           ref: task.ref,
           executor: task.executor,
           mode: task.mode,
+          repository_access: task.repositoryAccess,
         },
       }),
     },
+    fetchImpl,
   );
 
   if (!response.ok) {
@@ -28,49 +30,29 @@ export async function dispatchWorkflow(env, task) {
   }
 }
 
-export async function cancelWorkflow(env, task) {
+export async function cancelWorkflow(env, task, fetchImpl = fetch) {
   if (!task.runId) return;
-  const token = await installationToken(env);
+  const token = await installationToken(env, fetchImpl);
   const [owner, repository] = runnerRepository(env);
   const response = await githubFetch(
     `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(task.runId)}/cancel`,
     token,
     { method: "POST" },
+    fetchImpl,
   );
   if (!response.ok) {
     throw new Error(`GitHub workflow cancellation failed with ${response.status}`);
   }
 }
 
-export async function authorizeRepository(repo, props, mode, ref) {
-  const token = props?.githubAccessToken;
-  if (!token) throw new Error("GitHub authorization is required");
-  const response = await fetch(`${API}/repos/${repo}`, {
-    headers: githubHeaders(token),
-  });
-  if (!response.ok) throw new Error("GitHub repository is not accessible");
-  const repository = await response.json();
-  if (mode !== "analyze" && !repository.permissions?.push) {
-    throw new Error("GitHub write access is required for this task mode");
-  }
-  if (mode === "pull_request") {
-    const branchResponse = await fetch(
-      `${API}/repos/${repo}/branches/${encodeURIComponent(ref)}`,
-      { headers: githubHeaders(token) },
-    );
-    if (!branchResponse.ok) {
-      throw new Error("pull_request mode requires ref to name an accessible branch");
-    }
-  }
-  return repository;
-}
-
-async function installationToken(env) {
+async function installationToken(env, fetchImpl) {
   const appJwt = await signAppJwt(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
   const [owner, repository] = runnerRepository(env);
   const installationResponse = await githubFetch(
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`,
     appJwt,
+    {},
+    fetchImpl,
   );
   if (!installationResponse.ok) {
     throw new Error(
@@ -90,6 +72,7 @@ async function installationToken(env) {
         permissions: { actions: "write" },
       }),
     },
+    fetchImpl,
   );
   if (!response.ok) throw new Error(`GitHub App token request failed with ${response.status}`);
   return (await response.json()).token;
@@ -99,8 +82,8 @@ function runnerRepository(env) {
   return env.GITHUB_RUNNER_REPOSITORY.split("/");
 }
 
-async function githubFetch(path, token, options = {}) {
-  return fetch(`${API}${path}`, {
+async function githubFetch(path, token, options = {}, fetchImpl = fetch) {
+  return fetchImpl(`${API}${path}`, {
     ...options,
     headers: {
       ...githubHeaders(token),
@@ -119,7 +102,7 @@ export function githubHeaders(token) {
   };
 }
 
-async function signAppJwt(appId, privateKeyPem) {
+export async function signAppJwt(appId, privateKeyPem) {
   const now = Math.floor(Date.now() / 1000);
   const header = encode({ alg: "RS256", typ: "JWT" });
   const payload = encode({ iat: now - 60, exp: now + 540, iss: String(appId) });

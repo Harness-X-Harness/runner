@@ -26,6 +26,18 @@ OIDC token 不得进入 workflow inputs、MCP structured content、日志、summ
 或 artifact。`TASK_CONTROL_PLANE_URL` 必须同时配置在 Worker 和 runner
 repository variables 中，并作为 OIDC audience 精确匹配。
 
+Repository authorization 在 dispatch 前只选择一个路径。公开仓库的
+`analyze` 使用 `public_read`；私有读取和所有写入使用经过用户授权与 App JWT
+复核的 installation。GitHub API 未知响应、installation 缺失或权限不足不得
+降级到另一条路径，也不得回退到 PAT。缺少 installation 时，task 保持
+`awaiting_installation`，公开输出只包含一个 opaque Worker authorization URL
+和所需权限名称。
+
+GitHub 安装返回的 `installation_id` 和通知本身不是授权证据。Worker 必须重新
+验证原提交用户、目标仓库和当前 installation permissions；Durable Object 再以
+原子 claim 保证一个 task 最多 dispatch 一次。安装 state 不包含 prompt、token
+或 private key，并在 KV 中限时保存。
+
 ## 凭证与 GitHub Environment
 
 每个目标仓库应使用独立、受保护的 GitHub Environment。Environment 名称会显示在 Actions UI 中，不得包含敏感信息。
@@ -130,6 +142,9 @@ executor 使用固定 SHA 的 OpenAI 官方 Codex Action；未指定
 [ ] GitHub App 已安装到 `GITHUB_RUNNER_REPOSITORY`，且 Worker 可自动解析 installation
 [ ] Worker 与 runner repository 的 `TASK_CONTROL_PLANE_URL` 完全一致
 [ ] MCP 返回值未包含 prompt、OAuth token、App private key 或 OIDC token
+[ ] public_read 只允许公开仓库 analyze，不允许任何写入 mode
+[ ] installation callback 重新验证原用户和仓库权限，不信任 installation_id
+[ ] repository access 失败不会触发匿名、PAT、retry 或其他 fallback
 ```
 
 ## 报告安全问题

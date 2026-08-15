@@ -1,6 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { applyTaskEvent, publicTask } from "./task.js";
+import {
+  applyTaskEvent,
+  claimTaskDispatch,
+  commitTaskDispatch,
+  publicTask,
+} from "./task.js";
 
 export class TaskObject extends DurableObject {
   async fetch(request) {
@@ -21,6 +26,21 @@ export class TaskObject extends DurableObject {
       if (!task) return json({ error: "task not found" }, 404);
       const next = applyTaskEvent(task, await request.json());
       await this.ctx.storage.put("task", next);
+      return json(next);
+    }
+
+    if (request.method === "POST" && url.pathname === "/task/claim-dispatch") {
+      if (!task) return json({ error: "task not found" }, 404);
+      const { repositoryAccess } = await request.json();
+      const result = claimTaskDispatch(task, repositoryAccess);
+      if (result.claimed) await this.ctx.storage.put("task", result.task);
+      return json(result);
+    }
+
+    if (request.method === "POST" && url.pathname === "/task/commit-dispatch") {
+      if (!task) return json({ error: "task not found" }, 404);
+      const next = commitTaskDispatch(task);
+      if (next !== task) await this.ctx.storage.put("task", next);
       return json(next);
     }
 

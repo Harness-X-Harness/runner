@@ -12,6 +12,11 @@ import {
   OAUTH_SCOPES,
 } from "./github-user-auth.js";
 import { handleMcpRequest } from "./mcp.js";
+import {
+  completeInstallationAuthorization,
+  isInstallationCallback,
+  startInstallationAuthorization,
+} from "./repository-authorization.js";
 import { TaskObject } from "./task-object.js";
 
 export { TaskObject };
@@ -77,7 +82,14 @@ async function defaultFetch(request, env) {
   }
 
   if (url.pathname === "/github/callback" && request.method === "GET") {
+    if (isInstallationCallback(request)) {
+      return completeInstallationAuthorization(request, env);
+    }
     return completeGitHubUserAuthorization(request, env);
+  }
+
+  if (url.pathname === "/github/install" && request.method === "GET") {
+    return startInstallationAuthorization(request, env);
   }
 
   return new Response("Not found", { status: 404 });

@@ -4,9 +4,9 @@ import { readFile } from "node:fs/promises";
 import test, { afterEach } from "node:test";
 
 import {
-  authorizeRepository,
   dispatchWorkflow,
 } from "../apps/chatgpt-app/src/github.js";
+import { resolveRepositoryAccess } from "../apps/chatgpt-app/src/repository-authorization.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -21,19 +21,25 @@ test("pull_request mode requires ref to resolve as a branch", async () => {
     if (requests.length === 1) {
       return new Response(JSON.stringify({ permissions: { push: true } }), { status: 200 });
     }
-    return new Response(JSON.stringify({ name: "feature/task" }), { status: 200 });
+    if (requests.length === 2) {
+      return new Response(JSON.stringify({ name: "feature/task" }), { status: 200 });
+    }
+    return Response.json({ permissions: { contents: "write", pull_requests: "write" } });
   };
 
-  await authorizeRepository(
-    "owner/project",
+  await resolveRepositoryAccess(
+    {
+      GITHUB_APP_ID: "4385224",
+      GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+    },
     { githubAccessToken: "token" },
-    "pull_request",
-    "feature/task",
+    { repo: "owner/project", mode: "pull_request", ref: "feature/task" },
   );
 
   assert.deepEqual(requests, [
     "https://api.github.com/repos/owner/project",
     "https://api.github.com/repos/owner/project/branches/feature%2Ftask",
+    "https://api.github.com/repos/owner/project/installation",
   ]);
 });
 
@@ -48,11 +54,13 @@ test("pull_request mode rejects tags and commits that are not branches", async (
   };
 
   await assert.rejects(
-    authorizeRepository(
-      "owner/project",
+    resolveRepositoryAccess(
+      {
+        GITHUB_APP_ID: "4385224",
+        GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+      },
       { githubAccessToken: "token" },
-      "pull_request",
-      "deadbeef",
+      { repo: "owner/project", mode: "pull_request", ref: "deadbeef" },
     ),
     /requires ref to name an accessible branch/,
   );
@@ -62,17 +70,25 @@ test("edit mode does not require a branch-only ref", async () => {
   const requests = [];
   globalThis.fetch = async (url) => {
     requests.push(String(url));
-    return new Response(JSON.stringify({ permissions: { push: true } }), { status: 200 });
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ permissions: { push: true } }), { status: 200 });
+    }
+    return Response.json({ permissions: { contents: "write" } });
   };
 
-  await authorizeRepository(
-    "owner/project",
+  await resolveRepositoryAccess(
+    {
+      GITHUB_APP_ID: "4385224",
+      GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+    },
     { githubAccessToken: "token" },
-    "edit",
-    "deadbeef",
+    { repo: "owner/project", mode: "edit", ref: "deadbeef" },
   );
 
-  assert.deepEqual(requests, ["https://api.github.com/repos/owner/project"]);
+  assert.deepEqual(requests, [
+    "https://api.github.com/repos/owner/project",
+    "https://api.github.com/repos/owner/project/installation",
+  ]);
 });
 
 test("workflow dispatch resolves the App installation from the runner repository", async () => {
@@ -105,6 +121,7 @@ test("workflow dispatch resolves the App installation from the runner repository
       ref: "main",
       executor: "codex",
       mode: "analyze",
+      repositoryAccess: "public_read",
     },
   );
 
@@ -122,6 +139,24 @@ test("workflow dispatch resolves the App installation from the runner repository
     permissions: { actions: "write" },
   });
   assert.equal(requests[2].init.headers.authorization, "Bearer installation-token");
+  assert.equal(
+    JSON.parse(requests[2].init.body).inputs.repository_access,
+    "public_read",
+  );
+});
+
+test("workflow selects exactly one target checkout authorization path", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/execute-task.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workflow, /repository_access:\n\s+description: Verified target repository access path/);
+  assert.match(workflow, /name: Create target repository token\n\s+if: \$\{\{ inputs\.repository_access == 'installation' \}\}/);
+  assert.match(workflow, /name: Check out installed target repository[\s\S]*token: \$\{\{ steps\.app-token\.outputs\.token \}\}/);
+  assert.match(workflow, /name: Check out public target repository[\s\S]*inputs\.repository_access == 'public_read'/);
+  assert.match(workflow, /inputs\.repository_access == 'public_read' && inputs\.mode != 'analyze'/);
+  assert.doesNotMatch(workflow, /continue-on-error:/);
 });
 
 test("workflow skips delivery steps when an executor produces no changes", async () => {
