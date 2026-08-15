@@ -75,6 +75,22 @@ test("callback events reject unknown lifecycle states", () => {
   );
 });
 
+test("public task exposes only the repository authorization action", () => {
+  const safe = publicTask({
+    id: "task_123",
+    status: "awaiting_installation",
+    authorizationUrl: "https://runner.example.com/github/install?state=opaque",
+    requiredPermissions: ["contents:write"],
+    authorizationState: "must-not-escape",
+  });
+  assert.deepEqual(safe, {
+    id: "task_123",
+    status: "awaiting_installation",
+    authorizationUrl: "https://runner.example.com/github/install?state=opaque",
+    requiredPermissions: ["contents:write"],
+  });
+});
+
 test("cancelled tasks cannot be revived by a late callback", () => {
   const task = { id: "task_123", status: "cancel_requested" };
   assert.equal(applyTaskEvent(task, { status: "running" }).status, "cancelled");

@@ -31,6 +31,13 @@ on:
           - analyze
           - edit
           - pull_request
+      repository_access:
+        description: Verified target repository access path
+        required: true
+        type: choice
+        options:
+          - public_read
+          - installation
 run-name: Code task · ${{ inputs.task_id }}
 
 permissions:
@@ -56,6 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Resolve target repository
+        if: ${{ inputs.repository_access == 'installation' }}
         id: target
         shell: bash
         run: |
@@ -63,6 +71,7 @@ jobs:
           echo "name=${TARGET_REPO#*/}" >> "$GITHUB_OUTPUT"
 
       - name: Create target repository token
+        if: ${{ inputs.repository_access == 'installation' }}
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
@@ -71,12 +80,27 @@ jobs:
           owner: ${{ steps.target.outputs.owner }}
           repositories: ${{ steps.target.outputs.name }}
 
-      - name: Check out target repository
+      - name: Reject write through public read
+        if: ${{ inputs.repository_access == 'public_read' && inputs.mode != 'analyze' }}
+        shell: bash
+        run: exit 1
+
+      - name: Check out installed target repository
+        if: ${{ inputs.repository_access == 'installation' }}
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           token: ${{ steps.app-token.outputs.token }}
+          path: target-workspace
+          persist-credentials: false
+
+      - name: Check out public target repository
+        if: ${{ inputs.repository_access == 'public_read' }}
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           path: target-workspace
           persist-credentials: false
 

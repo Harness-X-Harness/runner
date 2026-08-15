@@ -217,7 +217,7 @@ async function requestGitHubUserToken(parameters, fetchImpl) {
   return token;
 }
 
-async function requestGitHubUserProfile(accessToken, fetchImpl) {
+export async function requestGitHubUserProfile(accessToken, fetchImpl = fetch) {
   const response = await fetchImpl("https://api.github.com/user", {
     headers: githubHeaders(accessToken),
   });

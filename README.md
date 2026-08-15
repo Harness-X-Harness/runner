@@ -115,3 +115,7 @@ operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 For ChatGPT-driven code tasks, see the [ChatGPT code-task app](docs/chatgpt-app.md).
 It adds a stable Cloudflare Worker `/mcp` control plane while keeping the
 existing temporary T3 session workflow available as a separate path.
+Public-repository analysis runs without installing the GitHub App. Private
+repositories and write modes request repository installation only when their
+required access is missing; the original task remains waiting and resumes only
+after GitHub user and installation permissions are verified.

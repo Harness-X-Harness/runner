@@ -3,8 +3,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { authorizeRepository, cancelWorkflow, dispatchWorkflow } from "./github.js";
+import { cancelWorkflow, dispatchWorkflow } from "./github.js";
+import {
+  createInstallationRequest,
+  resolveRepositoryAccess,
+} from "./repository-authorization.js";
 import { EXECUTORS, MODES, TASK_STATUSES, publicTask, validateSubmitInput } from "./task.js";
+import {
+  commitTaskDispatch,
+  readTask as readTaskFromStore,
+  updateTask,
+  writeTask,
+} from "./task-store.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
 
 const SECURITY_SCHEMES = Object.freeze({
@@ -25,6 +35,8 @@ const taskOutputSchema = {
   createdAt: z.string(),
   updatedAt: z.string().optional(),
   runId: z.string().optional(),
+  authorizationUrl: z.string().optional(),
+  requiredPermissions: z.array(z.string()).optional(),
   result: z.record(z.string(), z.unknown()).optional(),
 };
 
@@ -43,7 +55,7 @@ export function createServer(env, props) {
       title: "Submit code task",
       description: "Use this when the user wants an authorized repository task executed by a selected coding agent.",
       inputSchema: {
-        repo: z.string().describe("Private GitHub repository in owner/repository form."),
+        repo: z.string().describe("GitHub repository in owner/repository form."),
         prompt: z.string().describe("The coding task instructions; they are retained privately by the control plane."),
         executor: z.enum(EXECUTORS).describe("Coding executor to run."),
         ref: z.string().optional().describe("Branch, tag, or commit; defaults to main."),
@@ -51,10 +63,12 @@ export function createServer(env, props) {
       },
       outputSchema: {
         taskId: z.string(),
-        status: z.literal("queued"),
+        status: statusSchema,
         repo: z.string(),
         executor: z.enum(EXECUTORS),
         createdAt: z.string(),
+        authorizationUrl: z.string().optional(),
+        requiredPermissions: z.array(z.string()).optional(),
       },
       _meta: { securitySchemes: SECURITY_SCHEMES.submit_task },
       annotations: annotations("submit_task"),
@@ -62,18 +76,50 @@ export function createServer(env, props) {
     async (input) => {
       requireScopes(props, SECURITY_SCHEMES.submit_task[0].scopes);
       const taskInput = validateSubmitInput(input);
-      await authorizeRepository(taskInput.repo, props, taskInput.mode, taskInput.ref);
-      const task = {
+      const baseTask = {
         id: `task_${crypto.randomUUID()}`,
         ...taskInput,
         ownerId: String(props?.githubUserId ?? props?.userId ?? "unknown"),
         runnerRepository: env.GITHUB_RUNNER_REPOSITORY,
-        status: "queued",
         createdAt: new Date().toISOString(),
+      };
+      const access = await resolveRepositoryAccess(env, props, baseTask);
+      if (access.kind === "installation_required") {
+        const authorization = await createInstallationRequest(env, baseTask);
+        const task = {
+          ...baseTask,
+          ...authorization,
+          requiredPermissions: access.requiredPermissions,
+          status: "awaiting_installation",
+        };
+        await writeTask(env, task);
+        return result({
+          taskId: task.id,
+          status: task.status,
+          repo: task.repo,
+          executor: task.executor,
+          createdAt: task.createdAt,
+          authorizationUrl: task.authorizationUrl,
+          requiredPermissions: task.requiredPermissions,
+        }, `Task ${task.id} needs repository authorization.`);
+      }
+
+      const task = {
+        ...baseTask,
+        repositoryAccess: access.repositoryAccess,
+        status: "dispatching",
       };
       await writeTask(env, task);
       try {
         await dispatchWorkflow(env, task);
+        const queued = await commitTaskDispatch(env, task.id);
+        return result({
+          taskId: queued.id,
+          status: queued.status,
+          repo: queued.repo,
+          executor: queued.executor,
+          createdAt: queued.createdAt,
+        }, `Queued ${queued.executor} task ${queued.id}.`);
       } catch (error) {
         await updateTask(env, task.id, {
           status: "failed",
@@ -81,13 +127,6 @@ export function createServer(env, props) {
         }).catch(() => undefined);
         throw error;
       }
-      return result({
-        taskId: task.id,
-        status: "queued",
-        repo: task.repo,
-        executor: task.executor,
-        createdAt: task.createdAt,
-      }, `Queued ${task.executor} task ${task.id}.`);
     },
   );
 
@@ -163,33 +202,10 @@ export function handleMcpRequest(request, env, props, ctx) {
 }
 
 async function readOwnedTask(env, taskId, props) {
-  const task = await readTask(env, taskId);
+  const task = await readTaskFromStore(env, taskId);
   const ownerId = String(props?.githubUserId ?? props?.userId ?? "unknown");
   if (task.ownerId !== ownerId) throw new Error("task not found");
   return task;
-}
-
-async function readTask(env, taskId) {
-  return (await taskStub(env, taskId).fetch("https://task/task").then((response) => response.json()));
-}
-
-async function writeTask(env, task) {
-  await taskStub(env, task.id).fetch("https://task/task", {
-    method: "POST",
-    body: JSON.stringify(task),
-  });
-}
-
-async function updateTask(env, taskId, event) {
-  const response = await taskStub(env, taskId).fetch("https://task/task", {
-    method: "PATCH",
-    body: JSON.stringify(event),
-  });
-  return response.json();
-}
-
-function taskStub(env, taskId) {
-  return env.TASKS.get(env.TASKS.idFromName(taskId));
 }
 
 /**

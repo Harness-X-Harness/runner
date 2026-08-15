@@ -91,6 +91,17 @@ grep -Fq 'https://x.ai/cli/install.sh' "$TOOLS_ACTION" || \
   fail 'private session must use the official Grok Build installer'
 grep -Fq 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' "$TASK_WORKFLOW" || \
   fail 'task workflow must use a SHA-pinned GitHub App token action'
+grep -Fq '      repository_access:' "$TASK_WORKFLOW" || \
+  fail 'task workflow must receive the verified repository access path'
+grep -Fq "inputs.repository_access == 'installation'" "$TASK_WORKFLOW" || \
+  fail 'target installation token must be conditional'
+grep -Fq 'name: Check out public target repository' "$TASK_WORKFLOW" || \
+  fail 'public analyze must have one installation-free checkout path'
+grep -Fq "inputs.repository_access == 'public_read' && inputs.mode != 'analyze'" "$TASK_WORKFLOW" || \
+  fail 'public read must never authorize a write mode'
+if grep -Fq 'continue-on-error:' "$TASK_WORKFLOW"; then
+  fail 'repository access must not fall back after a failed step'
+fi
 
 # Codex and Grok share one scoped Mini key. Provider endpoints remain GitHub
 # Secrets, and each CLI resolves that key through its native user config.

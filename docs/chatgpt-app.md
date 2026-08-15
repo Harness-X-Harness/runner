@@ -11,14 +11,22 @@ Private T3 Session workflow is unchanged and can still be used independently.
    uses the configured GitHub App for user identity and keeps the GitHub user
    and refresh tokens plus granted tool scopes encrypted in the OAuth provider
    grant properties; every tool checks its required scopes again.
-2. `submit_task` checks that the user can access the requested repository,
-   stores the complete prompt in a per-task Durable Object, and dispatches
-   `.github/workflows/execute-task.yml` in this repository through a GitHub App.
-3. The workflow receives only `task_id`, `repo`, `ref`, `executor`, and `mode`.
+2. `submit_task` resolves one repository access path before storing or
+   dispatching the task. Public `analyze` uses `public_read`. Private reads and
+   every write mode require a verified GitHub App installation. There is no
+   retry, PAT, anonymous-after-token, or other fallback path.
+3. When installation access is missing, the task is stored as
+   `awaiting_installation` and returns one repository-specific authorization
+   URL. The installation return starts GitHub user authorization again, verifies
+   the original submitting user and current repository installation, then
+   atomically claims the task for dispatch. An installation notification or
+   callback parameter alone never grants authority.
+4. The workflow receives only `task_id`, `repo`, `ref`, `executor`, `mode`, and
+   the verified `repository_access` path.
    It obtains a short-lived GitHub Actions OIDC token, fetches the private
    prompt from `/internal/tasks/<task_id>`, and reports lifecycle events back to
    the same task object.
-4. `get_task`, `get_task_result`, and `cancel_task` expose only the task's safe
+5. `get_task`, `get_task_result`, and `cancel_task` expose only the task's safe
    public fields. Prompt text, OAuth properties, and callback credentials never
    appear in MCP structured content.
 
@@ -33,7 +41,7 @@ The public tools are:
 
 | Tool | Purpose | Side effect |
 | --- | --- | --- |
-| `submit_task` | Queue a code task | Starts a GitHub Actions run |
+| `submit_task` | Queue a code task or request repository installation | Starts a run only when the required access path is verified |
 | `get_task` | Read current status | None |
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
@@ -89,6 +97,20 @@ Set the GitHub App's user authorization callback URL as:
 https://runner.example.com/github/callback
 ```
 
+Set its post-installation Setup URL as:
+
+```text
+https://runner.example.com/github/install
+```
+
+Enable **Redirect on update** so adding a selected repository returns to the
+same continuation. The Worker does not trust GitHub's `installation_id` query
+parameter. It uses the opaque task state only to locate the waiting task, then
+queries GitHub again with the App JWT and completes a user authorization-code
+flow before dispatch. If an organization owner approves the request in another
+browser, the original submitter can use the same task authorization URL after
+approval; the prompt and task parameters do not need to be submitted again.
+
 Leave "Request user authorization (OAuth) during installation" disabled. The
 MCP consent flow starts GitHub authorization explicitly, so an installation
 must not redirect directly to the callback without the consent state. Keep
@@ -126,10 +148,28 @@ and `Actions: write`. Do not configure or persist an installation ID manually.
 
 The same GitHub App also issues a user access token after MCP consent. That
 token is limited by both the user's access and the App's installation
-permissions and is used only to verify access to the requested repository.
+permissions and is used to verify access to the requested repository. A public
+`analyze` task does not require a target-repository installation. Other modes
+must pass both user authorization and current installation-permission checks.
 The App installation token remains the short-lived execution credential used
 to dispatch the runner workflow and modify an installed target repository.
 No separate GitHub OAuth App or broad `repo` OAuth scope is required.
+
+## Repository authorization states
+
+The requirements model is in `formal/RepositoryAuthorization.tla`. It preserves
+these product properties:
+
+- public read access is valid only for `analyze`;
+- unknown GitHub responses fail without selecting another access path;
+- installation notification does not authorize dispatch;
+- a waiting task must be verified by the original GitHub user;
+- the Durable Object dispatch claim is single-use;
+- late installation callbacks cannot revive a cancelled or dispatched task.
+
+The checked positive model covers 107 distinct states. The durable faulty
+configuration deliberately trusts an installation notification and violates
+`AuthorizedDispatch`.
 
 All requests to `api.github.com`, whether authenticated by a user token, App
 JWT, or installation token, use the shared GitHub headers including
