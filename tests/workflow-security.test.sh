@@ -121,7 +121,7 @@ for auth_workflow in "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
     fail "auth workflow permissions must be read-only: $auth_workflow"
   grep -Fq 'Authorization: Bearer $MINI_END_USER_KEY' "$auth_workflow" || \
     fail "auth workflow must use the shared Mini key: $auth_workflow"
-  grep -Fq '"$MINI_BASE_URL/models"' "$auth_workflow" || \
+  grep -Fq '"$MINI_BASE_URL/models' "$auth_workflow" || \
     fail "auth workflow must probe the secret provider endpoint: $auth_workflow"
   grep -Fq -- '-o /dev/null' "$auth_workflow" || \
     fail "auth workflow must discard the model response: $auth_workflow"
@@ -131,8 +131,12 @@ for auth_workflow in "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
 done
 grep -Fq 'secrets.MINI_CODEX_BASE_URL' "$CODEX_AUTH_WORKFLOW" || \
   fail 'Codex auth workflow must use the secret endpoint'
+grep -Fq '"$MINI_BASE_URL/models?client_version=0.0.0"' "$CODEX_AUTH_WORKFLOW" || \
+  fail 'Codex auth probe must supply the required semantic client version'
 grep -Fq 'secrets.MINI_GROK_BASE_URL' "$GROK_AUTH_WORKFLOW" || \
   fail 'Grok auth workflow must use the secret endpoint'
+grep -Fq '"$MINI_BASE_URL/models"' "$GROK_AUTH_WORKFLOW" || \
+  fail 'Grok auth probe must use the native models endpoint'
 
 if rg -q 'experimental_bearer_token|auth[.]json|api_key\s*=' \
   "$WORKFLOW" "$TASK_WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; then

@@ -18,4 +18,4 @@ jobs:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
           MINI_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
         run: >-
-          curl -fsS -o /dev/null -H "Authorization: Bearer $MINI_END_USER_KEY" "$MINI_BASE_URL/models"
+          curl -fsS -o /dev/null -H "Authorization: Bearer $MINI_END_USER_KEY" "$MINI_BASE_URL/models?client_version=0.0.0"

@@ -58,7 +58,8 @@ endpoint 是机密配置。Codex 与 Grok 在默认用户 home 中使用各自�
 `config.toml`，并通过 `env_key = "MINI_END_USER_KEY"` 读取同一把 key。不得把
 key 写入 config，不得提交 provider endpoint，也不得为 Grok 配置 first-party
 login、`auth.json` 或 `XAI_API_KEY` fallback。独立 auth workflows 只请求 secret
-base URL 下的 `/models` 并丢弃 response body。
+base URL 下的 `/models` 并丢弃 response body。Codex surface 还要求
+`client_version` query 使用语义版本格式；auth probe 固定使用非敏感的 `0.0.0`。
 
 Lark secrets 当前作为 job 环境变量提供，因此 workflow 中的所有步骤和 local action 进程都属于其信任边界。Online 卡片包含 pairing URL，因此目标 Lark 群的所有成员也属于凭证信任边界。仅允许受信任代码进入可访问这些 secrets 的分支与 Environment，并限制目标群成员资格。
 
