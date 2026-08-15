@@ -47,8 +47,8 @@ The public tools are:
 | `get_task_result` | Read summary, commit, or PR | None |
 
 `executor` currently accepts `codex`, `claude`, and `grok`. Each executor has
-an independent workflow step. Codex uses the pinned official Codex Action;
-Claude Code and Grok Build use their current official installers. Codex and
+an independent workflow step. Codex uses the native official CLI; Claude Code
+and Grok Build use their current official installers. Codex and
 Grok share `MINI_END_USER_KEY` while their confidential endpoints remain in
 `MINI_CODEX_BASE_URL` and `MINI_GROK_BASE_URL`. Grok uses its native custom-model
 configuration and does not use first-party login. `mode=analyze` leaves the checkout unchanged;

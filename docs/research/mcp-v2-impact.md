@@ -44,18 +44,20 @@ session 中。([MCP 官方发布说明](https://blog.modelcontextprotocol.io/pos
 
 ## 与当前实现的映射
 
-当前依赖为 `agents@0.19.0`、`@modelcontextprotocol/sdk@1.29.0` 和
-`@cloudflare/workers-oauth-provider@0.8.2`，见
+当前依赖为 `agents@0.20.1`、`@modelcontextprotocol/server@2.0.0` 和
+`@cloudflare/workers-oauth-provider@0.10.3`，见
 [`apps/chatgpt-app/package.json`](../../apps/chatgpt-app/package.json)。MCP server 仍从
-`agents/mcp` 和 SDK v1 导入，并通过内部 `tools/list` handler 补充 Apps SDK 的
-`securitySchemes`，见 [`mcp.js`](../../apps/chatgpt-app/src/mcp.js)。
+`agents/mcp/server` 和 SDK v2 导入。四个工具通过公开 `registerTool` 注册，OAuth
+元数据同时保留在 `_meta.securitySchemes`；因为 SDK v2 的 wire schema 不允许 Apps SDK
+扩展字段，Worker 在 `tools/list` 响应边界补回顶层 `securitySchemes`，不访问 SDK 私有
+handler map，见 [`mcp.js`](../../apps/chatgpt-app/src/mcp.js)。
 
 | 当前组件 | MCP 2026-07-28 映射 | 判断 |
 | --- | --- | --- |
-| Worker `/mcp` | `agents/mcp/server` 的 `createMcpHandler(factory)` | 迁移目标明确，URL 无需变化。Cloudflare 的 handler 同时服务 2026 客户端和旧的 stateless Streamable HTTP 客户端。([Handler API](https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/)) |
+| Worker `/mcp` | `agents/mcp/server` 的 `createMcpHandler(factory)` | 已迁移，URL 不变。Cloudflare 的 handler 同时服务 2026 客户端和旧的 stateless Streamable HTTP 客户端。([Handler API](https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/)) |
 | 四个 MCP tools | 普通 SDK v2 tools | 继续保留。输入、输出和 side-effect annotations 是产品契约，不是协议 session。 |
 | `TaskObject` Durable Object | 应用 task store | 必须保留。它序列化 callback、取消和迟到事件；新协议只消除 protocol session storage。([Cloudflare](https://blog.cloudflare.com/mcp-v2/)) |
-| `workers-oauth-provider` + KV | MCP OAuth resource/authorization server | 继续保留，但升级当前 `0.8.2`。该库的后续版本加入 RFC 9207、严格 RFC 8707 resource policy，以及 ChatGPT CIMD negotiation 与多设备 grant 修复。([官方 changelog](https://github.com/cloudflare/workers-oauth-provider/blob/main/CHANGELOG.md)) |
+| `workers-oauth-provider` + KV | MCP OAuth resource/authorization server | 继续保留，已升级到 `0.10.3`。该库的后续版本加入 RFC 9207、严格 RFC 8707 resource policy，以及 ChatGPT CIMD negotiation 与多设备 grant 修复。([官方 changelog](https://github.com/cloudflare/workers-oauth-provider/blob/main/CHANGELOG.md)) |
 | GitHub OAuth + App installation | 上游身份与 repository authority | 不受 MCP v2 取代。MRTR 只能改善交互表现，不能证明安装权限。 |
 | GitHub Actions callback | 外部异步执行结果 | 不受 stateless transport 影响；仍需 task ID、OIDC callback 和 Durable Object 状态机。 |
 
@@ -98,23 +100,24 @@ Durable Object 持久化。协议原语能改进 UI，不会删除业务状态�
 
 在一个独立 PR 中：
 
-1. 把 `workers-oauth-provider` 从 `0.8.2` 升到经过测试的最新稳定版。研究时的 `0.10.3`
-   修复了 ChatGPT 的 `private_key_jwt`/`none` negotiation，并避免 CIMD client 在一台设备重新授权时
-   注销其他设备 grant；`0.9.0` 才加入 RFC 9207 和严格 resource policy。([官方 changelog](https://github.com/cloudflare/workers-oauth-provider/blob/main/CHANGELOG.md))
-2. 把 `agents` 升到支持 SDK v2 的版本，并用该版本要求的精确 MCP package 版本。Cloudflare
-   `0.20.0` 文档要求 `@modelcontextprotocol/server@2.0.0`。([Handler API](https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/))
+1. 已把 `workers-oauth-provider` 从 `0.8.2` 升到 `0.10.3`。该版本修复了 ChatGPT 的
+   `private_key_jwt`/`none` negotiation，并避免 CIMD client 在一台设备重新授权时注销其他设备
+   grant；`0.9.0` 才加入 RFC 9207 和严格 resource policy。([官方 changelog](https://github.com/cloudflare/workers-oauth-provider/blob/main/CHANGELOG.md))
+2. 已把 `agents` 升到 `0.20.1`，并使用其精确 peer 对应的
+   `@modelcontextprotocol/server@2.0.0`。([Handler API](https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/))
 3. 将 MCP server import 改为 `@modelcontextprotocol/server`，handler 改为
    `agents/mcp/server`。
 4. 将 `createServer(env, props)` 改为每个请求创建 server 的 factory；四个工具及其 callback
    保持不变。
 5. 把 `inputSchema` 和 `outputSchema` 改为显式 `z.object(...)`。SDK v2 推荐 Standard Schema，
    raw shape overload 已弃用。([SDK v2 migration](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md))
-6. 删除对 SDK v1 私有 `_requestHandlers` 的补丁，使用 v2 的公开注册/metadata 表达同一
-   `securitySchemes` 契约；若公开 API 不能表达 ChatGPT Apps metadata，则暂缓迁移，不复制另一个
-   私有补丁。
+6. 已删除 SDK v1 私有 `_requestHandlers` 补丁。v2 的公开注册保留 `_meta.securitySchemes`，
+   Worker 只在最终 `tools/list` HTTP 响应边界恢复 Apps SDK 所需的顶层扩展字段；这不依赖 SDK
+   私有状态，也不改变 MCP 工具调用处理。
 7. 保持 `/mcp`、OAuth scope、tool name、task schema 和 Durable Object binding 不变。
-8. 分别用旧 Streamable HTTP client、`2026-07-28` client 和真实 ChatGPT App 做 clean-login
-   验证。Cloudflare 要求迁移时单独测试新旧 client、OAuth、Origin、取消和 transport loss。
+8. 已用本地旧 stateless Streamable HTTP 请求和 `2026-07-28` 请求验证工具列表与元数据；部署后
+   仍需用真实 ChatGPT App 做 clean-login 和一个代表性任务工具流验证。Cloudflare 要求迁移时单独
+   测试新旧 client、OAuth、Origin、取消和 transport loss。
    ([迁移指南](https://developers.cloudflare.com/agents/model-context-protocol/guides/migrate-to-mcp-sdk-v2/))
 
 ### 阶段二：OAuth audience 显式化
