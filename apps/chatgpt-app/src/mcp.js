@@ -30,7 +30,7 @@ const taskOutputSchema = {
 
 export function createServer(env, props) {
   const server = new McpServer(
-    { name: "weavergroup-runner", version: "1.0.0" },
+    { name: "harness-x-harness-task-runner", version: "1.0.0" },
     {
       instructions:
         "Use submit_task to start a task, then get_task to follow progress. Use get_task_result only after completion.",

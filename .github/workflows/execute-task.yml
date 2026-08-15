@@ -108,7 +108,7 @@ jobs:
           working-directory: target-workspace
           permission-profile: ":workspace"
           safety-strategy: drop-sudo
-          allow-bot-users: "weavertaskrunner[bot]"
+          allow-bot-users: "weavertaskrunner[bot],harness-x-harness-task-runner[bot]"
           codex-args: '["--ephemeral"]'
 
       - name: Install Claude Code
@@ -179,7 +179,7 @@ jobs:
         shell: bash
         working-directory: target-workspace
         run: |
-          git config user.name "weavergroup-runner[bot]"
+          git config user.name "harness-x-harness-task-runner[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
           git commit -m "Execute code task $TASK_ID"
@@ -210,7 +210,7 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg title "Execute code task $TASK_ID" --arg head "task/$TASK_ID" --arg base "$TARGET_REF" \
-              '{title:$title,head:$head,base:$base,body:"Created by the WeaverGroup runner."}')")"
+              '{title:$title,head:$head,base:$base,body:"Created by the Harness X Harness Task Runner."}')")"
           echo "url=$(jq -r .html_url <<<"$response")" >> "$GITHUB_OUTPUT"
 
       - name: Report completed

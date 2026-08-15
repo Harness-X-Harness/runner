@@ -160,7 +160,10 @@ test("Codex executor uses the pinned Codex Action with forwarding credentials", 
   assert.match(workflow, /prompt-file: \$\{\{ runner\.temp \}\}\/task\.prompt/);
   assert.match(workflow, /working-directory: target-workspace/);
   assert.match(workflow, /permission-profile: ":workspace"/);
-  assert.match(workflow, /allow-bot-users: "weavertaskrunner\[bot\]"/);
+  assert.match(
+    workflow,
+    /allow-bot-users: "weavertaskrunner\[bot\],harness-x-harness-task-runner\[bot\]"/,
+  );
   assert.doesNotMatch(workflow, /allow-bots:/);
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|chatgpt\.com\/codex\/install\.sh/);
 });
