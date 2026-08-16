@@ -46,6 +46,19 @@ The public tools are:
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
 
+## OAuth resource audience
+
+The Worker binds OAuth grants and access tokens to the canonical MCP resource
+`https://<control-plane-host>/mcp`, not to the bare Worker origin. The
+`TASK_CONTROL_PLANE_URL` variable must therefore contain the deployed Worker
+origin without a path; the Worker derives `/mcp` from it and publishes the
+same authorization-server issuer. A token issued before this boundary change
+may require one clean ChatGPT reauthorization. Do not restore an origin-only
+comparison or delete the `OAUTH_KV` namespace during this migration. New
+authorization and token requests must include this exact `resource` value. The
+Worker rejects an omitted value before the provider processes it; the provider
+keeps redirect-aware OAuth errors for repeated or different values.
+
 `executor` currently accepts `codex`, `claude`, and `grok`. Each executor has
 an independent workflow step. Codex uses the native official CLI; Claude Code
 and Grok Build use their current official installers. Codex and
