@@ -59,8 +59,10 @@ creating a read-only connection that reports missing permissions.
 `submit_task` still requires only `tasks:run` and `repos:read` for
 `mode=analyze`. `edit` and `pull_request` return the standard OAuth
 `insufficient_scope` challenge if a client explicitly requests a narrower
-grant. The authorization server displays and grants exactly the validated
-scope set that the client requests.
+grant. For ChatGPT tool calls, the challenge is carried by the MCP error
+result's `_meta["mcp/www_authenticate"]`; a transport-level HTTP 403 does not
+open ChatGPT's tool authorization UI. The authorization server displays and
+grants exactly the validated scope set that the client requests.
 
 Repository access remains independent: GitHub asks for installation or update
 only when a task targets a repository the App cannot access.
