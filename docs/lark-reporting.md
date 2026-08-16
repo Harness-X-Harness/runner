@@ -31,11 +31,12 @@ exact name, and creates one interactive card. It stores no `message_id`, makes
 no PATCH request, and has no post hook, heartbeat, external store, or cleanup
 workflow.
 
-The ready card includes both the temporary T3 origin and the native pairing
-URL. Anyone who can read the destination chat can use that pairing access, so
-the card disables forwarding and the group membership is part of the credential
-trust boundary. Neither value is written to Actions logs or step summaries.
-The card is not a status monitor; GitHub Actions is authoritative after delivery.
+The ready card includes both the temporary T3 origin and the native pairing URL
+that T3 issues for that origin after the Quick Tunnel becomes ready. Anyone who
+can read the destination chat can use that pairing access, so the card disables
+forwarding and the group membership is part of the credential trust boundary.
+Neither value is written to Actions logs or step summaries. The card is not a
+status monitor; GitHub Actions is authoritative after delivery.
 
 The payload uses Lark card JSON 2.0 throughout. Its links are JSON 2.0
 interactive containers and its footnote is notation text; the legacy `action`

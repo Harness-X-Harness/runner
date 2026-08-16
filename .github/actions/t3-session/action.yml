@@ -27,16 +27,14 @@ runs:
         pattern: '(https://[-a-z0-9]+[.]trycloudflare[.]com)'
         destination: ${{ runner.temp }}/t3-url
 
-    - uses: ./.github/actions/await-log
-      with:
-        path: ${{ runner.temp }}/t3code.log
-        pattern: '^Pairing URL: ([^\r\n]+)$'
-        destination: ${{ runner.temp }}/pairing-url
-
     - shell: bash
       run: |
         backend_url="$(cat "$RUNNER_TEMP/t3-url")"
-        pairing_url="$(cat "$RUNNER_TEMP/pairing-url")"
+        pairing_url="$(
+          npx --yes t3@latest auth pairing create \
+            --base-url "$backend_url" \
+            --json | jq -er .pairUrl
+        )"
         umask 077
         printf '%s\n' "$backend_url" > "$HOME/private-runner-session/t3code/t3-url"
         printf '%s\n' "$pairing_url" > "$HOME/private-runner-session/t3code/pairing-url"

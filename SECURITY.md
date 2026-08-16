@@ -94,7 +94,7 @@ Cloudflare Quick Tunnel URL 是公网可达地址，不是秘密或认证凭据�
 
 ## T3 session 数据
 
-workflow 原样使用 T3 输出的 pairing URL，不自行拼接、改写 host 或重建 token 路径。若外部配对要求显式 public origin，应使用 T3 上游支持的配置方式。
+workflow 先等待 Quick Tunnel URL，再通过 T3 原生 `auth pairing create --base-url` 命令为该 public origin 签发 pairing URL。workflow 不解析 credential，不自行拼接 URL，也不从 `serve` 日志复用 loopback pairing URL。
 
 连接信息写入 runner 上 `~/private-runner-session` 下的 mode-`0600` 文件，不写入 Actions step summary。LarkSend 在全部连接就绪后发送一张包含临时 T3 origin 和 pairing URL 的不可转发卡片。它不保存 message ID，也不更新或清理该卡片。
 

@@ -57,6 +57,14 @@ grep -Fq 'install -d -m 0700 "$HOME/workspace"' "$T3_ACTION" || \
   fail 'private environment must create the empty user workspace'
 grep -Fq '"$HOME/workspace"' "$T3_ACTION" || \
   fail 'T3 must open the empty user workspace'
+[[ "$(grep -Fc 'uses: ./.github/actions/await-log' "$T3_ACTION")" == 1 ]] || \
+  fail 'T3 session must only wait for the Quick Tunnel URL'
+grep -Fq 'npx --yes t3@latest auth pairing create' "$T3_ACTION" || \
+  fail 'T3 session must use the native CLI to issue the public pairing URL'
+grep -Fq -- '--base-url "$backend_url"' "$T3_ACTION" || \
+  fail 'T3 pairing URL must use the ready Quick Tunnel as its base URL'
+grep -Fq -- '--json | jq -er .pairUrl' "$T3_ACTION" || \
+  fail 'T3 session must consume the native pairUrl JSON field'
 
 grep -Fq 'using: node24' "$LARK_ACTION" || \
   fail 'LarkSend must use the current Node 24 Action runtime'
@@ -238,9 +246,8 @@ if rg -q 'openssh-server|sshd_config|ssh-public-key|ssh_public_key' \
   fail 'OpenSSH fallback must not return'
 fi
 
-if rg -q 'pairing_token|app[.]t3[.]codes/pair[?]host|/pair#token=' \
-  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
-  fail 'workflow must not reconstruct T3 pairing URLs'
+if grep -Fq "pattern: '^Pairing URL:" "$T3_ACTION"; then
+  fail 'T3 session must not reuse the loopback pairing URL from serve output'
 fi
 
 # Public repository: never publish pairing material, private repo names, or
