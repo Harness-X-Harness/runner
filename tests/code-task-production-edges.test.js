@@ -264,16 +264,30 @@ test("submit_task records a failed state when workflow dispatch fails", async ()
   assert.match(source, /status: "failed",\n\s+error: "workflow dispatch failed"/);
 });
 
-test("invalid OAuth authorization requests return a safe client error", async () => {
+test("OAuth authorization routes use the dedicated authorization module", async () => {
   const source = await readFile(
     new URL("../apps/chatgpt-app/src/index.js", import.meta.url),
     "utf8",
   );
 
-  assert.match(
-    source,
-    /try \{\n\s+authRequest = await env\.OAUTH_PROVIDER\.parseAuthRequest\(request\);\n\s+\} catch \{\n\s+return new Response\("Invalid OAuth authorization request", \{ status: 400 \}\);/,
+  assert.match(source, /authorizePage\(request, env\)/);
+  assert.match(source, /submitAuthorizationDecision\(request, env\)/);
+  assert.match(source, /completeAuthorizationCallback\(request, env\)/);
+  assert.doesNotMatch(source, /parseAuthRequest|oauth:consent|github:oauth/);
+});
+
+test("OAuth protected-resource metadata starts with read-only scope", async () => {
+  const source = await readFile(
+    new URL("../apps/chatgpt-app/src/index.js", import.meta.url),
+    "utf8",
   );
+  const scopes = await readFile(
+    new URL("../apps/chatgpt-app/src/oauth-scopes.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /scopes_supported: \[\.\.\.BASELINE_OAUTH_SCOPES\]/);
+  assert.match(scopes, /BASELINE_OAUTH_SCOPES = Object\.freeze\(\["tasks:read"\]\)/);
 });
 
 function testPrivateKeyPem() {

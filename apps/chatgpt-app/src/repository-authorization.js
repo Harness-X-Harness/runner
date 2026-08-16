@@ -1,8 +1,8 @@
 import {
   exchangeGitHubUserCode,
-  githubUserAuthorizationUrl,
   requestGitHubUserProfile,
 } from "./github-user-auth.js";
+import { startGitHubAuthorization } from "./github-oauth-state.js";
 import { dispatchWorkflow, githubHeaders, signAppJwt } from "./github.js";
 import {
   claimTaskDispatch,
@@ -13,7 +13,6 @@ import {
 
 const API = "https://api.github.com";
 const INSTALL_STATE_TTL = 604800;
-const OAUTH_STATE_TTL = 600;
 const DEFAULT_APP_SLUG = "harness-x-harness-task-runner";
 
 export async function resolveRepositoryAccess(
@@ -82,12 +81,6 @@ export async function createInstallationRequest(env, task) {
   return { authorizationUrl: url.toString() };
 }
 
-export function isInstallationCallback(request) {
-  return new URL(request.url).searchParams.get("state")?.startsWith(
-    "install_oauth_",
-  ) ?? false;
-}
-
 export async function startInstallationAuthorization(
   request,
   env,
@@ -128,58 +121,48 @@ export async function startInstallationAuthorization(
     return redirect(installation.value.html_url, cookie);
   }
 
-  const oauthState = `install_oauth_${crypto.randomUUID()}`;
-  await env.OAUTH_KV.put(
-    `github:install-oauth:${oauthState}`,
-    JSON.stringify({
+  const callback = `${url.origin}/github/callback`;
+  const response = await startGitHubAuthorization(
+    env,
+    callback,
+    {
+      kind: "installation",
       taskId: task.id,
       ownerId: task.ownerId,
       installState: state,
-    }),
-    { expirationTtl: OAUTH_STATE_TTL },
+    },
+    "install_oauth_",
   );
-  const callback = `${url.origin}/github/callback`;
-  return redirect(
-    githubUserAuthorizationUrl(env, callback, oauthState),
-    cookie,
-  );
+  response.headers.append("set-cookie", cookie);
+  return response;
 }
 
 export async function completeInstallationAuthorization(
-  request,
   env,
+  authorization,
   fetchImpl = fetch,
 ) {
-  const url = new URL(request.url);
-  const state = url.searchParams.get("state");
-  const code = url.searchParams.get("code");
-  if (!state || !code) return text("GitHub authorization was not completed", 400);
-
-  const authorizationJson = await env.OAUTH_KV.get(
-    `github:install-oauth:${state}`,
-  );
-  if (!authorizationJson) return text("Expired GitHub authorization state", 400);
-  await env.OAUTH_KV.delete(`github:install-oauth:${state}`);
-  const authorization = JSON.parse(authorizationJson);
+  const installation = authorization.payload;
 
   let token;
   let profile;
   try {
     token = await exchangeGitHubUserCode(
       env,
-      code,
-      `${url.origin}/github/callback`,
+      authorization.code,
+      authorization.callback,
+      authorization.codeVerifier,
       fetchImpl,
     );
     profile = await requestGitHubUserProfile(token.access_token, fetchImpl);
   } catch {
     return text("GitHub authorization verification failed", 502);
   }
-  if (String(profile.id) !== String(authorization.ownerId)) {
+  if (String(profile.id) !== String(installation.ownerId)) {
     return text("Authorize with the GitHub user who submitted this task", 403);
   }
 
-  const task = await readTask(env, authorization.taskId);
+  const task = await readTask(env, installation.taskId);
   if (task.ownerId !== String(profile.id)) return text("Task not found", 404);
   if (task.status !== "awaiting_installation") {
     return text(`Task is already ${task.status}.`);
@@ -205,7 +188,7 @@ export async function completeInstallationAuthorization(
   try {
     await dispatchWorkflow(env, claim.task, fetchImpl);
     const queued = await commitTaskDispatch(env, task.id);
-    await env.OAUTH_KV.delete(`github:install:${authorization.installState}`);
+    await env.OAUTH_KV.delete(`github:install:${installation.installState}`);
     return text(`Repository authorized. Task ${queued.id} is ${queued.status}.`);
   } catch {
     await updateTask(env, task.id, {

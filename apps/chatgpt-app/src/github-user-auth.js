@@ -1,23 +1,17 @@
 import { githubHeaders } from "./github.js";
+import { OAUTH_SCOPES } from "./oauth-scopes.js";
 
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const MINIMUM_TOKEN_TTL = 60;
 
-export const OAUTH_SCOPES = Object.freeze([
-  "tasks:read",
-  "tasks:run",
-  "tasks:cancel",
-  "repos:read",
-  "repos:write",
-  "pull_requests:write",
-]);
-
-export function githubUserAuthorizationUrl(env, callback, state) {
+export function githubUserAuthorizationUrl(env, callback, state, codeChallenge) {
   const url = new URL(AUTHORIZE_URL);
   url.searchParams.set("client_id", env.GITHUB_APP_CLIENT_ID);
   url.searchParams.set("redirect_uri", callback);
   url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
   return url;
 }
 
@@ -25,6 +19,7 @@ export async function exchangeGitHubUserCode(
   env,
   code,
   callback,
+  codeVerifier,
   fetchImpl = fetch,
 ) {
   return requestGitHubUserToken(
@@ -33,36 +28,28 @@ export async function exchangeGitHubUserCode(
       client_secret: env.GITHUB_APP_CLIENT_SECRET,
       code,
       redirect_uri: callback,
+      code_verifier: codeVerifier,
     },
     fetchImpl,
   );
 }
 
 export async function completeGitHubUserAuthorization(
-  request,
   env,
+  githubAuthorization,
   fetchImpl = fetch,
   logger = console,
 ) {
-  const url = new URL(request.url);
-  const state = url.searchParams.get("state");
-  const code = url.searchParams.get("code");
-  if (!state || !code) {
-    return new Response("GitHub authorization was not completed", {
-      status: 400,
-    });
-  }
-
-  const authRequestJson = await env.OAUTH_KV.get(`oauth:github:${state}`);
-  if (!authRequestJson) {
-    return new Response("Expired GitHub authorization state", { status: 400 });
-  }
-  await env.OAUTH_KV.delete(`oauth:github:${state}`);
-
-  const callback = `${url.origin}/github/callback`;
+  const { authRequest } = githubAuthorization.payload;
   let token;
   try {
-    token = await exchangeGitHubUserCode(env, code, callback, fetchImpl);
+    token = await exchangeGitHubUserCode(
+      env,
+      githubAuthorization.code,
+      githubAuthorization.callback,
+      githubAuthorization.codeVerifier,
+      fetchImpl,
+    );
   } catch {
     return new Response("GitHub token exchange failed", { status: 502 });
   }
@@ -73,7 +60,6 @@ export async function completeGitHubUserAuthorization(
   } catch {
     return new Response("GitHub profile lookup failed", { status: 502 });
   }
-  const authRequest = JSON.parse(authRequestJson);
   const grantedScopes = authRequest.scope.filter((scope) =>
     OAUTH_SCOPES.includes(scope),
   );

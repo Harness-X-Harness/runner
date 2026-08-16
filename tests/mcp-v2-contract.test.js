@@ -118,7 +118,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const modernTools = (await modernResponse.json()).result.tools;
   assert.equal(modernTools.length, 4);
   assert.deepEqual(modernTools.find(({ name }) => name === "submit_task").securitySchemes, [
-    { type: "oauth2", scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"] },
+    { type: "oauth2", scopes: ["tasks:run", "repos:read"] },
   ]);
 
   const legacyResponse = await handleMcpRequest(
@@ -144,4 +144,58 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
     destructiveHint: false,
     openWorldHint: false,
   });
+});
+
+test("write task modes request OAuth step-up while analyze stays minimal", async () => {
+  const response = await handleMcpRequest(
+    new Request("https://runner.example/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "mcp-method": "tools/call",
+        "mcp-protocol-version": "2026-07-28",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "submit_task",
+          arguments: {
+            repo: "owner/repository",
+            prompt: "Make a change",
+            executor: "codex",
+            mode: "pull_request",
+          },
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": { name: "contract-test", version: "1.0.0" },
+          },
+        },
+      }),
+    }),
+    {},
+    {
+      githubUserId: "test-user",
+      oauthScopes: ["tasks:read", "tasks:run", "repos:read"],
+    },
+    {},
+  );
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    error: "insufficient_scope",
+    error_description: "Additional authorization is required",
+  });
+  const challenge = response.headers.get("www-authenticate");
+  assert.match(challenge, /error="insufficient_scope"/);
+  assert.match(
+    challenge,
+    /scope="tasks:read tasks:run repos:read repos:write pull_requests:write"/,
+  );
+  assert.match(
+    challenge,
+    /resource_metadata="https:\/\/runner\.example\/\.well-known\/oauth-protected-resource\/mcp"/,
+  );
 });

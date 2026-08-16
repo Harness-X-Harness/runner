@@ -10,7 +10,9 @@ Private T3 Session workflow is unchanged and can still be used independently.
 1. ChatGPT authenticates to the Worker through OAuth 2.1 + PKCE. The Worker
    uses the configured GitHub App for user identity and keeps the GitHub user
    and refresh tokens plus granted tool scopes encrypted in the OAuth provider
-   grant properties; every tool checks its required scopes again.
+   grant properties; every tool checks its required scopes again. The local
+   consent page explains each requested scope, supports explicit denial, and
+   binds the following GitHub S256 PKCE flow to the initiating browser.
 2. `submit_task` resolves one repository access path before storing or
    dispatching the task. Public `analyze` uses `public_read`. Private reads and
    every write mode require a verified GitHub App installation. There is no
@@ -45,6 +47,15 @@ The public tools are:
 | `get_task` | Read current status | None |
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
+
+`submit_task` initially requests only `tasks:run` and `repos:read`, which are
+enough for `mode=analyze`. `edit` and `pull_request` return the standard OAuth
+`insufficient_scope` challenge when their additional write scopes are absent;
+the MCP client then performs incremental authorization and retries the call.
+The initial MCP connection has only `tasks:read`, and every step-up preserves
+the scopes already granted while adding the complete scope set required by the
+new operation. This keeps read-only analysis independent of `repos:write` and
+`pull_requests:write` and avoids repeated permission churn.
 
 ## OAuth resource audience
 
@@ -120,9 +131,12 @@ Enable **Redirect on update** so adding a selected repository returns to the
 same continuation. The Worker does not trust GitHub's `installation_id` query
 parameter. It uses the opaque task state only to locate the waiting task, then
 queries GitHub again with the App JWT and completes a user authorization-code
-flow before dispatch. If an organization owner approves the request in another
-browser, the original submitter can use the same task authorization URL after
-approval; the prompt and task parameters do not need to be submitted again.
+flow with S256 PKCE before dispatch. The one-time GitHub OAuth state is stored
+for ten minutes and is bound to the browser that started that flow. If an
+organization owner approves the installation request in another browser, the
+original submitter can use the same task authorization URL in their browser
+after approval; the prompt and task parameters do not need to be submitted
+again.
 
 Leave "Request user authorization (OAuth) during installation" disabled. The
 MCP consent flow starts GitHub authorization explicitly, so an installation
@@ -148,8 +162,8 @@ selected task mode. The workflow also needs the App ID as
 the `GITHUB_` prefix, so these Actions secret names intentionally differ from
 the Worker's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` bindings. Configure
 `MINI_END_USER_KEY`, `MINI_CODEX_BASE_URL`, and `MINI_GROK_BASE_URL` as runner
-repository secrets. The Codex Action receives the shared key and constructs its
-Responses endpoint from the secret base URL. Grok resolves the same key through
+repository secrets. The native Codex CLI resolves the shared key and its secret
+provider endpoint from its user config. Grok resolves the same key through
 `env_key` in its native user config. Put `ANTHROPIC_API_KEY` there only when the
 Claude executor is enabled.
 These credentials are scoped to their individual workflow steps and are not
@@ -194,7 +208,7 @@ colon delimiters.
 ## Local checks
 
 ```bash
-node --test tests/task-contract.test.js
+node --test tests/*.test.js
 npm --prefix apps/chatgpt-app run typecheck
 npm --prefix apps/chatgpt-app run deploy -- --dry-run
 ```

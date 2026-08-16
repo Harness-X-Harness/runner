@@ -17,6 +17,7 @@ test("GitHub App user authorization uses its client id without OAuth scopes", ()
     },
     "https://runner.example.com/github/callback",
     "state-123",
+    "challenge-123",
   );
 
   assert.equal(url.origin, "https://github.com");
@@ -27,6 +28,8 @@ test("GitHub App user authorization uses its client id without OAuth scopes", ()
     "https://runner.example.com/github/callback",
   );
   assert.equal(url.searchParams.get("state"), "state-123");
+  assert.equal(url.searchParams.get("code_challenge"), "challenge-123");
+  assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.equal(url.searchParams.has("scope"), false);
 });
 
@@ -39,6 +42,7 @@ test("GitHub App callback exchanges its code with the app client credentials", a
     },
     "callback-code",
     "https://runner.example.com/github/callback",
+    "verifier-123",
     async (url, init) => {
       captured = { url, init };
       return Response.json({
@@ -66,6 +70,7 @@ test("GitHub App callback exchanges its code with the app client credentials", a
       client_secret: "client-secret",
       code: "callback-code",
       redirect_uri: "https://runner.example.com/github/callback",
+      code_verifier: "verifier-123",
     },
   );
   assert.equal(token.access_token, "ghu_access");
@@ -85,16 +90,9 @@ test("GitHub callback completes OAuth with a delimiter-safe user id", async () =
   let completedAuthorization;
   let profileRequest;
   const response = await completeGitHubUserAuthorization(
-    new Request(
-      "https://runner.example.com/github/callback?state=github-state&code=github-code",
-    ),
     {
       GITHUB_APP_CLIENT_ID: "Iv1.example",
       GITHUB_APP_CLIENT_SECRET: "client-secret",
-      OAUTH_KV: {
-        get: async () => JSON.stringify(authRequest),
-        delete: async () => {},
-      },
       OAUTH_PROVIDER: {
         completeAuthorization: async (authorization) => {
           completedAuthorization = authorization;
@@ -104,6 +102,12 @@ test("GitHub callback completes OAuth with a delimiter-safe user id", async () =
           };
         },
       },
+    },
+    {
+      code: "github-code",
+      callback: "https://runner.example.com/github/callback",
+      codeVerifier: "verifier-123",
+      payload: { authRequest },
     },
     async (url, init) => {
       if (url === "https://github.com/login/oauth/access_token") {
@@ -130,26 +134,26 @@ test("GitHub callback completes OAuth with a delimiter-safe user id", async () =
 test("GitHub callback rejects a non-JSON profile error before creating a grant", async () => {
   let completedAuthorization = false;
   const response = await completeGitHubUserAuthorization(
-    new Request(
-      "https://runner.example.com/github/callback?state=github-state&code=github-code",
-    ),
     {
       GITHUB_APP_CLIENT_ID: "Iv1.example",
       GITHUB_APP_CLIENT_SECRET: "client-secret",
-      OAUTH_KV: {
-        get: async () =>
-          JSON.stringify({
-            responseType: "code",
-            clientId: "client-123",
-            redirectUri: "https://client.example/callback",
-            scope: ["tasks:read"],
-          }),
-        delete: async () => {},
-      },
       OAUTH_PROVIDER: {
         completeAuthorization: async () => {
           completedAuthorization = true;
           return { redirectTo: "https://client.example/callback" };
+        },
+      },
+    },
+    {
+      code: "github-code",
+      callback: "https://runner.example.com/github/callback",
+      codeVerifier: "verifier-123",
+      payload: {
+        authRequest: {
+          responseType: "code",
+          clientId: "client-123",
+          redirectUri: "https://client.example/callback",
+          scope: ["tasks:read"],
         },
       },
     },
@@ -172,25 +176,25 @@ test("GitHub callback rejects a non-JSON profile error before creating a grant",
 test("GitHub callback reports grant completion failures without exposing credentials", async () => {
   const logEntries = [];
   const response = await completeGitHubUserAuthorization(
-    new Request(
-      "https://runner.example.com/github/callback?state=github-state&code=github-code",
-    ),
     {
       GITHUB_APP_CLIENT_ID: "Iv1.example",
       GITHUB_APP_CLIENT_SECRET: "client-secret",
-      OAUTH_KV: {
-        get: async () =>
-          JSON.stringify({
-            responseType: "code",
-            clientId: "client-123",
-            redirectUri: "https://client.example/callback",
-            scope: ["tasks:read"],
-          }),
-        delete: async () => {},
-      },
       OAUTH_PROVIDER: {
         completeAuthorization: async () => {
           throw new Error("KV grant write failed");
+        },
+      },
+    },
+    {
+      code: "github-code",
+      callback: "https://runner.example.com/github/callback",
+      codeVerifier: "verifier-123",
+      payload: {
+        authRequest: {
+          responseType: "code",
+          clientId: "client-123",
+          redirectUri: "https://client.example/callback",
+          scope: ["tasks:read"],
         },
       },
     },
@@ -360,6 +364,7 @@ test("GitHub token failures expose no upstream response details", async () => {
       },
       "invalid-code",
       "https://runner.example.com/github/callback",
+      "verifier-123",
       async () =>
         Response.json(
           {
