@@ -53,15 +53,14 @@ export async function authorizePage(request, env) {
 
   const scopeList = scopeDetails.length === 0
     ? "<p>No permissions were requested.</p>"
-    : `<ul class="scopes">${scopeDetails.map(({ scope, title, description }) =>
-      `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span><code>${escapeHtml(scope)}</code></li>`
-    ).join("")}</ul>`;
+    : renderScopeGroups(scopeDetails);
   return html(
     "Authorize Harness X Harness Task Runner",
-    `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests access to Harness X Harness Task Runner.</p>
+    `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests permission to use Harness X Harness Task Runner.</p>
+     <p class="note">These permissions control what ChatGPT can ask Harness to do. They do not install the GitHub App or grant access to every repository.</p>
      <h2>Requested permissions</h2>
      ${scopeList}
-     <p class="note">GitHub authorization confirms your identity and repository access. GitHub App installation permissions remain separate.</p>
+     <p class="note">GitHub verifies your identity next. If a task later needs a repository that the GitHub App cannot access, GitHub asks you to install or update the App for that target repository.</p>
      <form method="post" action="/authorize/consent">
        <input type="hidden" name="csrf" value="${escapeHtml(csrf)}" />
        <div class="actions">
@@ -73,6 +72,20 @@ export async function authorizePage(request, env) {
     [secureCookie(CONSENT_COOKIE, browserSession)],
     [new URL(authRequest.redirectUri).origin, GITHUB_AUTHORIZATION_ORIGIN],
   );
+}
+
+function renderScopeGroups(scopeDetails) {
+  const groups = new Map();
+  for (const detail of scopeDetails) {
+    const scopes = groups.get(detail.group) ?? [];
+    scopes.push(detail);
+    groups.set(detail.group, scopes);
+  }
+  return [...groups].map(([group, scopes]) =>
+    `<section class="permission-group"><h3>${escapeHtml(group)}</h3><ul class="scopes">${scopes.map(({ scope, title, description }) =>
+      `<li><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span><code>${escapeHtml(scope)}</code></li>`
+    ).join("")}</ul></section>`
+  ).join("");
 }
 
 export async function submitAuthorizationDecision(request, env) {
@@ -200,7 +213,7 @@ function html(title, body, status = 200, cookies = [], formActionOrigins = []) {
   const formActions = ["'self'", ...formActionOrigins].join(" ");
   const response = new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
-     <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui;max-width:42rem;margin:4rem auto;padding:0 1.25rem}h1{line-height:1.2}h2{font-size:1rem;margin-top:2rem}.scopes{list-style:none;padding:0;display:grid;gap:.75rem}.scopes li{border:1px solid color-mix(in srgb,currentColor 22%,transparent);border-radius:.6rem;padding:.8rem 1rem}.scopes span,.scopes code{display:block}.scopes span{margin:.2rem 0;color:color-mix(in srgb,currentColor 72%,transparent)}.scopes code{font-size:.8rem}.note{margin:1.5rem 0}.actions{display:flex;gap:.75rem;flex-wrap:wrap}button{font:inherit;padding:.65rem 1rem;border-radius:.45rem;border:1px solid currentColor;cursor:pointer}.primary{background:#238636;color:#fff;border-color:#238636}button:focus-visible{outline:3px solid #58a6ff;outline-offset:2px}</style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`,
+     <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui;max-width:42rem;margin:4rem auto;padding:0 1.25rem}h1{line-height:1.2}h2{font-size:1.1rem;margin-top:2rem}.permission-group{margin-top:1.5rem}.permission-group h3{font-size:1rem;margin:0 0 .65rem}.scopes{list-style:none;padding:0;display:grid;gap:.75rem}.scopes li{border:1px solid color-mix(in srgb,currentColor 22%,transparent);border-radius:.6rem;padding:.8rem 1rem}.scopes span,.scopes code{display:block}.scopes span{margin:.2rem 0;color:color-mix(in srgb,currentColor 72%,transparent)}.scopes code{font-size:.8rem}.note{margin:1.5rem 0}.actions{display:flex;gap:.75rem;flex-wrap:wrap}button{font:inherit;padding:.65rem 1rem;border-radius:.45rem;border:1px solid currentColor;cursor:pointer}.primary{background:#238636;color:#fff;border-color:#238636}button:focus-visible{outline:3px solid #58a6ff;outline-offset:2px}</style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`,
     { status },
   );
   const headers = response.headers;
