@@ -11,6 +11,10 @@
       {
         "name": "TASKS",
         "class_name": "TaskObject"
+      },
+      {
+        "name": "AUTHORIZATION_STATES",
+        "class_name": "AuthorizationStateObject"
       }
     ]
   },
@@ -18,6 +22,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["TaskObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AuthorizationStateObject"]
     }
   ],
   "kv_namespaces": [

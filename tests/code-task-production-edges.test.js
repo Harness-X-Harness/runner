@@ -276,6 +276,21 @@ test("OAuth authorization routes use the dedicated authorization module", async 
   assert.doesNotMatch(source, /parseAuthRequest|oauth:consent|github:oauth/);
 });
 
+test("application authorization state uses a strongly consistent Durable Object", async () => {
+  const [authorization, githubState, installation, configuration] = await Promise.all([
+    readFile(new URL("../apps/chatgpt-app/src/authorization.js", import.meta.url), "utf8"),
+    readFile(new URL("../apps/chatgpt-app/src/github-oauth-state.js", import.meta.url), "utf8"),
+    readFile(new URL("../apps/chatgpt-app/src/repository-authorization.js", import.meta.url), "utf8"),
+    readFile(new URL("../apps/chatgpt-app/wrangler.jsonc", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of [authorization, githubState, installation]) {
+    assert.doesNotMatch(source, /OAUTH_KV/);
+  }
+  assert.match(configuration, /"name": "AUTHORIZATION_STATES"/);
+  assert.match(configuration, /"new_sqlite_classes": \["AuthorizationStateObject"\]/);
+});
+
 test("OAuth protected-resource metadata starts with read-only scope", async () => {
   const source = await readFile(
     new URL("../apps/chatgpt-app/src/index.js", import.meta.url),

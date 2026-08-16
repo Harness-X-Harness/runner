@@ -1,29 +1,37 @@
-# Keep OAuth state in KV and task state in Durable Objects
+# Keep provider records in KV and request state in Durable Objects
 
-The control plane keeps OAuth clients, grants, token metadata, and short-lived
-authorization state in Workers KV because `@cloudflare/workers-oauth-provider`
-requires an `OAUTH_KV` binding and already implements hashed token storage,
-encrypted grant properties, expiration, and revocation around that model.
-Task prompts and lifecycle state remain in one Durable Object per task so that
-runner callbacks, cancellation, and result updates are serialized. The two
-stores have different consistency and access requirements; they are not unified
-solely to reduce the number of Cloudflare products.
+`@cloudflare/workers-oauth-provider` requires the `OAUTH_KV` binding for its
+registered clients, grants, authorization codes, access tokens, refresh tokens,
+expiration, and revocation. The control plane keeps that binding and does not
+replace the provider's persistence implementation.
+
+Application-owned authorization state has a different consistency requirement.
+Consent POSTs, GitHub callbacks, and repository-installation continuations read
+state immediately after another request creates it, and some records must be
+consumed exactly once. These records use one `AuthorizationStateObject` Durable
+Object per opaque state identifier. Its storage is strongly consistent; it
+serializes consumption and deletes unconsumed records with an alarm.
+
+Task prompts and lifecycle state continue to use one `TaskObject` Durable Object
+per task so runner callbacks, cancellation, and result updates are serialized.
+The authorization-state and task modules share the Durable Objects product but
+have separate interfaces and namespaces.
 
 ## Considered options
 
-- D1 would support relational queries, audit reporting, and explicit SQL
-  transactions, but adopting it for OAuth would require a custom persistence
-  layer, schema migrations, expiration cleanup, and renewed security validation
-  for authorization codes, token rotation, and revocation.
-- Durable Objects could serialize OAuth updates as well as task updates, but the
-  selected OAuth provider does not expose a Durable Object storage adapter.
-  Using one would therefore also mean owning more of the OAuth implementation.
+- Keeping application state in Workers KV was rejected. KV is eventually
+  consistent and does not guarantee read-after-write visibility, including for
+  newly created keys. Retrying or delaying the callback would retain the race.
+- Moving the complete OAuth provider to Durable Objects was rejected because the
+  selected provider requires KV and does not expose a Durable Object adapter.
+- D1 would add relational queries and SQL transactions, but these opaque,
+  single-record state transitions do not need a relational schema or migrations.
+- Self-contained signed state would remove storage, but it would add signing-key
+  lifecycle, payload-size, and replay rules to three authorization paths.
 
 ## Consequences
 
-The deployment token needs `Workers KV Storage: Edit` in addition to
-`Workers Scripts: Edit`; D1 permissions are not required. KV's eventual
-consistency is accepted for the current provider-backed OAuth flow. Revisit the
-decision if the product requires immediate global revocation, relational
-authorization queries, comprehensive audit reporting, or a different OAuth
-provider with a supported transactional storage adapter.
+The deployment retains `Workers KV Storage: Edit` because the OAuth provider
+still requires KV. It also deploys the `AUTHORIZATION_STATES` SQLite-backed
+Durable Object namespace. D1 permissions are not required. Application code
+must not use `OAUTH_KV` for state that a later request needs to read immediately.
