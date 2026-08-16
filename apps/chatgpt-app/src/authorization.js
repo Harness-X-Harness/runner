@@ -14,6 +14,7 @@ import { completeInstallationAuthorization } from "./repository-authorization.js
 
 const CONSENT_TTL = 600;
 const CONSENT_COOKIE = "__Host-RUNNER_CSRF";
+const GITHUB_AUTHORIZATION_ORIGIN = "https://github.com";
 
 export async function authorizePage(request, env) {
   let authRequest;
@@ -70,7 +71,7 @@ export async function authorizePage(request, env) {
      </form>`,
     200,
     [secureCookie(CONSENT_COOKIE, browserSession)],
-    new URL(authRequest.redirectUri).origin,
+    [new URL(authRequest.redirectUri).origin, GITHUB_AUTHORIZATION_ORIGIN],
   );
 }
 
@@ -195,8 +196,8 @@ function oauthRedirect(redirectUri, parameters) {
   });
 }
 
-function html(title, body, status = 200, cookies = [], formActionOrigin) {
-  const formActions = ["'self'", formActionOrigin].filter(Boolean).join(" ");
+function html(title, body, status = 200, cookies = [], formActionOrigins = []) {
+  const formActions = ["'self'", ...formActionOrigins].join(" ");
   const response = new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
      <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui;max-width:42rem;margin:4rem auto;padding:0 1.25rem}h1{line-height:1.2}h2{font-size:1rem;margin-top:2rem}.scopes{list-style:none;padding:0;display:grid;gap:.75rem}.scopes li{border:1px solid color-mix(in srgb,currentColor 22%,transparent);border-radius:.6rem;padding:.8rem 1rem}.scopes span,.scopes code{display:block}.scopes span{margin:.2rem 0;color:color-mix(in srgb,currentColor 72%,transparent)}.scopes code{font-size:.8rem}.note{margin:1.5rem 0}.actions{display:flex;gap:.75rem;flex-wrap:wrap}button{font:inherit;padding:.65rem 1rem;border-radius:.45rem;border:1px solid currentColor;cursor:pointer}.primary{background:#238636;color:#fff;border-color:#238636}button:focus-visible{outline:3px solid #58a6ff;outline-offset:2px}</style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`,
