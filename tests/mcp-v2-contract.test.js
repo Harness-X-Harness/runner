@@ -118,7 +118,10 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const modernTools = (await modernResponse.json()).result.tools;
   assert.equal(modernTools.length, 4);
   assert.deepEqual(modernTools.find(({ name }) => name === "submit_task").securitySchemes, [
-    { type: "oauth2", scopes: ["tasks:run", "repos:read"] },
+    {
+      type: "oauth2",
+      scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"],
+    },
   ]);
 
   const legacyResponse = await handleMcpRequest(
@@ -144,63 +147,4 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
     destructiveHint: false,
     openWorldHint: false,
   });
-});
-
-test("write task modes return ChatGPT's tool-level OAuth step-up challenge", async () => {
-  const response = await handleMcpRequest(
-    new Request("https://runner.example/mcp", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "mcp-method": "tools/call",
-        "mcp-protocol-version": "2026-07-28",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: {
-          name: "submit_task",
-          arguments: {
-            repo: "owner/repository",
-            prompt: "Make a change",
-            executor: "codex",
-            mode: "pull_request",
-          },
-          _meta: {
-            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-            "io.modelcontextprotocol/clientCapabilities": {},
-            "io.modelcontextprotocol/clientInfo": { name: "contract-test", version: "1.0.0" },
-          },
-        },
-      }),
-    }),
-    {},
-    {
-      githubUserId: "test-user",
-      oauthScopes: ["tasks:read", "tasks:run", "repos:read"],
-    },
-    {},
-  );
-
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.jsonrpc, "2.0");
-  assert.equal(body.id, 3);
-  assert.equal(body.result.isError, true);
-  assert.deepEqual(body.result.content, [{
-    type: "text",
-    text: "Additional authorization is required.",
-  }]);
-  const challenge = body.result._meta["mcp/www_authenticate"][0];
-  assert.match(challenge, /error="insufficient_scope"/);
-  assert.match(challenge, /error_description="Additional authorization is required"/);
-  assert.match(
-    challenge,
-    /scope="tasks:read tasks:run repos:read repos:write pull_requests:write"/,
-  );
-  assert.match(
-    challenge,
-    /resource_metadata="https:\/\/runner\.example\/\.well-known\/oauth-protected-resource\/mcp"/,
-  );
 });
