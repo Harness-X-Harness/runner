@@ -51,21 +51,20 @@ The public tools are:
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
 
-`submit_task` initially requests only `tasks:run` and `repos:read`, which are
-enough for `mode=analyze`. `edit` and `pull_request` return the standard OAuth
-`insufficient_scope` challenge when their additional write scopes are absent;
-the MCP client then performs incremental authorization and retries the call.
-The initial MCP connection has only `tasks:read`, and every step-up preserves
-the scopes already granted while adding the complete scope set required by the
-new operation. This keeps read-only analysis independent of `repos:write` and
-`pull_requests:write` and avoids repeated permission churn.
+`submit_task` requires only `tasks:run` and `repos:read` for `mode=analyze`.
+`edit` and `pull_request` return the standard OAuth `insufficient_scope`
+challenge when their additional write scopes are absent; the MCP client can
+then perform incremental authorization and retry the call. Every step-up
+preserves the scopes already granted while adding the complete scope set
+required by the new operation.
 
 Some clients aggregate every tool's declared scope when a user manually links
 the whole app, even though the initial MCP challenge and protected-resource
-metadata request only `tasks:read`. The authorization server treats that exact
-all-capabilities request as an initial link and grants only `tasks:read`.
-Operation-specific subsets are not reduced, so later analyze, edit,
-pull-request, and cancel challenges can add only the permissions they need.
+metadata request only `tasks:read`. The authorization server displays and
+grants the complete scope set that the client requests; it does not silently
+reduce the grant and leave the client connected with partial permissions.
+Repository access remains independent: GitHub asks for installation or update
+only when a task targets a repository the App cannot access.
 
 ## OAuth resource audience
 

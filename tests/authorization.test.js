@@ -61,7 +61,7 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.deepEqual(stored.authRequest.scope, authRequest.scope);
 });
 
-test("initial consent does not grant ChatGPT's aggregate capability request", async () => {
+test("initial consent displays and preserves every requested capability", async () => {
   const states = fakeAuthorizationStates();
   const response = await authorizePage(
     new Request("https://runner.example.com/authorize"),
@@ -86,14 +86,29 @@ test("initial consent does not grant ChatGPT's aggregate capability request", as
 
   const body = await response.text();
   assert.match(body, /Read task status and results/);
-  assert.doesNotMatch(body, /Cancel tasks/);
-  assert.doesNotMatch(body, /Run code tasks/);
-  assert.doesNotMatch(body, /Change repositories/);
-  assert.doesNotMatch(body, /Create pull requests/);
-  assert.doesNotMatch(body, /Read repositories/);
+  assert.match(body, /Cancel tasks/);
+  assert.match(body, /Run code tasks/);
+  assert.match(body, /Change repositories/);
+  assert.match(body, /Create pull requests/);
+  assert.match(body, /Read repositories/);
+  assert.match(body, /Task permissions/);
+  assert.match(body, /Repository permissions/);
+  assert.match(
+    body,
+    /These permissions control what ChatGPT can ask Harness to do/,
+  );
+  assert.match(body, /GitHub verifies your identity next/);
+  assert.match(body, /for that target repository/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
-  assert.deepEqual(stored.authRequest.scope, ["tasks:read"]);
+  assert.deepEqual(stored.authRequest.scope, [
+    "tasks:read",
+    "tasks:run",
+    "tasks:cancel",
+    "repos:read",
+    "repos:write",
+    "pull_requests:write",
+  ]);
 });
 
 test("validated authorization errors return OAuth error state and issuer", async () => {
