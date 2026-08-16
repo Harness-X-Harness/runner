@@ -146,7 +146,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   });
 });
 
-test("write task modes request OAuth step-up while analyze stays minimal", async () => {
+test("write task modes return ChatGPT's tool-level OAuth step-up challenge", async () => {
   const response = await handleMcpRequest(
     new Request("https://runner.example/mcp", {
       method: "POST",
@@ -183,13 +183,18 @@ test("write task modes request OAuth step-up while analyze stays minimal", async
     {},
   );
 
-  assert.equal(response.status, 403);
-  assert.deepEqual(await response.json(), {
-    error: "insufficient_scope",
-    error_description: "Additional authorization is required",
-  });
-  const challenge = response.headers.get("www-authenticate");
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.jsonrpc, "2.0");
+  assert.equal(body.id, 3);
+  assert.equal(body.result.isError, true);
+  assert.deepEqual(body.result.content, [{
+    type: "text",
+    text: "Additional authorization is required.",
+  }]);
+  const challenge = body.result._meta["mcp/www_authenticate"][0];
   assert.match(challenge, /error="insufficient_scope"/);
+  assert.match(challenge, /error_description="Additional authorization is required"/);
   assert.match(
     challenge,
     /scope="tasks:read tasks:run repos:read repos:write pull_requests:write"/,

@@ -202,10 +202,10 @@ export function createServer(env, props) {
 
 export async function handleMcpRequest(request, env, props, ctx) {
   const toolsListRequest = request.method === "POST" && await isToolsListRequest(request);
-  const stepUpScopes = request.method === "POST"
-    ? await requiredStepUpScopes(request, currentProps(props))
+  const stepUp = request.method === "POST"
+    ? await requiredStepUp(request, currentProps(props))
     : undefined;
-  if (stepUpScopes) return insufficientScopeResponse(request, stepUpScopes);
+  if (stepUp) return insufficientScopeResponse(request, stepUp.id, stepUp.scopes);
   const handler = createMcpHandler(() => createServer(env, currentProps(props)), {
     route: "/mcp",
     authContext: { props: props ?? {} },
@@ -216,7 +216,7 @@ export async function handleMcpRequest(request, env, props, ctx) {
     : response;
 }
 
-async function requiredStepUpScopes(request, props) {
+async function requiredStepUp(request, props) {
   let body;
   try {
     body = await request.clone().json();
@@ -231,12 +231,15 @@ async function requiredStepUpScopes(request, props) {
   const required = requiredSubmitScopes(mode);
   const granted = new Set(props?.oauthScopes ?? []);
   if (required.every((scope) => granted.has(scope))) return undefined;
-  return OAUTH_SCOPES.filter(
-    (scope) => granted.has(scope) || required.includes(scope),
-  );
+  return {
+    id: body.id,
+    scopes: OAUTH_SCOPES.filter(
+      (scope) => granted.has(scope) || required.includes(scope),
+    ),
+  };
 }
 
-function insufficientScopeResponse(request, scopes) {
+function insufficientScopeResponse(request, id, scopes) {
   const resourceMetadata = new URL(
     "/.well-known/oauth-protected-resource/mcp",
     request.url,
@@ -247,19 +250,18 @@ function insufficientScopeResponse(request, scopes) {
     `scope="${scopes.join(" ")}"`,
     `resource_metadata="${resourceMetadata}"`,
   ].join(", ");
-  return Response.json(
-    {
-      error: "insufficient_scope",
-      error_description: "Additional authorization is required",
+  return Response.json({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{
+        type: "text",
+        text: "Additional authorization is required.",
+      }],
+      _meta: { "mcp/www_authenticate": [authenticate] },
+      isError: true,
     },
-    {
-      status: 403,
-      headers: {
-        "cache-control": "no-store",
-        "www-authenticate": authenticate,
-      },
-    },
-  );
+  }, { headers: { "cache-control": "no-store" } });
 }
 
 function currentProps(fallback) {
