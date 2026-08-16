@@ -291,18 +291,14 @@ test("application authorization state uses a strongly consistent Durable Object"
   assert.match(configuration, /"new_sqlite_classes": \["AuthorizationStateObject"\]/);
 });
 
-test("OAuth protected-resource metadata starts with read-only scope", async () => {
+test("OAuth protected-resource metadata requests the complete App capability set", async () => {
   const source = await readFile(
     new URL("../apps/chatgpt-app/src/index.js", import.meta.url),
     "utf8",
   );
-  const scopes = await readFile(
-    new URL("../apps/chatgpt-app/src/oauth-scopes.js", import.meta.url),
-    "utf8",
-  );
 
-  assert.match(source, /scopes_supported: \[\.\.\.BASELINE_OAUTH_SCOPES\]/);
-  assert.match(scopes, /BASELINE_OAUTH_SCOPES = Object\.freeze\(\["tasks:read"\]\)/);
+  assert.match(source, /scopes_supported: \[\.\.\.OAUTH_SCOPES\]/);
+  assert.doesNotMatch(source, /BASELINE_OAUTH_SCOPES/);
 });
 
 function testPrivateKeyPem() {

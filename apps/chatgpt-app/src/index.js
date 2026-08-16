@@ -14,10 +14,7 @@ import {
   submitAuthorizationDecision,
 } from "./authorization.js";
 import { handleMcpRequest } from "./mcp.js";
-import {
-  BASELINE_OAUTH_SCOPES,
-  OAUTH_SCOPES,
-} from "./oauth-scopes.js";
+import { OAUTH_SCOPES } from "./oauth-scopes.js";
 import {
   authorizationServerIssuer,
   canonicalMcpResource,
@@ -58,7 +55,7 @@ function createOAuthProvider(env, canonicalResource) {
     resourceMetadata: {
       resource: canonicalResource,
       authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],
-      scopes_supported: [...BASELINE_OAUTH_SCOPES],
+      scopes_supported: [...OAUTH_SCOPES],
       bearer_methods_supported: ["header"],
       resource_name: "Harness X Harness Task Runner",
     },
