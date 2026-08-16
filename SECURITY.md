@@ -1,18 +1,17 @@
 # 安全策略与威胁模型
 
-本仓库公开 workflow 和 local actions。真实基础设施、私有仓库身份和凭证必须保存在仓库外。安全性依赖最小权限凭证、受保护的默认分支、GitHub Environment 审批和 Headscale policy，而不是源码保密。
+本仓库公开 workflow 和 local actions。真实基础设施、私有仓库身份和凭证必须保存在仓库外。安全性依赖最小权限凭证、受保护的默认分支、固定 GitHub Environment 和 Headscale policy，而不是源码保密。
 
 ## 信任边界
 
 本项目通过 `workflow_dispatch` 创建一次性的 GitHub-hosted Ubuntu runner。它可以：
 
-- 使用限定到目标仓库的 Git 凭证检出私有代码；
-- 通过 Headscale/Tailscale SSH 提供可选的私有 shell；
+- 通过 Headscale/Tailscale SSH 提供私有 shell；
 - 运行 Codex、Claude Code 和 T3 Code；
 - 通过 Cloudflare Quick Tunnel 暴露带 T3 应用层认证的临时公网入口；
-- 使用 Lark 应用机器人发送并更新一张 session 状态卡片。
+- 使用 Lark 应用机器人发送一张 ready 连接卡片。
 
-GitHub-hosted runner 会在 job 结束后销毁，但这不是进程级沙箱。目标仓库代码、开发工具、T3 Code 和取得 SSH 访问权的主体均以 runner 用户权限运行，并能访问当前 session 中该用户可读的文件与凭证。
+GitHub-hosted runner 会在 job 结束后销毁，但这不是进程级沙箱。用户在环境中运行的代码、开发工具、T3 Code 和取得 SSH 访问权的主体均以 runner 用户权限运行，并能访问当前 run 中该用户可读的文件与凭证。
 
 任何合并到受保护分支、随后由受信任 Environment dispatch 的 workflow 或 local action 都处于同一信任边界。必须像审查生产部署代码一样审查 `.github/`、`apps/`、`headscale/` 和安全配置。
 
@@ -48,32 +47,28 @@ GitHub 安装返回的 `installation_id` 和通知本身不是授权证据。Wor
 原子 claim 保证一个 task 最多 dispatch 一次。安装 state 不包含 prompt、token
 或 private key，并在 KV 中限时保存。
 
-## 凭证与 GitHub Environment
+## 凭证与固定 GitHub Environment
 
-每个目标仓库应使用独立、受保护的 GitHub Environment。Environment 名称会显示在 Actions UI 中，不得包含敏感信息。
+Remote Development Environment workflow 固定使用受保护的 `session--none` GitHub Environment。它不接收 Environment 或目标仓库输入。
 
 | 配置 | 建议范围 | 用途 |
 | --- | --- | --- |
-| `TARGET_REPO` | Environment secret | `owner/repository` 格式的目标私有仓库 |
-| `TARGET_REPO_AUTH` | Environment secret | 仅可访问该目标仓库的最小权限 token |
-| `HEADSCALE_AUTHKEY` | Environment secret | 启用 SSH 时使用的 tagged ephemeral auth key |
-| `HEADSCALE_URL` | Repository 或 Environment secret | Headscale control server URL |
-| `LARK_APP_ID` | Repository 或 Environment secret | Lark 自建应用 ID |
-| `LARK_APP_SECRET` | Repository 或 Environment secret | Lark 自建应用密钥 |
-| `LARK_CHAT_NAME` | Repository 或 Environment secret | 机器人所在目标群的精确名称 |
+| `HEADSCALE_AUTHKEY` | `session--none` Environment secret | tagged ephemeral auth key |
+| `HEADSCALE_URL` | Repository secret | Headscale control server URL |
+| `LARK_APP_ID` | Repository secret | Lark 自建应用 ID |
+| `LARK_APP_SECRET` | Repository secret | Lark 自建应用密钥 |
+| `LARK_CHAT_NAME` | Repository secret | 机器人所在目标群的精确名称 |
 | `GITHUB_APP_ID` | Worker secret | 调度 workflow 的 GitHub App |
 | `GITHUB_APP_PRIVATE_KEY` | Worker secret | 调度 workflow 的 GitHub App 私钥 |
 | `RUNNER_GITHUB_APP_ID` | Runner repository secret | 目标仓库授权使用的同一个 GitHub App；避开 GitHub 保留的 `GITHUB_` secret 前缀 |
 | `RUNNER_GITHUB_APP_PRIVATE_KEY` | Runner repository secret | 目标仓库授权使用的 GitHub App 私钥；只注入 token 创建 Action |
 | `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
-| `MINI_END_USER_KEY` | Runner repository 或 Environment secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
-| `MINI_CODEX_BASE_URL` | Runner repository 或 Environment secret | Codex provider base URL；不得写入仓库、日志或 artifact |
-| `MINI_GROK_BASE_URL` | Runner repository 或 Environment secret | Grok provider base URL；不得写入仓库、日志或 artifact |
+| `MINI_END_USER_KEY` | Runner repository secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
+| `MINI_CODEX_BASE_URL` | Runner repository secret | Codex provider base URL；不得写入仓库、日志或 artifact |
+| `MINI_GROK_BASE_URL` | Runner repository secret | Grok provider base URL；不得写入仓库、日志或 artifact |
 | `ANTHROPIC_API_KEY` | Runner repository secret | Claude Code executor，仅在对应步骤注入 |
 
-应为 Environment 配置 required reviewers、prevent self-review 和只允许受保护默认分支部署的规则。`TARGET_REPO_AUTH` 不得使用组织管理员 token 或具有宽泛仓库权限的 classic PAT。
-
-目标仓库凭证存放在 runner 本地的 path-scoped Git credential store 中。它不会成为全局 Git 凭证，但这不是进程隔离：以 runner 用户运行的目标代码和工具仍可能读取它。
+`session--none` 只允许受保护默认分支部署。workflow 不保存目标仓库 token，也不自动 clone；用户在临时环境中自行建立的 Git、GitHub 或其他凭证属于该 run 的完整用户信任边界，并在 run 结束时销毁。
 
 `MINI_END_USER_KEY` 同时具有 Codex 与 Grok provider scope。两个 provider
 endpoint 是机密配置。Codex 与 Grok 在默认用户 home 中使用各自原生
@@ -83,11 +78,11 @@ login、`auth.json` 或 `XAI_API_KEY` fallback。独立 auth workflows 使用官
 安装器和原生 user config 执行最小模型请求，并丢弃模型输出；它们不自行模拟
 provider 的认证协议。
 
-Lark secrets 当前作为 job 环境变量提供，因此 workflow 中的所有步骤和 local action 进程都属于其信任边界。Online 卡片包含 pairing URL，因此目标 Lark 群的所有成员也属于凭证信任边界。仅允许受信任代码进入可访问这些 secrets 的分支与 Environment，并限制目标群成员资格。
+Lark secrets 当前作为 job 环境变量提供，因此 workflow 中的所有步骤和 local action 进程都属于其信任边界。Ready 卡片包含 pairing URL，因此目标 Lark 群的所有成员也属于凭证信任边界。仅允许受信任代码进入可访问这些 secrets 的分支与 Environment，并限制目标群成员资格。
 
 ## 网络边界
 
-启用 SSH 时，runner 通过 Headscale 加入 tailnet 并使用 Tailscale SSH；workflow 不启动系统 OpenSSH 服务，也不接收 SSH public key。客户端使用：
+runner 始终通过 Headscale 加入 tailnet 并使用 Tailscale SSH；workflow 不启动系统 OpenSSH 服务，也不接收 SSH public key。客户端使用：
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>
@@ -101,9 +96,9 @@ Cloudflare Quick Tunnel URL 是公网可达地址，不是秘密或认证凭据�
 
 workflow 原样使用 T3 输出的 pairing URL，不自行拼接、改写 host 或重建 token 路径。若外部配对要求显式 public origin，应使用 T3 上游支持的配置方式。
 
-连接信息写入 runner 上 `~/private-runner-session` 下的 mode-`0600` 文件，不写入 Actions step summary。Online 卡片包含临时 T3 origin 和 pairing URL，并禁止转发；Offline 更新会移除这两个入口。
+连接信息写入 runner 上 `~/private-runner-session` 下的 mode-`0600` 文件，不写入 Actions step summary。LarkSend 在全部连接就绪后发送一张包含临时 T3 origin 和 pairing URL 的不可转发卡片。它不保存 message ID，也不更新或清理该卡片。
 
-除配置的 Lark 群外，不要把 pairing URL、连接文件、Git credential、内部地址或包含私有仓库信息的日志上传为 artifact，也不要粘贴到其它聊天、公开 issue 或 pull request。job 被取消或结束时，Lark Action 的原生 `post` hook 会尽力把卡片更新为 Offline；runner 已消失或断网时无法保证该更新。
+除配置的 Lark 群外，不要把 pairing URL、连接文件、Git credential、内部地址或包含私有仓库信息的日志上传为 artifact，也不要粘贴到其它聊天、公开 issue 或 pull request。Lark 卡片不是状态监控面；连接是否仍有效以 GitHub Actions run 状态为准。
 
 ## Fork 与 pull request
 
@@ -123,7 +118,7 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 
 外部 GitHub Actions 固定到完整 commit SHA。运行时工具刻意遵循一次性开发环境的当前上游入口：
 
-- Private T3 Session 的 Codex、Claude Code 和 Grok Build 使用各自官方安装器；
+- Private Development Environment 的 Codex、Claude Code 和 Grok Build 使用各自官方安装器；
 - ChatGPT code-task 的 Codex 使用官方 CLI 安装器；
 - ChatGPT code-task 的 Claude Code 使用官方安装器；
 - ChatGPT code-task 的 Grok Build 使用 xAI 官方 CLI 安装器；
@@ -139,9 +134,8 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 [ ] workflow 仍只由 workflow_dispatch 触发
 [ ] 未加入 pull_request_target、issue_comment 或特权 workflow_run 路径
 [ ] 外部 GitHub Actions 固定到完整 SHA
-[ ] 默认分支和 session Environment 均受保护
-[ ] Environment 启用了 required reviewers 和 prevent self-review
-[ ] TARGET_REPO_AUTH 只访问一个目标仓库
+[ ] 默认分支和固定 `session--none` Environment 均受保护
+[ ] `session--none` 只允许受保护默认分支部署
 [ ] Headscale grants 不允许 runner 横向访问
 [ ] Quick Tunnel 仍依赖 T3 应用层认证
 [ ] pairing URL 只进入 mode-0600 runner 文件和指定的不可转发 Lark 卡片，不进入日志、summary 或 artifact

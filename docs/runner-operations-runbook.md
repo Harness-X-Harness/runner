@@ -1,11 +1,10 @@
-# Private runner operations
+# Private development environment operations
 
-## Start a session
+## Start an environment
 
-Dispatch **Private T3 Session** and choose the protected GitHub Environment
-holding the target-repository secrets. Set `enable_ssh=true` for private shell
-access. Set `non_durable=true` only when the workflow should finish after it
-has started and reported T3 rather than remain available.
+Dispatch **Private Development Environment**. The workflow has no inputs and
+uses the fixed `session--none` GitHub Environment. It creates an empty
+`$HOME/workspace`, joins Headscale, and starts T3 through a Quick Tunnel.
 
 ## Connect
 
@@ -21,9 +20,14 @@ Read the private connection data after connecting:
 cat ~/private-runner-session/t3code/connection.txt
 ```
 
-The file is mode `0600`. The Online Lark card also carries the pairing URL for
-the configured trusted group. Do not copy it to Actions output, artifacts, any
-other chat, or public tracking systems.
+The file is mode `0600`. After all connections are ready, LarkSend sends one
+non-forwardable card containing the pairing URL to the configured trusted
+group. Do not copy it to Actions output, artifacts, any other chat, or public
+tracking systems.
+
+Use the environment like a personal temporary Linux machine. Authenticate
+tools and clone or create repositories after connection. Cancel the GitHub run
+when finished. The platform run limit is the only other termination path.
 
 ## Failure behavior
 
@@ -31,15 +35,15 @@ This repository follows the happy path. Native commands keep their normal
 output and exit status; the workflow has no custom retry, timeout, fallback, or
 diagnostic-artifact layer.
 
-The Lark application-bot card moves from Starting to Online and is updated to
-Offline by the action's native job teardown hook. Teardown is best-effort when a
-runner is cancelled and cannot run after the runner itself disappears.
+LarkSend has no update or cleanup lifecycle. The ready card remains a record of
+the delivered connection; GitHub Actions is authoritative for current run
+status.
 
 ## Local checks
 
 ```bash
 bash tests/workflow-security.test.sh
-node --test tests/lark-session.test.js
+node --test tests/lark-send.test.js
 node --test tests/await-log.test.js
 shellcheck --severity=warning tests/*.sh
 actionlint

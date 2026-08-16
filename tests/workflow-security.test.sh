@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract checks for public-repo safety and the Lark session card.
+# Contract checks for public-repo safety and the one-shot Lark connection card.
 # These are policy assertions over workflow YAML, not behavioral tests.
 # Implementation details (installer URLs, package versions) belong elsewhere.
 
@@ -14,8 +14,8 @@ TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
-LARK_ACTION="$ROOT_DIR/.github/actions/lark-session/action.yml"
-LARK_SCRIPT="$ROOT_DIR/.github/actions/lark-session/index.js"
+LARK_ACTION="$ROOT_DIR/.github/actions/lark-send/action.yml"
+LARK_SCRIPT="$ROOT_DIR/.github/actions/lark-send/index.js"
 CONTROL_ACTION="$ROOT_DIR/.github/actions/task-control/action.yml"
 CONTROL_SCRIPT="$ROOT_DIR/.github/actions/task-control/index.js"
 
@@ -32,21 +32,48 @@ for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$L
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
-# One application-bot card owns the session lifecycle and its post hook marks it offline.
-grep -Fq 'uses: ./.github/actions/lark-session' "$WORKFLOW" || \
-  fail 'missing starting Lark session card'
-grep -Fq 'uses: ./.github/actions/lark-session' "$T3_ACTION" || \
-  fail 'missing online Lark session card update'
-grep -Fq 'post: cleanup.js' "$LARK_ACTION" || \
-  fail 'Lark session card must define a post cleanup hook'
+# GitHub Actions is the complete environment lifecycle. The workflow has one
+# fixed profile, no dispatch parameters, and sends one ready connection card.
+grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
+  fail 'private environment must use manual workflow dispatch'
+if rg -q '^    inputs:|inputs[.]' "$WORKFLOW"; then
+  fail 'private environment workflow must have zero inputs'
+fi
+grep -Fq 'environment: session--none' "$WORKFLOW" || \
+  fail 'private environment must use the fixed session--none profile'
+grep -Fq 'uses: ./.github/actions/private-network' "$WORKFLOW" || \
+  fail 'private environment must always join the private network'
+grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
+  fail 'private environment must always start T3'
+[[ "$(grep -Fc 'uses: ./.github/actions/lark-send' "$WORKFLOW")" == 1 ]] || \
+  fail 'private environment must send exactly one Lark connection card'
+grep -Fq 'run: sleep infinity' "$WORKFLOW" || \
+  fail 'private environment must remain until cancellation or platform limit'
+if rg -q 'TARGET_REPO|TARGET_REPO_AUTH|enable_ssh|non_durable|target-workspace' \
+  "$WORKFLOW" "$T3_ACTION"; then
+  fail 'private environment still contains repository or optional-lifecycle inputs'
+fi
+grep -Fq 'install -d -m 0700 "$HOME/workspace"' "$T3_ACTION" || \
+  fail 'private environment must create the empty user workspace'
+grep -Fq '"$HOME/workspace"' "$T3_ACTION" || \
+  fail 'T3 must open the empty user workspace'
+
+grep -Fq 'using: node24' "$LARK_ACTION" || \
+  fail 'LarkSend must use the current Node 24 Action runtime'
+if grep -Fq 'post:' "$LARK_ACTION"; then
+  fail 'LarkSend must not define a post cleanup hook'
+fi
 grep -Fq 'Authorization: `Bearer ${accessToken}`' "$LARK_SCRIPT" || \
   fail 'Lark card requests must use the application access token'
-grep -Fq 'method: "PATCH"' "$LARK_SCRIPT" || \
-  fail 'Lark session card must update the existing message'
+[[ "$(grep -Fc 'method: "POST"' "$LARK_SCRIPT")" == 2 ]] || \
+  fail 'LarkSend must only request a token and create one message'
+if rg -q 'method: "PATCH"|message_id|GITHUB_STATE|Offline|Starting' "$LARK_ACTION" "$LARK_SCRIPT"; then
+  fail 'LarkSend still contains lifecycle update state'
+fi
 grep -Fq '"pairing-url"' "$LARK_SCRIPT" || \
-  fail 'Lark session card must read the native T3 pairing URL'
+  fail 'LarkSend must read the native T3 pairing URL'
 grep -Fq 'enable_forward: false' "$LARK_SCRIPT" || \
-  fail 'Lark session card containing pairing access must not be forwardable'
+  fail 'Lark connection card containing pairing access must not be forwardable'
 grep -Fq 'secrets.LARK_APP_ID' "$WORKFLOW" || \
   fail 'workflow must pass LARK_APP_ID'
 grep -Fq 'secrets.LARK_APP_SECRET' "$WORKFLOW" || \

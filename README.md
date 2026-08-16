@@ -1,11 +1,11 @@
-# Private T3 session
+# Private development environment
 
 [![Codex auth](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml)
 [![Grok auth](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml)
 
-This public repository starts a one-time GitHub-hosted Ubuntu runner for a
-private repository, optionally joins it to Headscale, and serves that checkout
-through T3 Code and a temporary Cloudflare Quick Tunnel.
+This public repository starts one user-owned, temporary GitHub-hosted Ubuntu
+development machine. It always joins Headscale for Tailscale SSH and serves an
+empty workspace through T3 Code and a temporary Cloudflare Quick Tunnel.
 
 The workflow is deliberately declarative and happy-path:
 
@@ -17,38 +17,43 @@ The workflow is deliberately declarative and happy-path:
   install location.
 - Tailscale uses its official Linux installer.
 
-The main workflow declares the session in three local composite actions:
-development tools, private network, and T3 session. There is
-no development-tool cache, fixed multi-language bootstrap, custom tool home, or
-shell wrapper for these commands. Target-project dependencies remain the target
-project's responsibility after connection and should follow that project's own
-documentation.
+The main workflow declares the environment through local actions for
+development tools, private network, T3, readiness, and one-shot Lark delivery.
+There is no development-tool cache, fixed multi-language bootstrap, custom tool
+home, or shell wrapper for these commands. The workflow does not clone a repository.
+Users authenticate tools, clone zero or more projects, and follow each
+project's own documentation after connection.
 
 Service readiness depends on the connection values emitted by the native
 processes, not a fixed startup delay. Dependency-free local Node actions model
-that wait and the Lark card lifecycle directly.
+that wait and send one ready connection card.
 
-## Configure a session Environment
+## Configure the fixed Environment
 
-Create a protected GitHub Environment for each target repository. Its name is
-visible in the Actions UI, so use a non-sensitive identifier. Configure these
-Environment secrets:
+The workflow uses the existing protected GitHub Environment `session--none`.
+Configure this Environment secret:
 
 | Secret | Purpose |
 | --- | --- |
-| `TARGET_REPO` | Private repository in `owner/repository` form |
-| `TARGET_REPO_AUTH` | Token restricted to that repository |
-| `HEADSCALE_AUTHKEY` | Tagged ephemeral Headscale/Tailscale auth key, when SSH is enabled |
-| `MINI_END_USER_KEY` | Shared scoped bearer key used by the Codex and Grok providers |
+| `HEADSCALE_AUTHKEY` | Tagged ephemeral Headscale/Tailscale auth key |
+
+Configure these repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `HEADSCALE_URL` | Headscale control server URL |
+| `MINI_END_USER_KEY` | Shared scoped bearer key used by Codex and Grok |
 | `MINI_CODEX_BASE_URL` | Confidential Codex provider base URL |
 | `MINI_GROK_BASE_URL` | Confidential Grok provider base URL |
+| `LARK_APP_ID` | Lark custom application ID |
+| `LARK_APP_SECRET` | Lark custom application secret |
+| `LARK_CHAT_NAME` | Exact destination chat name |
 
-Configure `HEADSCALE_URL` as a repository or Environment secret when SSH is
-enabled. The workflow only accepts `workflow_dispatch`, has read-only GitHub
-token permissions, and uses a path-scoped temporary Git credential store.
+The workflow only accepts zero-input `workflow_dispatch` and has read-only
+GitHub token permissions.
 
-The Lark session card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
-`LARK_CHAT_NAME` secrets. See [Lark session card](docs/lark-reporting.md).
+The LarkSend card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
+`LARK_CHAT_NAME` secrets. See [LarkSend connection card](docs/lark-reporting.md).
 
 The two auth badges report separate daily native-CLI checks. Each workflow can
 also be dispatched manually. It installs the current official CLI, loads the
@@ -56,11 +61,9 @@ provider endpoint and shared key through native user configuration, executes a
 minimal model request, and discards the model output. No endpoint or key is
 stored in the repository. Grok does not use first-party login.
 
-Protect both the default branch and every session Environment. In particular,
-restrict Environment deployment branches and require reviewers before granting
-secrets to workflow runs.
+Protect the default branch and restrict `session--none` deployment branches.
 
-When SSH is enabled, configure Headscale using the repository's
+Configure Headscale using the repository's
 [config example](headscale/config.example.yaml) and
 [policy example](headscale/policy.example.hujson). They are fragments to merge
 into the deployed configuration, not drop-in production files. Replace the
@@ -70,9 +73,8 @@ tagged runners over Tailscale SSH.
 
 ## Start and connect
 
-Dispatch **Private T3 Session**, select the session Environment, and set
-`enable_ssh=true` when private shell access is needed. The runner uses
-Tailscale SSH:
+Dispatch **Private Development Environment**. The workflow has no inputs. The
+runner uses Tailscale SSH:
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>
@@ -85,13 +87,16 @@ Private connection data is mode `0600` under:
 ```
 
 The file records the Cloudflare public origin and the pairing URL emitted by
-T3 itself. The workflow never constructs or rewrites pairing URLs. It publishes
-the native pairing URL only in the non-forwardable Online Lark card and removes
-it when the card becomes Offline; it never writes that URL to Actions logs,
-summaries, or artifacts. If external pairing requires an explicit public origin,
-use the upstream T3 configuration intended for that purpose instead of rewriting
-its output.
-The Quick Tunnel URL and all runner state disappear when the session ends.
+T3 itself. The workflow never constructs or rewrites pairing URLs. After all
+connections are ready, LarkSend publishes one non-forwardable card containing
+the native pairing URL; it never writes that URL to Actions logs, summaries, or
+artifacts. The card is not updated when the run ends. If external pairing
+requires an explicit public origin, use the upstream T3 configuration intended
+for that purpose instead of rewriting its output.
+The initial workspace is `$HOME/workspace`. The user manages its repositories,
+credentials, and processes directly. Cancel the GitHub run when finished. The
+Quick Tunnel URL and all runner state disappear when the run ends or reaches
+the GitHub-hosted platform limit.
 
 ## Failure behavior
 
@@ -103,7 +108,7 @@ or diagnostic-artifact layer.
 
 ```bash
 bash tests/workflow-security.test.sh
-node --test tests/lark-session.test.js
+node --test tests/lark-send.test.js
 node --test tests/await-log.test.js
 shellcheck --severity=warning tests/*.sh
 actionlint
@@ -114,7 +119,7 @@ operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 
 For ChatGPT-driven code tasks, see the [ChatGPT code-task app](docs/chatgpt-app.md).
 It adds a stable Cloudflare Worker `/mcp` control plane while keeping the
-existing temporary T3 session workflow available as a separate path.
+temporary development-environment workflow as a separate path.
 Public-repository analysis runs without installing the GitHub App. Private
 repositories and write modes request repository installation only when their
 required access is missing; the original task remains waiting and resumes only

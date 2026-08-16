@@ -2,8 +2,9 @@
 
 The repository now contains a separate Cloudflare Worker control plane under
 `apps/chatgpt-app`. Its stable public endpoint is the Worker origin followed by
-`/mcp`; the temporary GitHub runner remains the execution plane. The existing
-Private T3 Session workflow is unchanged and can still be used independently.
+`/mcp`; the temporary GitHub runner remains the execution plane. The zero-input
+Private Development Environment workflow remains independent of
+the ChatGPT code-task control plane.
 
 ## Request flow
 

@@ -1,34 +1,9 @@
 name: T3 session
-description: Clone the target repository and start T3 Code through a Quick Tunnel.
-
-inputs:
-  repository:
-    description: Target repository in owner/repository form.
-    required: true
-  token:
-    description: Token restricted to the target repository.
-    required: true
-  non-durable:
-    description: Whether to exit after T3 reports online.
-    required: true
-  ssh-online:
-    description: Whether the runner is reachable over SSH.
-    required: true
+description: Start T3 Code for an empty user workspace through a Quick Tunnel.
 
 runs:
   using: composite
   steps:
-    - shell: bash
-      env:
-        TARGET_REPO: ${{ inputs.repository }}
-        TARGET_REPO_AUTH: ${{ inputs.token }}
-      run: |
-        git config --global credential.https://github.com.useHttpPath true
-        git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
-        printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' \
-          "$TARGET_REPO" "$TARGET_REPO_AUTH" | git credential approve
-        git clone "https://github.com/${TARGET_REPO}.git" "$WORKSPACE"
-
     - shell: bash
       run: |
         curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | \
@@ -40,8 +15,8 @@ runs:
 
     - shell: bash
       run: |
-        install -d -m 0700 "$HOME/private-runner-session/t3code"
-        npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$WORKSPACE" \
+        install -d -m 0700 "$HOME/workspace" "$HOME/private-runner-session/t3code"
+        npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$HOME/workspace" \
           > "$RUNNER_TEMP/t3code.log" 2>&1 &
         cloudflared tunnel --url http://127.0.0.1:3773 \
           > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
@@ -59,8 +34,6 @@ runs:
         destination: ${{ runner.temp }}/pairing-url
 
     - shell: bash
-      env:
-        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
       run: |
         backend_url="$(cat "$RUNNER_TEMP/t3-url")"
         pairing_url="$(cat "$RUNNER_TEMP/pairing-url")"
@@ -72,13 +45,3 @@ runs:
         chmod 600 "$HOME/private-runner-session/t3code/t3-url" \
           "$HOME/private-runner-session/t3code/pairing-url" \
           "$HOME/private-runner-session/t3code/connection.txt"
-
-    - uses: ./.github/actions/lark-session
-      env:
-        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
-      with:
-        status: online
-
-    - if: ${{ inputs.non-durable != 'true' }}
-      shell: bash
-      run: sleep infinity
