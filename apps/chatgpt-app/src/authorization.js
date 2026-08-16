@@ -34,9 +34,16 @@ export async function authorizePage(request, env) {
   }
 
   const csrf = crypto.randomUUID();
-  await env.OAUTH_KV.put(`oauth:consent:${csrf}`, JSON.stringify(authRequest), {
-    expirationTtl: CONSENT_TTL,
-  });
+  const browserSession =
+    cookieValue(request.headers.get("cookie"), CONSENT_COOKIE) ?? crypto.randomUUID();
+  await env.OAUTH_KV.put(
+    `oauth:consent:${csrf}`,
+    JSON.stringify({
+      authRequest,
+      browserSessionHash: await sha256Base64Url(browserSession),
+    }),
+    { expirationTtl: CONSENT_TTL },
+  );
 
   const scopeList = scopeDetails.length === 0
     ? "<p>No permissions were requested.</p>"
@@ -57,48 +64,48 @@ export async function authorizePage(request, env) {
        </div>
      </form>`,
     200,
-    [secureCookie(CONSENT_COOKIE, csrf)],
+    [secureCookie(CONSENT_COOKIE, browserSession)],
   );
 }
 
 export async function submitAuthorizationDecision(request, env) {
   const form = await request.formData();
   const csrf = String(form.get("csrf") ?? "");
-  const cookie = cookieValue(request.headers.get("cookie"), CONSENT_COOKIE);
-  if (!csrf || csrf !== cookie) {
+  const browserSession = cookieValue(request.headers.get("cookie"), CONSENT_COOKIE);
+  if (!csrf || !browserSession) {
     return html("Authorization error", "<p>Invalid consent state.</p>", 400);
   }
 
-  const authRequestJson = await env.OAUTH_KV.get(`oauth:consent:${csrf}`);
-  if (!authRequestJson) {
-    return html("Authorization error", "<p>Expired consent state.</p>", 400, [clearCookie(CONSENT_COOKIE)]);
+  const consentJson = await env.OAUTH_KV.get(`oauth:consent:${csrf}`);
+  if (!consentJson) {
+    return html("Authorization error", "<p>Expired consent state.</p>", 400);
+  }
+  const consent = JSON.parse(consentJson);
+  if (await sha256Base64Url(browserSession) !== consent.browserSessionHash) {
+    return html("Authorization error", "<p>Invalid consent state.</p>", 400);
   }
   const decision = String(form.get("decision") ?? "");
   if (decision !== "allow" && decision !== "deny") {
     return html("Authorization error", "<p>Invalid authorization decision.</p>", 400);
   }
   await env.OAUTH_KV.delete(`oauth:consent:${csrf}`);
-  const authRequest = JSON.parse(authRequestJson);
+  const authRequest = consent.authRequest;
 
   if (decision === "deny") {
-    const response = oauthRedirect(authRequest.redirectUri, {
+    return oauthRedirect(authRequest.redirectUri, {
       error: "access_denied",
       error_description: "The user denied the authorization request",
       state: authRequest.state,
       iss: authRequest.issuer,
     });
-    response.headers.append("set-cookie", clearCookie(CONSENT_COOKIE));
-    return response;
   }
 
   const callback = `${new URL(request.url).origin}/github/callback`;
-  const response = await startGitHubAuthorization(
+  return startGitHubAuthorization(
     env,
     callback,
     { kind: "mcp", authRequest },
   );
-  response.headers.append("set-cookie", clearCookie(CONSENT_COOKIE));
-  return response;
 }
 
 export async function completeAuthorizationCallback(
@@ -205,8 +212,14 @@ function secureCookie(name, value, maxAge = CONSENT_TTL) {
   return `${name}=${value}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
-function clearCookie(name) {
-  return secureCookie(name, "", 0);
+async function sha256Base64Url(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function clearGitHubCookie() {

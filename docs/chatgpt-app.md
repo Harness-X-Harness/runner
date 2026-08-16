@@ -12,7 +12,9 @@ Private T3 Session workflow is unchanged and can still be used independently.
    and refresh tokens plus granted tool scopes encrypted in the OAuth provider
    grant properties; every tool checks its required scopes again. The local
    consent page explains each requested scope, supports explicit denial, and
-   binds the following GitHub S256 PKCE flow to the initiating browser.
+   binds the following GitHub S256 PKCE flow to the initiating browser. Its
+   short-lived browser-session cookie can bind multiple independent, one-time
+   consent forms without one authorization attempt invalidating another.
 2. `submit_task` resolves one repository access path before storing or
    dispatching the task. Public `analyze` uses `public_read`. Private reads and
    every write mode require a verified GitHub App installation. There is no

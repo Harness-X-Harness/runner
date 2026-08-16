@@ -54,7 +54,7 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.doesNotMatch(body, /<script>ChatGPT<\/script>/);
   assert.equal(kv.size, 1);
   const [stored] = [...kv.values()];
-  assert.deepEqual(JSON.parse(stored).scope, authRequest.scope);
+  assert.deepEqual(JSON.parse(stored).authRequest.scope, authRequest.scope);
 });
 
 test("initial consent does not grant ChatGPT's aggregate capability request", async () => {
@@ -89,7 +89,7 @@ test("initial consent does not grant ChatGPT's aggregate capability request", as
   assert.doesNotMatch(body, /Read repositories/);
   assert.equal(kv.size, 1);
   const [stored] = [...kv.values()];
-  assert.deepEqual(JSON.parse(stored).scope, ["tasks:read"]);
+  assert.deepEqual(JSON.parse(stored).authRequest.scope, ["tasks:read"]);
 });
 
 test("validated authorization errors return OAuth error state and issuer", async () => {
@@ -137,7 +137,10 @@ test("untrusted authorization redirects are rendered locally", async () => {
 });
 
 test("denying consent returns access_denied without contacting GitHub", async () => {
-  const kv = new Map([["oauth:consent:csrf-123", JSON.stringify(authRequest)]]);
+  const kv = new Map([[
+    "oauth:consent:csrf-123",
+    JSON.stringify(await consentRecord(authRequest)),
+  ]]);
   const response = await submitAuthorizationDecision(
     consentRequest("deny"),
     { OAUTH_KV: mapKv(kv) },
@@ -150,12 +153,58 @@ test("denying consent returns access_denied without contacting GitHub", async ()
   assert.equal(location.searchParams.get("state"), "client-state");
   assert.equal(location.searchParams.get("iss"), "https://runner.example.com");
   assert.equal(kv.size, 0);
-  assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_CSRF=;/);
-  assert.match(response.headers.get("set-cookie"), /Max-Age=0/);
+  assert.equal(response.headers.has("set-cookie"), false);
+});
+
+test("parallel authorization pages keep one browser-bound consent session", async () => {
+  const kv = new Map();
+  const env = {
+    OAUTH_KV: mapKv(kv),
+    OAUTH_PROVIDER: {
+      parseAuthRequest: async () => authRequest,
+      lookupClient: async () => ({ clientName: "ChatGPT" }),
+    },
+  };
+
+  const first = await authorizePage(
+    new Request("https://runner.example.com/authorize"),
+    env,
+  );
+  const firstCsrf = await csrfFromResponse(first.clone());
+  const firstCookie = cookieFromResponse(first, "__Host-RUNNER_CSRF");
+  const second = await authorizePage(
+    new Request("https://runner.example.com/authorize", {
+      headers: { cookie: `__Host-RUNNER_CSRF=${firstCookie}` },
+    }),
+    env,
+  );
+  const secondCsrf = await csrfFromResponse(second.clone());
+  const secondCookie = cookieFromResponse(second, "__Host-RUNNER_CSRF");
+
+  const denied = await submitAuthorizationDecision(
+    consentRequest("deny", firstCsrf, secondCookie),
+    env,
+  );
+
+  assert.equal(denied.status, 302);
+  assert.equal(new URL(denied.headers.get("location")).searchParams.get("error"), "access_denied");
+
+  const secondDenied = await submitAuthorizationDecision(
+    consentRequest("deny", secondCsrf, secondCookie),
+    env,
+  );
+  assert.equal(secondDenied.status, 302);
+  assert.equal(
+    new URL(secondDenied.headers.get("location")).searchParams.get("error"),
+    "access_denied",
+  );
 });
 
 test("GitHub callback requires the initiating browser and exchanges PKCE once", async () => {
-  const kv = new Map([["oauth:consent:csrf-123", JSON.stringify(authRequest)]]);
+  const kv = new Map([[
+    "oauth:consent:csrf-123",
+    JSON.stringify(await consentRecord(authRequest)),
+  ]]);
   const env = {
     GITHUB_APP_CLIENT_ID: "Iv1.example",
     GITHUB_APP_CLIENT_SECRET: "client-secret",
@@ -173,7 +222,6 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   assert.equal(github.searchParams.get("code_challenge_method"), "S256");
   assert.match(github.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
   assert.match(start.headers.get("set-cookie"), /__Host-RUNNER_GITHUB_STATE=/);
-  assert.match(start.headers.get("set-cookie"), /__Host-RUNNER_CSRF=;/);
 
   const record = JSON.parse(kv.get(`github:oauth:${state}`));
   assert.equal(record.payload.kind, "mcp");
@@ -237,15 +285,21 @@ test("submit modes map to the minimum complete OAuth scope set", () => {
   assert.throws(() => describeScopes(["unknown:scope"]), /Unknown OAuth scope/);
 });
 
-function consentRequest(decision) {
+function consentRequest(decision, csrf = "csrf-123", cookie = csrf) {
   return new Request("https://runner.example.com/authorize/consent", {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
-      cookie: "__Host-RUNNER_CSRF=csrf-123",
+      cookie: `__Host-RUNNER_CSRF=${cookie}`,
     },
-    body: new URLSearchParams({ csrf: "csrf-123", decision }),
+    body: new URLSearchParams({ csrf, decision }),
   });
+}
+
+async function csrfFromResponse(response) {
+  const match = (await response.text()).match(/name="csrf" value="([^"]+)"/);
+  if (!match) throw new Error("Missing CSRF form value");
+  return match[1];
 }
 
 function cookieFromResponse(response, name) {
@@ -269,4 +323,20 @@ function authorizationError(code, options) {
   const error = new Error(options.description);
   error.name = "AuthorizationError";
   return Object.assign(error, { code, ...options });
+}
+
+async function consentRecord(request, browserSession = "csrf-123") {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(browserSession),
+  );
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return {
+    authRequest: request,
+    browserSessionHash: btoa(binary)
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replaceAll("=", ""),
+  };
 }

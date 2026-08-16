@@ -9,7 +9,10 @@ clickjacking 防护、browser-bound GitHub state、S256 PKCE、显式拒绝、re
 GitHub callback 和 ChatGPT step-up 仍待验收。真实 ChatGPT 手工连接进一步证明：客户端会把所有工具
 声明的 scope 聚合成一个初始授权请求，即使初始 `WWW-Authenticate` 和 protected-resource metadata
 都只声明 `tasks:read`。后续修复在 authorization server 边界把这个精确的全能力集合缩减为
-`tasks:read`；按操作产生的 scope 子集保持不变。下文“当前实现”和差距章节保留对评审基线的描述。
+`tasks:read`；按操作产生的 scope 子集保持不变。真实 Cancel 验收随后暴露了另一个边界：每个 GET
+都以页面 CSRF 覆盖同一 cookie，使重复或并发授权页互相失效。后续修复改为一个短期浏览器会话
+cookie，加每页独立的一次性 KV token；KV 只保存浏览器会话哈希。下文“当前实现”和差距章节保留
+对评审基线的描述。
 
 ## 精确问题
 
@@ -48,8 +51,9 @@ Radical-KISS 方案不是引入 React、Hono 或另一套 auth framework。建�
 
 1. `parseAuthRequest()` 校验 MCP client、redirect URI、response type、resource 和 PKCE。
 2. `lookupClient()` 取得 CIMD、DCR 或预注册 client 的名称。
-3. 生成 10 分钟 CSRF 值，把完整 `authRequest` 放进 `OAUTH_KV`，并通过
-   `__Host-RUNNER_CSRF` 安全 cookie 绑定 consent POST。
+3. 生成 10 分钟的单次页面 CSRF，把 `authRequest` 与短期浏览器会话哈希放进 `OAUTH_KV`，并通过
+   `__Host-RUNNER_CSRF` 安全 cookie 绑定 consent POST。同一浏览器的并发页面共享会话 cookie，
+   但使用不同的页面 CSRF 和 KV record。
 4. 页面显示 client name 和请求的内部 scope；用户只能选择 `Continue with GitHub`。
 5. POST 成功后，生成第二个随机 `state`，把 `authRequest` 保存 10 分钟，然后跳转 GitHub。
 6. GitHub callback 交换 user access token，读取稳定的 numeric user ID，再调用
