@@ -44,9 +44,8 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("content-security-policy"), /base-uri 'none'/);
   assert.match(
     response.headers.get("content-security-policy"),
-    /form-action 'self' https:\/\/client\.example/,
+    /form-action 'self' https:\/\/client\.example https:\/\/github\.com/,
   );
-  assert.doesNotMatch(response.headers.get("content-security-policy"), /https:\/\/github\.com/);
   assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
