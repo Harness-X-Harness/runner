@@ -42,6 +42,10 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.match(response.headers.get("content-security-policy"), /base-uri 'none'/);
+  assert.match(
+    response.headers.get("content-security-policy"),
+    /form-action 'self' https:\/\/client\.example/,
+  );
   assert.doesNotMatch(response.headers.get("content-security-policy"), /https:\/\/github\.com/);
   assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_CSRF=/);
 
