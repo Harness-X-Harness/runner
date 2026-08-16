@@ -6,7 +6,10 @@
 clickjacking 防护、browser-bound GitHub state、S256 PKCE、显式拒绝、redirect-aware OAuth
 错误、人类可读 scope 和 mode-specific incremental authorization。PR #51 已合并并部署；本地
 测试、default-branch CI、Worker health 和 OAuth metadata 检查通过。真实浏览器 consent、拒绝、
-GitHub callback 和 ChatGPT step-up 仍待验收。下文“当前实现”和差距章节保留对评审基线的描述。
+GitHub callback 和 ChatGPT step-up 仍待验收。真实 ChatGPT 手工连接进一步证明：客户端会把所有工具
+声明的 scope 聚合成一个初始授权请求，即使初始 `WWW-Authenticate` 和 protected-resource metadata
+都只声明 `tasks:read`。后续修复在 authorization server 边界把这个精确的全能力集合缩减为
+`tasks:read`；按操作产生的 scope 子集保持不变。下文“当前实现”和差距章节保留对评审基线的描述。
 
 ## 精确问题
 

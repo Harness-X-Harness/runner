@@ -53,6 +53,43 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(body, /&lt;script&gt;ChatGPT&lt;\/script&gt;/);
   assert.doesNotMatch(body, /<script>ChatGPT<\/script>/);
   assert.equal(kv.size, 1);
+  const [stored] = [...kv.values()];
+  assert.deepEqual(JSON.parse(stored).scope, authRequest.scope);
+});
+
+test("initial consent does not grant ChatGPT's aggregate capability request", async () => {
+  const kv = new Map();
+  const response = await authorizePage(
+    new Request("https://runner.example.com/authorize"),
+    {
+      OAUTH_KV: mapKv(kv),
+      OAUTH_PROVIDER: {
+        parseAuthRequest: async () => ({
+          ...authRequest,
+          scope: [
+            "tasks:cancel",
+            "tasks:run",
+            "repos:write",
+            "pull_requests:write",
+            "repos:read",
+            "tasks:read",
+          ],
+        }),
+        lookupClient: async () => ({ clientName: "ChatGPT" }),
+      },
+    },
+  );
+
+  const body = await response.text();
+  assert.match(body, /Read task status and results/);
+  assert.doesNotMatch(body, /Cancel tasks/);
+  assert.doesNotMatch(body, /Run code tasks/);
+  assert.doesNotMatch(body, /Change repositories/);
+  assert.doesNotMatch(body, /Create pull requests/);
+  assert.doesNotMatch(body, /Read repositories/);
+  assert.equal(kv.size, 1);
+  const [stored] = [...kv.values()];
+  assert.deepEqual(JSON.parse(stored).scope, ["tasks:read"]);
 });
 
 test("validated authorization errors return OAuth error state and issuer", async () => {
