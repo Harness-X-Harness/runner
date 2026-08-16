@@ -53,18 +53,15 @@ The public tools are:
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
 
-`submit_task` requires only `tasks:run` and `repos:read` for `mode=analyze`.
-`edit` and `pull_request` return the standard OAuth `insufficient_scope`
-challenge when their additional write scopes are absent; the MCP client can
-then perform incremental authorization and retry the call. Every step-up
-preserves the scopes already granted while adding the complete scope set
-required by the new operation.
+The initial MCP challenge and protected-resource metadata request the complete
+App capability set. This lets clients connect the full App once instead of
+creating a read-only connection that reports missing permissions.
+`submit_task` still requires only `tasks:run` and `repos:read` for
+`mode=analyze`. `edit` and `pull_request` return the standard OAuth
+`insufficient_scope` challenge if a client explicitly requests a narrower
+grant. The authorization server displays and grants exactly the validated
+scope set that the client requests.
 
-Some clients aggregate every tool's declared scope when a user manually links
-the whole app, even though the initial MCP challenge and protected-resource
-metadata request only `tasks:read`. The authorization server displays and
-grants the complete scope set that the client requests; it does not silently
-reduce the grant and leave the client connected with partial permissions.
 Repository access remains independent: GitHub asks for installation or update
 only when a task targets a repository the App cannot access.
 

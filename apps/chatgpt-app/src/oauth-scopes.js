@@ -32,7 +32,6 @@ const SCOPE_DETAILS = Object.freeze({
 });
 
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));
-export const BASELINE_OAUTH_SCOPES = Object.freeze(["tasks:read"]);
 
 export function consentScopes(requestedScopes) {
   describeScopes(requestedScopes);
