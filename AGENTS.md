@@ -14,6 +14,13 @@ Engineering skills use the default five-role triage vocabulary. See `docs/agents
 
 This is a single-context repository. See `docs/agents/domain.md`.
 
+### Live stories
+
+Human-in-the-loop production acceptance for the Private Development
+Environment is defined in
+`docs/agents/live-stories/private-development-environment.md`. Use it after a
+merged change affects that user story; do not convert it into CI automation.
+
 ## 事实经验自动固化
 
 每个 clone 在 Agent 开始工作时必须初始化本地工作记忆：先确认 `.agent-memory/` 已写入该
