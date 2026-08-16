@@ -13,6 +13,11 @@ import {
 } from "./github-user-auth.js";
 import { handleMcpRequest } from "./mcp.js";
 import {
+  authorizationServerIssuer,
+  canonicalMcpResource,
+  requireCanonicalResourceParameter,
+} from "./oauth-resource.js";
+import {
   completeInstallationAuthorization,
   isInstallationCallback,
   startInstallationAuthorization,
@@ -28,12 +33,15 @@ export class McpApi extends WorkerEntrypoint {
 }
 
 export default {
-  fetch(request, env, ctx) {
-    return createOAuthProvider(env).fetch(request, env, ctx);
+  async fetch(request, env, ctx) {
+    const canonicalResource = canonicalMcpResource(env.TASK_CONTROL_PLANE_URL);
+    const resourceError = await requireCanonicalResourceParameter(request);
+    if (resourceError) return resourceError;
+    return createOAuthProvider(env, canonicalResource).fetch(request, env, ctx);
   },
 };
 
-function createOAuthProvider(env) {
+function createOAuthProvider(env, canonicalResource) {
   return new OAuthProvider({
     apiRoute: "/mcp",
     apiHandler: McpApi,
@@ -43,6 +51,8 @@ function createOAuthProvider(env) {
     clientRegistrationEndpoint: "/oauth/register",
     scopesSupported: [...OAUTH_SCOPES],
     resourceMetadata: {
+      resource: canonicalResource,
+      authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],
       scopes_supported: [...OAUTH_SCOPES],
       bearer_methods_supported: ["header"],
       resource_name: "Harness X Harness Task Runner",

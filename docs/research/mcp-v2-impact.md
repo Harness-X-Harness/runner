@@ -120,18 +120,23 @@ Durable Object 持久化。协议原语能改进 UI，不会删除业务状态�
    测试新旧 client、OAuth、Origin、取消和 transport loss。
    ([迁移指南](https://developers.cloudflare.com/agents/model-context-protocol/guides/migrate-to-mcp-sdk-v2/))
 
-### 阶段二：OAuth audience 显式化
+### 阶段二：OAuth audience 显式化（已部署）
 
-当前 `resourceMetadata` 没有显式 `resource` 和 `authorization_servers`。Workers OAuth Provider
-在省略时使用 request origin，并签发 origin-bound token；显式配置后则要求 authorization 和 token
-请求使用完全相同的 resource。([Workers OAuth Provider](https://github.com/cloudflare/workers-oauth-provider))
+Worker 已把 `resourceMetadata.resource` 固定为
+`TASK_CONTROL_PLANE_URL` 对应的完整 `https://…/mcp` URI，并显式发布同一 Worker origin 的
+`authorization_servers`。Workers OAuth Provider 会把授权和 token 绑定到这个 canonical resource，
+对显式不匹配的 `resource` 请求、未绑定 token 和错误 audience 的 API token 进行拒绝。
+([Workers OAuth Provider](https://github.com/cloudflare/workers-oauth-provider))
+Worker 还在 `/authorize` 和 `/oauth/token` 边界要求请求明确携带 `resource`；缺失值会在 provider
+处理前返回 `invalid_target`，而重复或不同值交给 provider 返回带有安全 redirect context 的标准
+OAuth 错误。Token revocation 保持 RFC 7009 的独立请求形态，不要求 resource。
 
-因此不应把增加 `resource: "https://…/mcp"` 当作无风险格式修改。它可能让已有 origin-bound grant
-重新授权。应先用全新 OAuth grant 验证，再选择一次可接受重新登录的发布窗口。不要用
-`resourceMatchOriginOnly` 作为永久 fallback；官方只把它定义为旧 grant 的迁移选项。
+这是一次有意的授权边界变化：部署前创建的 origin-only grant 不能作为新的 `/mcp` audience 证据。
+应在发布后完成一次 ChatGPT clean login，再验证工具调用、refresh、第二设备授权和旧 grant 的拒绝
+行为。不要使用 `resourceMatchOriginOnly` 作为永久 fallback；当前实现没有保留该兼容路径。
 
-这也说明 provider 与 resource 配置必须在同一升级中验证，不能只更新 lockfile。升级后的验收至少
-应覆盖 ChatGPT clean login、refresh、第二设备授权、旧 grant 和 canonical `/mcp` audience。
+回滚边界是恢复上一版 Worker 代码和同一 KV binding；不要删除 `OAUTH_KV`。如果回滚后继续使用
+新 `/mcp` grant，应预期重新完成一次授权，因为旧版本的 origin-only audience 与新版本不等价。
 
 DCR endpoint 暂时保留。CIMD 已启用，DCR 只承担旧 client 兼容；在确认实际 ChatGPT client 使用
 CIMD 后再删除，符合至少 12 个月的弃用窗口。
