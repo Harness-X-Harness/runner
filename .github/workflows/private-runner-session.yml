@@ -1,19 +1,8 @@
-name: Private T3 Session
+name: Private Development Environment
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Target GitHub Environment
-        required: true
-        type: environment
-      enable_ssh:
-        default: false
-        type: boolean
-      non_durable:
-        default: false
-        type: boolean
-run-name: Private T3 session · ${{ inputs.environment }}
+run-name: Private environment · #${{ github.run_number }}
 
 permissions:
   contents: read
@@ -21,10 +10,8 @@ permissions:
 jobs:
   session:
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.environment }}
+    environment: session--none
     env:
-      WORKSPACE: ${{ github.workspace }}/target-workspace
-      SESSION_TARGET_ID: ${{ inputs.environment }}
       LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
       LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
       LARK_CHAT_NAME: ${{ secrets.LARK_CHAT_NAME }}
@@ -37,11 +24,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
-
-      - uses: ./.github/actions/lark-session
-        with:
-          status: starting
+          node-version: 24
 
       - uses: ./.github/actions/development-tools
 
@@ -58,15 +41,15 @@ jobs:
             "$MINI_GROK_BASE_URL" > "$HOME/.grok/config.toml"
           chmod 600 "$HOME/.codex/config.toml" "$HOME/.grok/config.toml"
 
-      - if: ${{ inputs.enable_ssh }}
-        uses: ./.github/actions/private-network
+      - uses: ./.github/actions/private-network
         with:
           headscale-url: ${{ secrets.HEADSCALE_URL }}
           auth-key: ${{ secrets.HEADSCALE_AUTHKEY }}
 
       - uses: ./.github/actions/t3-session
-        with:
-          repository: ${{ secrets.TARGET_REPO }}
-          token: ${{ secrets.TARGET_REPO_AUTH }}
-          non-durable: ${{ inputs.non_durable }}
-          ssh-online: ${{ inputs.enable_ssh }}
+
+      - uses: ./.github/actions/lark-send
+
+      - name: Keep environment running
+        shell: bash
+        run: sleep infinity
