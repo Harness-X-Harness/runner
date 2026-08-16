@@ -15,10 +15,10 @@ import {
   writeTask,
 } from "./task-store.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
-import { OAUTH_SCOPES, requiredSubmitScopes } from "./oauth-scopes.js";
+import { requiredSubmitScopes } from "./oauth-scopes.js";
 
 const SECURITY_SCHEMES = Object.freeze({
-  submit_task: Object.freeze([{ type: "oauth2", scopes: requiredSubmitScopes("analyze") }]),
+  submit_task: Object.freeze([{ type: "oauth2", scopes: requiredSubmitScopes("pull_request") }]),
   get_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
   cancel_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:cancel"] }]),
   get_task_result: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
@@ -202,10 +202,6 @@ export function createServer(env, props) {
 
 export async function handleMcpRequest(request, env, props, ctx) {
   const toolsListRequest = request.method === "POST" && await isToolsListRequest(request);
-  const stepUp = request.method === "POST"
-    ? await requiredStepUp(request, currentProps(props))
-    : undefined;
-  if (stepUp) return insufficientScopeResponse(request, stepUp.id, stepUp.scopes);
   const handler = createMcpHandler(() => createServer(env, currentProps(props)), {
     route: "/mcp",
     authContext: { props: props ?? {} },
@@ -214,54 +210,6 @@ export async function handleMcpRequest(request, env, props, ctx) {
   return toolsListRequest
     ? addAppsSecuritySchemes(response)
     : response;
-}
-
-async function requiredStepUp(request, props) {
-  let body;
-  try {
-    body = await request.clone().json();
-  } catch {
-    return undefined;
-  }
-  if (body?.method !== "tools/call" || body?.params?.name !== "submit_task") {
-    return undefined;
-  }
-  const mode = body.params.arguments?.mode ?? "analyze";
-  if (!MODES.includes(mode)) return undefined;
-  const required = requiredSubmitScopes(mode);
-  const granted = new Set(props?.oauthScopes ?? []);
-  if (required.every((scope) => granted.has(scope))) return undefined;
-  return {
-    id: body.id,
-    scopes: OAUTH_SCOPES.filter(
-      (scope) => granted.has(scope) || required.includes(scope),
-    ),
-  };
-}
-
-function insufficientScopeResponse(request, id, scopes) {
-  const resourceMetadata = new URL(
-    "/.well-known/oauth-protected-resource/mcp",
-    request.url,
-  );
-  const authenticate = [
-    'Bearer error="insufficient_scope"',
-    'error_description="Additional authorization is required"',
-    `scope="${scopes.join(" ")}"`,
-    `resource_metadata="${resourceMetadata}"`,
-  ].join(", ");
-  return Response.json({
-    jsonrpc: "2.0",
-    id,
-    result: {
-      content: [{
-        type: "text",
-        text: "Additional authorization is required.",
-      }],
-      _meta: { "mcp/www_authenticate": [authenticate] },
-      isError: true,
-    },
-  }, { headers: { "cache-control": "no-store" } });
 }
 
 function currentProps(fallback) {

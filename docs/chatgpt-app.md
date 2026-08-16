@@ -54,15 +54,16 @@ The public tools are:
 | `get_task_result` | Read summary, commit, or PR | None |
 
 The initial MCP challenge and protected-resource metadata request the complete
-App capability set. This lets clients connect the full App once instead of
-creating a read-only connection that reports missing permissions.
-`submit_task` still requires only `tasks:run` and `repos:read` for
-`mode=analyze`. `edit` and `pull_request` return the standard OAuth
-`insufficient_scope` challenge if a client explicitly requests a narrower
-grant. For ChatGPT tool calls, the challenge is carried by the MCP error
-result's `_meta["mcp/www_authenticate"]`; a transport-level HTTP 403 does not
-open ChatGPT's tool authorization UI. The authorization server displays and
-grants exactly the validated scope set that the client requests.
+App capability set. The single `submit_task` tool also declares every scope it
+can use, including repository writes and pull-request creation. MCP tool
+security declarations are static and cannot vary with the tool's `mode`
+argument. This one-time full connection keeps the public interface small and
+avoids a reconnect loop caused by parameter-level scope escalation.
+
+The server still enforces the minimum scope set for the selected mode:
+`analyze` requires task run and repository read; `edit` adds repository write;
+`pull_request` also adds pull-request write. The authorization server displays
+and grants exactly the validated scope set that the client requests.
 
 Repository access remains independent: GitHub asks for installation or update
 only when a task targets a repository the App cannot access.

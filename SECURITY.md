@@ -32,12 +32,11 @@ Worker 自己的 MCP consent 页与 GitHub 托管的 App 授权页是两个不�
 到 GitHub 的 user authorization flow 使用独立的 S256 PKCE；一次性 state 同时
 绑定短期 KV record 和发起流程的安全浏览器 cookie。callback 必须同时验证两者，
 再消费 state。`analyze` 只要求 task run 和 repository read scope；写入 mode 在
-权限不足时使用标准 `insufficient_scope` challenge。ChatGPT tool call 必须通过
-MCP error result 的 `_meta["mcp/www_authenticate"]` 携带该 challenge，不能只返回
-transport-level HTTP 403。初始 MCP challenge 和 protected-resource metadata
-发布完整 App scope 集合，使 ChatGPT 建立基础连接；授权服务器仍只授予客户端实际
-请求且经过校验的 scope。显式请求窄权限的客户端可以获得窄 grant，并在调用额外
-能力时增量授权。
+`submit_task` 是一个含 `analyze`、`edit` 和 `pull_request` 参数的单一 MCP tool。
+由于 tool `securitySchemes` 是静态契约，它必须声明这三个 mode 可能使用的完整 scope
+集合；不得依赖参数级动态授权升级。初始 MCP challenge 和 protected-resource
+metadata 同样发布完整 App scope 集合。服务器仍按实际 mode 校验最小 scope，授权
+服务器也只授予客户端实际请求且经过校验的 scope。
 
 Repository authorization 在 dispatch 前只选择一个路径。公开仓库的
 `analyze` 使用 `public_read`；私有读取和所有写入使用经过用户授权与 App JWT
