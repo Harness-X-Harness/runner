@@ -48,3 +48,10 @@ node --test tests/await-log.test.js
 shellcheck --severity=warning tests/*.sh
 actionlint
 ```
+
+## Live acceptance
+
+After a merged change affects this environment path, follow
+[Live Story: Private Development Environment](agents/live-stories/private-development-environment.md).
+It separates autonomous probes from the user-owned Lark and T3 pairing gates
+and requires cleanup of the temporary runner.
