@@ -169,11 +169,18 @@ test("installation return starts original-user verification before dispatch", as
   assert.equal(location.origin, "https://github.com");
   assert.equal(location.pathname, "/login/oauth/authorize");
   assert.match(oauthState, /^install_oauth_/);
-  assert.deepEqual(JSON.parse(kv.get(`github:install-oauth:${oauthState}`)), {
+  assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+  assert.match(location.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
+  const oauthRecord = JSON.parse(kv.get(`github:oauth:${oauthState}`));
+  assert.deepEqual(oauthRecord.payload, {
+    kind: "installation",
     taskId: "task_123",
     ownerId: "42",
     installState: state,
   });
+  assert.match(oauthRecord.codeVerifier, /^[A-Za-z0-9_-]{43}$/);
+  assert.match(oauthRecord.browserBindingHash, /^[A-Za-z0-9_-]{43}$/);
+  assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_GITHUB_STATE=/);
 });
 
 test("dispatch claim is single-use and a late commit cannot regress running", () => {
@@ -214,11 +221,6 @@ test("verified installation callback dispatches once and duplicate callback cann
     requiredPermissions: ["contents:read"],
   });
   const kv = new Map([
-    ["github:install-oauth:install_oauth_callback", JSON.stringify({
-      taskId: "task_123",
-      ownerId: "42",
-      installState: "repo_install_original",
-    })],
     ["github:install:repo_install_original", JSON.stringify({
       taskId: "task_123",
       ownerId: "42",
@@ -261,15 +263,23 @@ test("verified installation callback dispatches once and duplicate callback cann
     }
     return new Response("unexpected request", { status: 500 });
   };
-  const callback = new Request(
-    "https://runner.example.com/github/callback?state=install_oauth_callback&code=github-code",
-  );
+  const authorization = {
+    code: "github-code",
+    callback: "https://runner.example.com/github/callback",
+    codeVerifier: "verifier-123",
+    payload: {
+      kind: "installation",
+      taskId: "task_123",
+      ownerId: "42",
+      installState: "repo_install_original",
+    },
+  };
 
-  const first = await completeInstallationAuthorization(callback, env, fetchImpl);
-  const duplicate = await completeInstallationAuthorization(callback, env, fetchImpl);
+  const first = await completeInstallationAuthorization(env, authorization, fetchImpl);
+  const duplicate = await completeInstallationAuthorization(env, authorization, fetchImpl);
 
   assert.equal(first.status, 200);
-  assert.equal(duplicate.status, 400);
+  assert.equal(duplicate.status, 200);
   assert.equal(dispatches, 1);
   assert.equal(taskState.current().status, "queued");
   assert.equal(taskState.current().repositoryAccess, "installation");

@@ -26,6 +26,16 @@ OIDC token 不得进入 workflow inputs、MCP structured content、日志、summ
 或 artifact。`TASK_CONTROL_PLANE_URL` 必须同时配置在 Worker 和 runner
 repository variables 中，并作为 OIDC audience 精确匹配。
 
+Worker 自己的 MCP consent 页与 GitHub 托管的 App 授权页是两个不同的授权
+边界。consent 页必须先校验 client 和精确 redirect URI，解释固定 scope，允许
+显式拒绝，并使用 `frame-ancestors 'none'`、`no-store` 和 `no-referrer`。Worker
+到 GitHub 的 user authorization flow 使用独立的 S256 PKCE；一次性 state 同时
+绑定短期 KV record 和发起流程的安全浏览器 cookie。callback 必须同时验证两者，
+再消费 state。`analyze` 只要求 task run 和 repository read scope；写入 mode 在
+权限不足时使用标准 `insufficient_scope` challenge 发起增量授权。初始连接只
+授予 `tasks:read`；每次增量授权保留已有 scope，并只增加当前 operation 所需的
+完整 scope 集合。
+
 Repository authorization 在 dispatch 前只选择一个路径。公开仓库的
 `analyze` 使用 `public_read`；私有读取和所有写入使用经过用户授权与 App JWT
 复核的 installation。GitHub API 未知响应、installation 缺失或权限不足不得
@@ -140,6 +150,9 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 [ ] GitHub App 已安装到 `GITHUB_RUNNER_REPOSITORY`，且 Worker 可自动解析 installation
 [ ] Worker 与 runner repository 的 `TASK_CONTROL_PLANE_URL` 完全一致
 [ ] MCP 返回值未包含 prompt、OAuth token、App private key 或 OIDC token
+[ ] consent 页仍有拒绝路径、clickjacking 防护和人类可读 scope 说明
+[ ] GitHub user authorization 仍使用 S256 PKCE 和 browser-bound one-time state
+[ ] analyze 的 OAuth scope 不包含 repository 或 pull-request write
 [ ] public_read 只允许公开仓库 analyze，不允许任何写入 mode
 [ ] installation callback 重新验证原用户和仓库权限，不信任 installation_id
 [ ] repository access 失败不会触发匿名、PAT、retry 或其他 fallback

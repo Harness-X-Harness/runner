@@ -15,9 +15,10 @@ import {
   writeTask,
 } from "./task-store.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
+import { OAUTH_SCOPES, requiredSubmitScopes } from "./oauth-scopes.js";
 
 const SECURITY_SCHEMES = Object.freeze({
-  submit_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"] }]),
+  submit_task: Object.freeze([{ type: "oauth2", scopes: requiredSubmitScopes("analyze") }]),
   get_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
   cancel_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:cancel"] }]),
   get_task_result: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
@@ -75,8 +76,8 @@ export function createServer(env, props) {
     },
     async (input) => {
       const requestProps = currentProps(props);
-      requireScopes(requestProps, SECURITY_SCHEMES.submit_task[0].scopes);
       const taskInput = validateSubmitInput(input);
+      requireScopes(requestProps, requiredSubmitScopes(taskInput.mode));
       const baseTask = {
         id: `task_${crypto.randomUUID()}`,
         ...taskInput,
@@ -201,6 +202,10 @@ export function createServer(env, props) {
 
 export async function handleMcpRequest(request, env, props, ctx) {
   const toolsListRequest = request.method === "POST" && await isToolsListRequest(request);
+  const stepUpScopes = request.method === "POST"
+    ? await requiredStepUpScopes(request, currentProps(props))
+    : undefined;
+  if (stepUpScopes) return insufficientScopeResponse(request, stepUpScopes);
   const handler = createMcpHandler(() => createServer(env, currentProps(props)), {
     route: "/mcp",
     authContext: { props: props ?? {} },
@@ -209,6 +214,52 @@ export async function handleMcpRequest(request, env, props, ctx) {
   return toolsListRequest
     ? addAppsSecuritySchemes(response)
     : response;
+}
+
+async function requiredStepUpScopes(request, props) {
+  let body;
+  try {
+    body = await request.clone().json();
+  } catch {
+    return undefined;
+  }
+  if (body?.method !== "tools/call" || body?.params?.name !== "submit_task") {
+    return undefined;
+  }
+  const mode = body.params.arguments?.mode ?? "analyze";
+  if (!MODES.includes(mode)) return undefined;
+  const required = requiredSubmitScopes(mode);
+  const granted = new Set(props?.oauthScopes ?? []);
+  if (required.every((scope) => granted.has(scope))) return undefined;
+  return OAUTH_SCOPES.filter(
+    (scope) => granted.has(scope) || required.includes(scope),
+  );
+}
+
+function insufficientScopeResponse(request, scopes) {
+  const resourceMetadata = new URL(
+    "/.well-known/oauth-protected-resource/mcp",
+    request.url,
+  );
+  const authenticate = [
+    'Bearer error="insufficient_scope"',
+    'error_description="Additional authorization is required"',
+    `scope="${scopes.join(" ")}"`,
+    `resource_metadata="${resourceMetadata}"`,
+  ].join(", ");
+  return Response.json(
+    {
+      error: "insufficient_scope",
+      error_description: "Additional authorization is required",
+    },
+    {
+      status: 403,
+      headers: {
+        "cache-control": "no-store",
+        "www-authenticate": authenticate,
+      },
+    },
+  );
 }
 
 function currentProps(fallback) {

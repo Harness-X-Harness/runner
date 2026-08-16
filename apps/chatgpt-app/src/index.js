@@ -6,20 +6,24 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 import {
-  completeGitHubUserAuthorization,
   githubGrantTokenExchange,
-  githubUserAuthorizationUrl,
-  OAUTH_SCOPES,
 } from "./github-user-auth.js";
+import {
+  authorizePage,
+  completeAuthorizationCallback,
+  submitAuthorizationDecision,
+} from "./authorization.js";
 import { handleMcpRequest } from "./mcp.js";
+import {
+  BASELINE_OAUTH_SCOPES,
+  OAUTH_SCOPES,
+} from "./oauth-scopes.js";
 import {
   authorizationServerIssuer,
   canonicalMcpResource,
   requireCanonicalResourceParameter,
 } from "./oauth-resource.js";
 import {
-  completeInstallationAuthorization,
-  isInstallationCallback,
   startInstallationAuthorization,
 } from "./repository-authorization.js";
 import { TaskObject } from "./task-object.js";
@@ -53,7 +57,7 @@ function createOAuthProvider(env, canonicalResource) {
     resourceMetadata: {
       resource: canonicalResource,
       authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],
-      scopes_supported: [...OAUTH_SCOPES],
+      scopes_supported: [...BASELINE_OAUTH_SCOPES],
       bearer_methods_supported: ["header"],
       resource_name: "Harness X Harness Task Runner",
     },
@@ -88,14 +92,11 @@ async function defaultFetch(request, env) {
   }
 
   if (url.pathname === "/authorize/consent" && request.method === "POST") {
-    return startGithubAuthorization(request, env);
+    return submitAuthorizationDecision(request, env);
   }
 
   if (url.pathname === "/github/callback" && request.method === "GET") {
-    if (isInstallationCallback(request)) {
-      return completeInstallationAuthorization(request, env);
-    }
-    return completeGitHubUserAuthorization(request, env);
+    return completeAuthorizationCallback(request, env);
   }
 
   if (url.pathname === "/github/install" && request.method === "GET") {
@@ -175,82 +176,6 @@ async function verifyRunnerIdentity(request, env) {
     throw new Error("runner identity is not trusted");
   }
   return payload;
-}
-
-async function authorizePage(request, env) {
-  let authRequest;
-  try {
-    authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
-  } catch {
-    return new Response("Invalid OAuth authorization request", { status: 400 });
-  }
-  const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
-  if (!client) return new Response("Unknown OAuth client", { status: 400 });
-
-  const csrf = crypto.randomUUID();
-  await env.OAUTH_KV.put(`oauth:consent:${csrf}`, JSON.stringify(authRequest), {
-    expirationTtl: 600,
-  });
-
-  return html(
-    "Authorize Harness X Harness Task Runner",
-    `<p><strong>${escapeHtml(client.clientName ?? "ChatGPT")}</strong> requests access to run code tasks.</p>
-     <p>Requested scopes: ${escapeHtml(authRequest.scope.join(", ") || "none")}</p>
-     <form method="post" action="/authorize/consent">
-       <input type="hidden" name="csrf" value="${escapeHtml(csrf)}" />
-       <button type="submit">Continue with GitHub</button>
-     </form>`,
-    `__Host-RUNNER_CSRF=${csrf}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`,
-  );
-}
-
-async function startGithubAuthorization(request, env) {
-  const form = await request.formData();
-  const csrf = String(form.get("csrf") ?? "");
-  const cookie = cookieValue(request.headers.get("cookie"), "__Host-RUNNER_CSRF");
-  if (!csrf || csrf !== cookie) return new Response("Invalid consent state", { status: 400 });
-
-  const authRequestJson = await env.OAUTH_KV.get(`oauth:consent:${csrf}`);
-  if (!authRequestJson) return new Response("Expired consent state", { status: 400 });
-  await env.OAUTH_KV.delete(`oauth:consent:${csrf}`);
-
-  const state = crypto.randomUUID();
-  await env.OAUTH_KV.put(`oauth:github:${state}`, authRequestJson, { expirationTtl: 600 });
-  const callback = `${new URL(request.url).origin}/github/callback`;
-  const github = githubUserAuthorizationUrl(env, callback, state);
-  return Response.redirect(github, 302);
-}
-
-function html(title, body, setCookie) {
-  return new Response(
-    `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-     <style>body{font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem}button{padding:.6rem 1rem}</style>
-     <h1>${escapeHtml(title)}</h1>${body}`,
-    {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://github.com",
-        "x-content-type-options": "nosniff",
-        ...(setCookie ? { "set-cookie": setCookie } : {}),
-      },
-    },
-  );
-}
-
-function cookieValue(header, name) {
-  return (header ?? "")
-    .split(";")
-    .map((part) => part.trim().split("="))
-    .find(([key]) => key === name)?.[1];
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 function json(value, status = 200) {
