@@ -6,6 +6,14 @@
     "nodejs_compat",
     "global_fetch_strictly_public"
   ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "runners.trustedtunnel.app",
+      "custom_domain": true
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -39,6 +47,6 @@
     "GITHUB_WORKFLOW_ID": "execute-task.yml",
     "GITHUB_RUNNER_REF": "main",
     "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
-    "TASK_CONTROL_PLANE_URL": "https://harness-x-harness-task-runner-control-plane.ron-huafeng.workers.dev"
+    "TASK_CONTROL_PLANE_URL": "https://runners.trustedtunnel.app"
   }
 }

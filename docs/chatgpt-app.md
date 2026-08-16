@@ -1,8 +1,9 @@
 # ChatGPT code-task app
 
 The repository now contains a separate Cloudflare Worker control plane under
-`apps/chatgpt-app`. Its stable public endpoint is the Worker origin followed by
-`/mcp`; the temporary GitHub runner remains the execution plane. The zero-input
+`apps/chatgpt-app`. Its stable public endpoint is
+`https://runners.trustedtunnel.app/mcp`; the temporary GitHub runner remains
+the execution plane. The zero-input
 Private Development Environment workflow remains independent of
 the ChatGPT code-task control plane.
 
@@ -103,14 +104,21 @@ npx wrangler deploy
 ```
 
 Copy `.secrets.env.example` to the ignored `.secrets.env` for local deployment
-credentials. Use the same `CLOUDFLARE_API_TOKEN` for OAuth KV management and
-Worker deployment; the project does not require separate tokens for individual
-Cloudflare APIs. For a Workers.dev deployment, the token needs account
-permissions `Workers Scripts: Edit`, `Workers KV Storage: Edit`, and
-`Account Settings: Read`. A user-owned token also needs `User Details: Read`
-and `Memberships: Read` for Wrangler identity checks. Zone permissions are only
-needed if a custom domain or Worker route is added. `CLOUDFLARE_ACCOUNT_ID`
-selects the account and is not a token.
+credentials. Use the same `CLOUDFLARE_API_TOKEN` for OAuth KV management,
+Worker deployment, and the fixed Custom Domain. Scope it to the Worker account
+with `Workers Scripts: Edit`, `Workers KV Storage: Edit`, and
+`Account Settings: Read`, plus `Workers Routes: Edit` on only the
+`trustedtunnel.app` zone. Cloudflare creates the Custom Domain DNS record and
+certificate; the token does not need DNS or certificate write permission. A
+user-owned token also needs `User Details: Read` and `Memberships: Read` for
+Wrangler identity checks. `CLOUDFLARE_ACCOUNT_ID` selects the account and is
+not a token.
+
+The deployment configuration binds exactly one public hostname,
+`runners.trustedtunnel.app`, disables both `workers.dev` and preview URLs, and
+uses that same origin as `TASK_CONTROL_PLANE_URL`. Per-runner hostnames are not
+part of the control plane; temporary T3 access continues to use its independent
+Quick Tunnel.
 
 When validating `CLOUDFLARE_API_TOKEN`, use the endpoint matching its owner:
 
@@ -128,13 +136,13 @@ Workers, KV, or Durable Objects permission required by deployment.
 Set the GitHub App's user authorization callback URL as:
 
 ```text
-https://runner.example.com/github/callback
+https://runners.trustedtunnel.app/github/callback
 ```
 
 Set its post-installation Setup URL as:
 
 ```text
-https://runner.example.com/github/install
+https://runners.trustedtunnel.app/github/install
 ```
 
 Enable **Redirect on update** so adding a selected repository returns to the
@@ -155,13 +163,18 @@ user-to-server token expiration enabled; the Worker rotates the upstream
 GitHub token when the MCP client refreshes its grant.
 
 Set the `TASK_CONTROL_PLANE_URL` repository variable in the runner repository
-to the Worker origin, for example `https://runner.example.com`. The workflow
-uses that value as the OIDC audience and callback base URL.
+to `https://runners.trustedtunnel.app`. The workflow uses that value as the
+OIDC audience and callback base URL.
 
 The Worker `TASK_CONTROL_PLANE_URL` value and the repository variable must be
 byte-for-byte identical. Do not put the GitHub App client secret, private key,
 task prompt, or OIDC token in `wrangler.jsonc`, workflow inputs, MCP structured
 content, logs, summaries, or artifacts.
+
+Changing the control-plane origin also changes the OAuth issuer and canonical
+`/mcp` resource. Update the GitHub App callback and setup URLs before deploying
+the new origin, then reconnect MCP clients after deployment. Do not retain the
+old `workers.dev` endpoint as a fallback.
 
 The GitHub App needs `Actions: write` on the runner repository so the Worker
 can dispatch the workflow. The same App must be installed on target

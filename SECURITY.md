@@ -15,7 +15,8 @@ GitHub-hosted runner 会在 job 结束后销毁，但这不是进程级沙箱。
 
 任何合并到受保护分支、随后由受信任 Environment dispatch 的 workflow 或 local action 都处于同一信任边界。必须像审查生产部署代码一样审查 `.github/`、`apps/`、`headscale/` 和安全配置。
 
-ChatGPT code-task app 另有一个稳定的 Cloudflare Worker 控制面。Worker
+ChatGPT code-task app 另有一个固定在
+`https://runners.trustedtunnel.app` 的 Cloudflare Worker 控制面。Worker
 通过 OAuth 2.1 + PKCE 识别用户，把完整 prompt 保存在按 task ID 分片的
 Durable Object 中，并只向 GitHub Actions workflow 传递 task ID、仓库、ref、
 executor 和 mode。workflow 使用 GitHub Actions OIDC 访问一次性 callback
@@ -141,6 +142,7 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 [ ] pairing URL 只进入 mode-0600 runner 文件和指定的不可转发 Lark 卡片，不进入日志、summary 或 artifact
 [ ] 官方工具安装入口已经复核
 [ ] ChatGPT Worker 的 OAuth KV、GitHub App client ID 和控制面 URL 已配置
+[ ] Worker 只绑定 `runners.trustedtunnel.app`，且 `workers.dev` 和 Preview URLs 已关闭
 [ ] GitHub App 已安装到 `GITHUB_RUNNER_REPOSITORY`，且 Worker 可自动解析 installation
 [ ] Worker 与 runner repository 的 `TASK_CONTROL_PLANE_URL` 完全一致
 [ ] MCP 返回值未包含 prompt、OAuth token、App private key 或 OIDC token
