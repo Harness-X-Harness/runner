@@ -4,9 +4,9 @@
 
 实施状态：本文评审的基线是 commit `b768263`。同日的后续 working tree 已按本文建议实现
 clickjacking 防护、browser-bound GitHub state、S256 PKCE、显式拒绝、redirect-aware OAuth
-错误、人类可读 scope 和 mode-specific incremental authorization。实现已通过本地测试和 Worker
-dry run，但尚未提交、部署或进行真实浏览器验收。下文“当前实现”和差距章节保留对评审基线的
-描述。
+错误、人类可读 scope 和 mode-specific incremental authorization。PR #51 已合并并部署；本地
+测试、default-branch CI、Worker health 和 OAuth metadata 检查通过。真实浏览器 consent、拒绝、
+GitHub callback 和 ChatGPT step-up 仍待验收。下文“当前实现”和差距章节保留对评审基线的描述。
 
 ## 精确问题
 
