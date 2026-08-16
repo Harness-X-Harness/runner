@@ -10,6 +10,7 @@ import {
   describeScopes,
   requiredSubmitScopes,
 } from "../apps/chatgpt-app/src/oauth-scopes.js";
+import { fakeAuthorizationStates } from "./helpers/authorization-state.js";
 
 const authRequest = Object.freeze({
   responseType: "code",
@@ -23,11 +24,11 @@ const authRequest = Object.freeze({
 });
 
 test("consent page explains fixed scopes and sends hardened browser headers", async () => {
-  const kv = new Map();
+  const states = fakeAuthorizationStates();
   const response = await authorizePage(
     new Request("https://runner.example.com/authorize"),
     {
-      OAUTH_KV: mapKv(kv),
+      AUTHORIZATION_STATES: states.binding,
       OAUTH_PROVIDER: {
         parseAuthRequest: async () => authRequest,
         lookupClient: async () => ({ clientName: "<script>ChatGPT</script>" }),
@@ -52,17 +53,17 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(body, /name="decision" value="deny"/);
   assert.match(body, /&lt;script&gt;ChatGPT&lt;\/script&gt;/);
   assert.doesNotMatch(body, /<script>ChatGPT<\/script>/);
-  assert.equal(kv.size, 1);
-  const [stored] = [...kv.values()];
-  assert.deepEqual(JSON.parse(stored).authRequest.scope, authRequest.scope);
+  assert.equal(states.size(), 1);
+  const [stored] = states.values();
+  assert.deepEqual(stored.authRequest.scope, authRequest.scope);
 });
 
 test("initial consent does not grant ChatGPT's aggregate capability request", async () => {
-  const kv = new Map();
+  const states = fakeAuthorizationStates();
   const response = await authorizePage(
     new Request("https://runner.example.com/authorize"),
     {
-      OAUTH_KV: mapKv(kv),
+      AUTHORIZATION_STATES: states.binding,
       OAUTH_PROVIDER: {
         parseAuthRequest: async () => ({
           ...authRequest,
@@ -87,9 +88,9 @@ test("initial consent does not grant ChatGPT's aggregate capability request", as
   assert.doesNotMatch(body, /Change repositories/);
   assert.doesNotMatch(body, /Create pull requests/);
   assert.doesNotMatch(body, /Read repositories/);
-  assert.equal(kv.size, 1);
-  const [stored] = [...kv.values()];
-  assert.deepEqual(JSON.parse(stored).authRequest.scope, ["tasks:read"]);
+  assert.equal(states.size(), 1);
+  const [stored] = states.values();
+  assert.deepEqual(stored.authRequest.scope, ["tasks:read"]);
 });
 
 test("validated authorization errors return OAuth error state and issuer", async () => {
@@ -137,13 +138,13 @@ test("untrusted authorization redirects are rendered locally", async () => {
 });
 
 test("denying consent returns access_denied without contacting GitHub", async () => {
-  const kv = new Map([[
+  const states = fakeAuthorizationStates([[
     "oauth:consent:csrf-123",
-    JSON.stringify(await consentRecord(authRequest)),
+    await consentRecord(authRequest),
   ]]);
   const response = await submitAuthorizationDecision(
     consentRequest("deny"),
-    { OAUTH_KV: mapKv(kv) },
+    { AUTHORIZATION_STATES: states.binding },
   );
 
   assert.equal(response.status, 302);
@@ -152,14 +153,14 @@ test("denying consent returns access_denied without contacting GitHub", async ()
   assert.equal(location.searchParams.get("error"), "access_denied");
   assert.equal(location.searchParams.get("state"), "client-state");
   assert.equal(location.searchParams.get("iss"), "https://runner.example.com");
-  assert.equal(kv.size, 0);
+  assert.equal(states.size(), 0);
   assert.equal(response.headers.has("set-cookie"), false);
 });
 
 test("parallel authorization pages keep one browser-bound consent session", async () => {
-  const kv = new Map();
+  const states = fakeAuthorizationStates();
   const env = {
-    OAUTH_KV: mapKv(kv),
+    AUTHORIZATION_STATES: states.binding,
     OAUTH_PROVIDER: {
       parseAuthRequest: async () => authRequest,
       lookupClient: async () => ({ clientName: "ChatGPT" }),
@@ -200,15 +201,41 @@ test("parallel authorization pages keep one browser-bound consent session", asyn
   );
 });
 
+test("consent does not depend on immediate Workers KV write visibility", async () => {
+  const states = fakeAuthorizationStates();
+  const env = {
+    AUTHORIZATION_STATES: states.binding,
+    OAUTH_KV: invisibleWritesKv(),
+    OAUTH_PROVIDER: {
+      parseAuthRequest: async () => authRequest,
+      lookupClient: async () => ({ clientName: "ChatGPT" }),
+    },
+  };
+  const page = await authorizePage(
+    new Request("https://runner.example.com/authorize"),
+    env,
+  );
+  const csrf = await csrfFromResponse(page.clone());
+  const browserSession = cookieFromResponse(page, "__Host-RUNNER_CSRF");
+
+  const denied = await submitAuthorizationDecision(
+    consentRequest("deny", csrf, browserSession),
+    env,
+  );
+
+  assert.equal(denied.status, 302);
+  assert.equal(new URL(denied.headers.get("location")).searchParams.get("error"), "access_denied");
+});
+
 test("GitHub callback requires the initiating browser and exchanges PKCE once", async () => {
-  const kv = new Map([[
+  const states = fakeAuthorizationStates([[
     "oauth:consent:csrf-123",
-    JSON.stringify(await consentRecord(authRequest)),
+    await consentRecord(authRequest),
   ]]);
   const env = {
     GITHUB_APP_CLIENT_ID: "Iv1.example",
     GITHUB_APP_CLIENT_SECRET: "client-secret",
-    OAUTH_KV: mapKv(kv),
+    AUTHORIZATION_STATES: states.binding,
     OAUTH_PROVIDER: {
       completeAuthorization: async () => ({
         redirectTo: "https://client.example/callback?code=mcp-code",
@@ -223,7 +250,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   assert.match(github.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
   assert.match(start.headers.get("set-cookie"), /__Host-RUNNER_GITHUB_STATE=/);
 
-  const record = JSON.parse(kv.get(`github:oauth:${state}`));
+  const record = states.get(`github:oauth:${state}`);
   assert.equal(record.payload.kind, "mcp");
   assert.deepEqual(record.payload.authRequest, authRequest);
   assert.match(record.codeVerifier, /^[A-Za-z0-9_-]{43}$/);
@@ -236,7 +263,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
     env,
   );
   assert.equal(wrongBrowser.status, 400);
-  assert.equal(kv.has(`github:oauth:${state}`), true);
+  assert.equal(states.has(`github:oauth:${state}`), true);
 
   const stateCookie = cookieFromResponse(start, "__Host-RUNNER_GITHUB_STATE");
   let tokenParameters;
@@ -264,7 +291,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   assert.equal(completed.headers.get("referrer-policy"), "no-referrer");
   assert.equal(completed.headers.get("x-frame-options"), "DENY");
   assert.equal(tokenParameters.code_verifier, record.codeVerifier);
-  assert.equal(kv.has(`github:oauth:${state}`), false);
+  assert.equal(states.has(`github:oauth:${state}`), false);
   assert.match(completed.headers.get("set-cookie"), /__Host-RUNNER_GITHUB_STATE=;/);
   assert.match(completed.headers.get("set-cookie"), /Max-Age=0/);
 });
@@ -311,11 +338,11 @@ function cookieFromResponse(response, name) {
   throw new Error(`Missing cookie: ${name}`);
 }
 
-function mapKv(values) {
+function invisibleWritesKv() {
   return {
-    get: async (key) => values.get(key) ?? null,
-    put: async (key, value) => values.set(key, value),
-    delete: async (key) => values.delete(key),
+    get: async () => null,
+    put: async () => undefined,
+    delete: async () => undefined,
   };
 }
 
@@ -334,7 +361,7 @@ async function consentRecord(request, browserSession = "csrf-123") {
   for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
   return {
     authRequest: request,
-    browserSessionHash: btoa(binary)
+    browserBindingHash: btoa(binary)
       .replaceAll("+", "-")
       .replaceAll("/", "_")
       .replaceAll("=", ""),

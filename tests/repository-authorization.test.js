@@ -13,6 +13,7 @@ import {
   claimTaskDispatch,
   commitTaskDispatch,
 } from "../apps/chatgpt-app/src/task.js";
+import { fakeAuthorizationStates } from "./helpers/authorization-state.js";
 
 test("public analyze selects one public-read path without an installation lookup", async () => {
   const requests = [];
@@ -93,13 +94,11 @@ test("unknown GitHub responses fail naturally and never select another path", as
 });
 
 test("installation request stores opaque task state and returns one Worker action", async () => {
-  const writes = [];
+  const states = fakeAuthorizationStates();
   const authorization = await createInstallationRequest(
     {
       TASK_CONTROL_PLANE_URL: "https://runner.example.com",
-      OAUTH_KV: {
-        put: async (...args) => writes.push(args),
-      },
+      AUTHORIZATION_STATES: states.binding,
     },
     { id: "task_123", ownerId: "42" },
   );
@@ -108,27 +107,25 @@ test("installation request stores opaque task state and returns one Worker actio
   assert.equal(url.origin, "https://runner.example.com");
   assert.equal(url.pathname, "/github/install");
   assert.match(url.searchParams.get("state"), /^repo_install_/);
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0][0], `github:install:${url.searchParams.get("state")}`);
-  assert.deepEqual(JSON.parse(writes[0][1]), {
+  assert.equal(states.size(), 1);
+  assert.deepEqual(states.get(`github:install:${url.searchParams.get("state")}`), {
     taskId: "task_123",
     ownerId: "42",
   });
-  assert.deepEqual(writes[0][2], { expirationTtl: 604800 });
 });
 
 test("installation action requests GitHub installation only while access is missing", async () => {
   const taskState = fakeTaskState(waitingTask());
   const state = "repo_install_original";
-  const kv = new Map([
-    [`github:install:${state}`, JSON.stringify({ taskId: "task_123", ownerId: "42" })],
+  const states = fakeAuthorizationStates([
+    [`github:install:${state}`, { taskId: "task_123", ownerId: "42" }],
   ]);
   const response = await startInstallationAuthorization(
     new Request(`https://runner.example.com/github/install?state=${state}`),
     {
       ...appEnvironment(),
       GITHUB_APP_SLUG: "harness-x-harness-task-runner",
-      OAUTH_KV: mapKv(kv),
+      AUTHORIZATION_STATES: states.binding,
       TASKS: taskState.binding,
     },
     async () => new Response("not installed", { status: 404 }),
@@ -147,15 +144,15 @@ test("installation action requests GitHub installation only while access is miss
 test("installation return starts original-user verification before dispatch", async () => {
   const taskState = fakeTaskState(waitingTask());
   const state = "repo_install_original";
-  const kv = new Map([
-    [`github:install:${state}`, JSON.stringify({ taskId: "task_123", ownerId: "42" })],
+  const states = fakeAuthorizationStates([
+    [`github:install:${state}`, { taskId: "task_123", ownerId: "42" }],
   ]);
   const response = await startInstallationAuthorization(
     new Request(`https://runner.example.com/github/install?state=${state}`),
     {
       ...appEnvironment(),
       GITHUB_APP_CLIENT_ID: "Iv1.example",
-      OAUTH_KV: mapKv(kv),
+      AUTHORIZATION_STATES: states.binding,
       TASKS: taskState.binding,
     },
     async () => Response.json({
@@ -171,7 +168,7 @@ test("installation return starts original-user verification before dispatch", as
   assert.match(oauthState, /^install_oauth_/);
   assert.equal(location.searchParams.get("code_challenge_method"), "S256");
   assert.match(location.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
-  const oauthRecord = JSON.parse(kv.get(`github:oauth:${oauthState}`));
+  const oauthRecord = states.get(`github:oauth:${oauthState}`);
   assert.deepEqual(oauthRecord.payload, {
     kind: "installation",
     taskId: "task_123",
@@ -220,11 +217,11 @@ test("verified installation callback dispatches once and duplicate callback cann
     authorizationUrl: "https://runner.example.com/github/install?state=repo_install_original",
     requiredPermissions: ["contents:read"],
   });
-  const kv = new Map([
-    ["github:install:repo_install_original", JSON.stringify({
+  const states = fakeAuthorizationStates([
+    ["github:install:repo_install_original", {
       taskId: "task_123",
       ownerId: "42",
-    })],
+    }],
   ]);
   let dispatches = 0;
   const env = {
@@ -234,7 +231,7 @@ test("verified installation callback dispatches once and duplicate callback cann
     GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
     GITHUB_WORKFLOW_ID: "execute-task.yml",
     GITHUB_RUNNER_REF: "main",
-    OAUTH_KV: mapKv(kv),
+    AUTHORIZATION_STATES: states.binding,
     TASKS: taskState.binding,
   };
   const fetchImpl = async (url) => {
@@ -283,7 +280,7 @@ test("verified installation callback dispatches once and duplicate callback cann
   assert.equal(dispatches, 1);
   assert.equal(taskState.current().status, "queued");
   assert.equal(taskState.current().repositoryAccess, "installation");
-  assert.equal(kv.has("github:install:repo_install_original"), false);
+  assert.equal(states.has("github:install:repo_install_original"), false);
 });
 
 function appEnvironment() {
@@ -299,14 +296,6 @@ function testPrivateKeyPem() {
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
     publicKeyEncoding: { type: "spki", format: "pem" },
   }).privateKey;
-}
-
-function mapKv(values) {
-  return {
-    get: async (key) => values.get(key) ?? null,
-    put: async (key, value) => values.set(key, value),
-    delete: async (key) => values.delete(key),
-  };
 }
 
 function fakeTaskState(initial) {

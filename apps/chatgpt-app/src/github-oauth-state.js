@@ -1,4 +1,8 @@
 import { githubUserAuthorizationUrl } from "./github-user-auth.js";
+import {
+  consumeAuthorizationState,
+  putAuthorizationState,
+} from "./authorization-state.js";
 
 const STATE_TTL = 600;
 const STATE_COOKIE = "__Host-RUNNER_GITHUB_STATE";
@@ -23,10 +27,11 @@ export async function startGitHubAuthorization(
     sha256Base64Url(codeVerifier),
     sha256Base64Url(browserBinding),
   ]);
-  await env.OAUTH_KV.put(
+  await putAuthorizationState(
+    env,
     `github:oauth:${state}`,
-    JSON.stringify({ payload, codeVerifier, browserBindingHash }),
-    { expirationTtl: STATE_TTL },
+    { payload, codeVerifier, browserBindingHash },
+    STATE_TTL,
   );
 
   const response = new Response(null, {
@@ -47,25 +52,24 @@ export async function consumeGitHubAuthorization(request, env) {
     throw new GitHubAuthorizationStateError("GitHub authorization was not completed");
   }
 
-  const recordJson = await env.OAUTH_KV.get(`github:oauth:${state}`);
-  if (!recordJson) {
+  const browserBinding = cookieValue(request.headers.get("cookie"), STATE_COOKIE);
+  const record = await consumeAuthorizationState(
+    env,
+    `github:oauth:${state}`,
+    browserBinding ? await sha256Base64Url(browserBinding) : "",
+  );
+  if (record.kind === "missing") {
     throw new GitHubAuthorizationStateError("Expired GitHub authorization state");
   }
-  const record = JSON.parse(recordJson);
-  const browserBinding = cookieValue(request.headers.get("cookie"), STATE_COOKIE);
-  if (
-    !browserBinding ||
-    await sha256Base64Url(browserBinding) !== record.browserBindingHash
-  ) {
+  if (record.kind === "browser_mismatch") {
     throw new GitHubAuthorizationStateError("GitHub authorization browser state did not match");
   }
-  await env.OAUTH_KV.delete(`github:oauth:${state}`);
 
   return {
     callback: `${url.origin}/github/callback`,
     code,
-    codeVerifier: record.codeVerifier,
-    payload: record.payload,
+    codeVerifier: record.value.codeVerifier,
+    payload: record.value.payload,
   };
 }
 

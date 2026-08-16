@@ -34,10 +34,11 @@ Private T3 Session workflow is unchanged and can still be used independently.
    public fields. Prompt text, OAuth properties, and callback credentials never
    appear in MCP structured content.
 
-The storage boundary is deliberate. The OAuth provider and short-lived
-authorization state use the provider's required `OAUTH_KV` binding, while each
-code task uses its own Durable Object for serialized lifecycle updates. D1 is
-not part of the current design. See
+The storage boundary is deliberate. The OAuth provider alone uses its required
+`OAUTH_KV` binding. Consent, GitHub callback, and repository-installation state
+use one strongly consistent `AuthorizationStateObject` Durable Object per
+opaque state identifier. Each code task uses its own `TaskObject` Durable Object
+for serialized lifecycle updates. D1 is not part of the current design. See
 [ADR 0001](adr/0001-oauth-kv-task-durable-objects.md) for the alternatives and
 the conditions that would justify revisiting this choice.
 

@@ -3,6 +3,11 @@ import {
   requestGitHubUserProfile,
 } from "./github-user-auth.js";
 import { startGitHubAuthorization } from "./github-oauth-state.js";
+import {
+  deleteAuthorizationState,
+  getAuthorizationState,
+  putAuthorizationState,
+} from "./authorization-state.js";
 import { dispatchWorkflow, githubHeaders, signAppJwt } from "./github.js";
 import {
   claimTaskDispatch,
@@ -71,10 +76,11 @@ export async function resolveRepositoryAccess(
 
 export async function createInstallationRequest(env, task) {
   const state = `repo_install_${crypto.randomUUID()}`;
-  await env.OAUTH_KV.put(
+  await putAuthorizationState(
+    env,
     `github:install:${state}`,
-    JSON.stringify({ taskId: task.id, ownerId: task.ownerId }),
-    { expirationTtl: INSTALL_STATE_TTL },
+    { taskId: task.id, ownerId: task.ownerId },
+    INSTALL_STATE_TTL,
   );
   const url = new URL("/github/install", env.TASK_CONTROL_PLANE_URL);
   url.searchParams.set("state", state);
@@ -92,9 +98,11 @@ export async function startInstallationAuthorization(
     cookieValue(request.headers.get("cookie"), "__Host-RUNNER_INSTALL_STATE");
   if (!state) return text("Missing repository authorization state", 400);
 
-  const requestJson = await env.OAUTH_KV.get(`github:install:${state}`);
-  if (!requestJson) return text("Expired repository authorization state", 400);
-  const authorization = JSON.parse(requestJson);
+  const authorization = await getAuthorizationState(
+    env,
+    `github:install:${state}`,
+  );
+  if (!authorization) return text("Expired repository authorization state", 400);
   const task = await readTask(env, authorization.taskId);
   if (
     task.status !== "awaiting_installation" ||
@@ -188,7 +196,10 @@ export async function completeInstallationAuthorization(
   try {
     await dispatchWorkflow(env, claim.task, fetchImpl);
     const queued = await commitTaskDispatch(env, task.id);
-    await env.OAUTH_KV.delete(`github:install:${installation.installState}`);
+    await deleteAuthorizationState(
+      env,
+      `github:install:${installation.installState}`,
+    );
     return text(`Repository authorized. Task ${queued.id} is ${queued.status}.`);
   } catch {
     await updateTask(env, task.id, {

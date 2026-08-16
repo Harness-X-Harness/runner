@@ -4,6 +4,10 @@ import {
   GitHubAuthorizationStateError,
   startGitHubAuthorization,
 } from "./github-oauth-state.js";
+import {
+  consumeAuthorizationState,
+  putAuthorizationState,
+} from "./authorization-state.js";
 import { completeGitHubUserAuthorization } from "./github-user-auth.js";
 import { consentScopes, describeScopes } from "./oauth-scopes.js";
 import { completeInstallationAuthorization } from "./repository-authorization.js";
@@ -36,13 +40,14 @@ export async function authorizePage(request, env) {
   const csrf = crypto.randomUUID();
   const browserSession =
     cookieValue(request.headers.get("cookie"), CONSENT_COOKIE) ?? crypto.randomUUID();
-  await env.OAUTH_KV.put(
+  await putAuthorizationState(
+    env,
     `oauth:consent:${csrf}`,
-    JSON.stringify({
+    {
       authRequest,
-      browserSessionHash: await sha256Base64Url(browserSession),
-    }),
-    { expirationTtl: CONSENT_TTL },
+      browserBindingHash: await sha256Base64Url(browserSession),
+    },
+    CONSENT_TTL,
   );
 
   const scopeList = scopeDetails.length === 0
@@ -76,20 +81,22 @@ export async function submitAuthorizationDecision(request, env) {
     return html("Authorization error", "<p>Invalid consent state.</p>", 400);
   }
 
-  const consentJson = await env.OAUTH_KV.get(`oauth:consent:${csrf}`);
-  if (!consentJson) {
+  const consent = await consumeAuthorizationState(
+    env,
+    `oauth:consent:${csrf}`,
+    await sha256Base64Url(browserSession),
+  );
+  if (consent.kind === "missing") {
     return html("Authorization error", "<p>Expired consent state.</p>", 400);
   }
-  const consent = JSON.parse(consentJson);
-  if (await sha256Base64Url(browserSession) !== consent.browserSessionHash) {
+  if (consent.kind === "browser_mismatch") {
     return html("Authorization error", "<p>Invalid consent state.</p>", 400);
   }
   const decision = String(form.get("decision") ?? "");
   if (decision !== "allow" && decision !== "deny") {
     return html("Authorization error", "<p>Invalid authorization decision.</p>", 400);
   }
-  await env.OAUTH_KV.delete(`oauth:consent:${csrf}`);
-  const authRequest = consent.authRequest;
+  const authRequest = consent.value.authRequest;
 
   if (decision === "deny") {
     return oauthRedirect(authRequest.redirectUri, {

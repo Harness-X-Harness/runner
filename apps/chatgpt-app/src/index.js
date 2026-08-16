@@ -27,8 +27,9 @@ import {
   startInstallationAuthorization,
 } from "./repository-authorization.js";
 import { TaskObject } from "./task-object.js";
+import { AuthorizationStateObject } from "./authorization-state-object.js";
 
-export { TaskObject };
+export { AuthorizationStateObject, TaskObject };
 
 export class McpApi extends WorkerEntrypoint {
   fetch(request) {
