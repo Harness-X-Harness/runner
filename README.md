@@ -86,13 +86,13 @@ Private connection data is mode `0600` under:
 ~/private-runner-session/t3code/connection.txt
 ```
 
-The file records the Cloudflare public origin and the pairing URL emitted by
-T3 itself. The workflow never constructs or rewrites pairing URLs. After all
-connections are ready, LarkSend publishes one non-forwardable card containing
-the native pairing URL; it never writes that URL to Actions logs, summaries, or
-artifacts. The card is not updated when the run ends. If external pairing
-requires an explicit public origin, use the upstream T3 configuration intended
-for that purpose instead of rewriting its output.
+The file records the Cloudflare public origin and a pairing URL issued by T3
+for that origin. The workflow waits for the Quick Tunnel, then uses T3's native
+`auth pairing create --base-url` command; it does not parse credentials or
+construct pairing URLs. After all connections are ready, LarkSend publishes one
+non-forwardable card containing the native pairing URL. It never writes that
+URL to Actions logs, summaries, or artifacts, and the card is not updated when
+the run ends.
 The initial workspace is `$HOME/workspace`. The user manages its repositories,
 credentials, and processes directly. Cancel the GitHub run when finished. The
 Quick Tunnel URL and all runner state disappear when the run ends or reaches

@@ -33,7 +33,7 @@ async function actionEnvironment() {
   await writeFile(join(sessionDirectory, "t3-url"), "https://runner.trycloudflare.com\n");
   await writeFile(
     join(sessionDirectory, "pairing-url"),
-    "https://app.t3.codes/pair#pairing-secret\n",
+    "https://runner.trycloudflare.com/pair#pairing-secret\n",
   );
 
   return {
@@ -123,7 +123,14 @@ test("sends one ready connection card to the exact configured chat", async () =>
   ]);
   assert.equal(actions[0].background_style, "green");
   assert.equal(actions[0].behaviors[0].default_url, "https://runner.trycloudflare.com");
-  assert.equal(actions[1].behaviors[0].default_url, "https://app.t3.codes/pair#pairing-secret");
+  assert.equal(
+    actions[1].behaviors[0].default_url,
+    "https://runner.trycloudflare.com/pair#pairing-secret",
+  );
+  assert.equal(
+    new URL(actions[1].behaviors[0].default_url).origin,
+    new URL(actions[0].behaviors[0].default_url).origin,
+  );
   assert.equal(
     actions[2].behaviors[0].default_url,
     "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
