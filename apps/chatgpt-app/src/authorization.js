@@ -5,7 +5,7 @@ import {
   startGitHubAuthorization,
 } from "./github-oauth-state.js";
 import { completeGitHubUserAuthorization } from "./github-user-auth.js";
-import { describeScopes } from "./oauth-scopes.js";
+import { consentScopes, describeScopes } from "./oauth-scopes.js";
 import { completeInstallationAuthorization } from "./repository-authorization.js";
 
 const CONSENT_TTL = 600;
@@ -24,6 +24,10 @@ export async function authorizePage(request, env) {
 
   let scopeDetails;
   try {
+    authRequest = {
+      ...authRequest,
+      scope: consentScopes(authRequest.scope),
+    };
     scopeDetails = describeScopes(authRequest.scope);
   } catch {
     return html("Authorization error", "<p>Invalid permission request.</p>", 400);

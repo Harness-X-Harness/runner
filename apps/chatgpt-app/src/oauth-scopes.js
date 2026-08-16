@@ -28,6 +28,18 @@ const SCOPE_DETAILS = Object.freeze({
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));
 export const BASELINE_OAUTH_SCOPES = Object.freeze(["tasks:read"]);
 
+export function consentScopes(requestedScopes) {
+  describeScopes(requestedScopes);
+  const requested = new Set(requestedScopes);
+  if (
+    requested.size === OAUTH_SCOPES.length &&
+    OAUTH_SCOPES.every((scope) => requested.has(scope))
+  ) {
+    return [...BASELINE_OAUTH_SCOPES];
+  }
+  return OAUTH_SCOPES.filter((scope) => requested.has(scope));
+}
+
 export function describeScopes(scopes) {
   return scopes.map((scope) => {
     const detail = SCOPE_DETAILS[scope];

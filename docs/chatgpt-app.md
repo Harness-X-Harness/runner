@@ -57,6 +57,13 @@ the scopes already granted while adding the complete scope set required by the
 new operation. This keeps read-only analysis independent of `repos:write` and
 `pull_requests:write` and avoids repeated permission churn.
 
+Some clients aggregate every tool's declared scope when a user manually links
+the whole app, even though the initial MCP challenge and protected-resource
+metadata request only `tasks:read`. The authorization server treats that exact
+all-capabilities request as an initial link and grants only `tasks:read`.
+Operation-specific subsets are not reduced, so later analyze, edit,
+pull-request, and cancel challenges can add only the permissions they need.
+
 ## OAuth resource audience
 
 The Worker binds OAuth grants and access tokens to the canonical MCP resource
