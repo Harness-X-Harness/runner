@@ -69,9 +69,12 @@ tagged runners over Tailscale SSH.
 
 ## Start and connect
 
-In ChatGPT, call `open_environment` and open the returned stable Environment
-URL. After GitHub verifies the browser identity, the page shows Preparing and
-then redirects to T3's native pairing flow. The runner also uses Tailscale SSH:
+In ChatGPT, call `open_environment`. ChatGPT can show an inline Environment
+card for opening or closing the session and viewing its GitHub run. The same
+tool also returns the stable Environment URL when the client does not render
+MCP Apps UI. After GitHub verifies the browser identity, the page shows
+Preparing and then redirects to T3's native pairing flow. The runner also uses
+Tailscale SSH:
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>

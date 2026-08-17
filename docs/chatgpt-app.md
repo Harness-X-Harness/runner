@@ -65,6 +65,14 @@ Environment, stores the exact GitHub run returned by workflow dispatch, and
 returns only the stable `https://runners.trustedtunnel.app/environment` entry
 plus a non-sensitive run link.
 
+ChatGPT can render this result as one inline MCP Apps control card. The card
+shows Starting, Ready, Closing, or Offline and offers only the actions valid
+for that state: open the stable Environment entry, view the GitHub run, close
+the Environment, or start a new one. The existing tools remain complete
+without the card. The card has no storage, polling, or direct backend request;
+the Worker and `EnvironmentObject` remain lifecycle authority. Pairing URLs,
+T3 tokens, and Tailscale details are not sent to the card.
+
 The browser entry verifies GitHub identity independently. While the runner
 starts, it displays Preparing. After T3, Quick Tunnel, and Tailscale are ready,
 the runner uses GitHub Actions OIDC to publish one descriptor for the exact
