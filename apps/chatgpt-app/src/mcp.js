@@ -5,6 +5,11 @@ import { z } from "zod";
 import { cancelWorkflow, dispatchWorkflow } from "./github.js";
 import { closeEnvironment, openEnvironment } from "./environment.js";
 import {
+  ENVIRONMENT_WIDGET_MIME_TYPE,
+  ENVIRONMENT_WIDGET_URI,
+  environmentWidgetHtml,
+} from "./environment-widget.js";
+import {
   createInstallationRequest,
   resolveRepositoryAccess,
 } from "./repository-authorization.js";
@@ -50,6 +55,36 @@ export function createServer(env, props) {
       instructions:
         "Use submit_task to start a task, then get_task to follow progress. Use get_task_result only after completion.",
     },
+  );
+  const controlPlaneOrigin = new URL(env.TASK_CONTROL_PLANE_URL).origin;
+  server.registerResource(
+    "environment-widget",
+    ENVIRONMENT_WIDGET_URI,
+    {
+      description: "Control the current private development environment.",
+      mimeType: ENVIRONMENT_WIDGET_MIME_TYPE,
+    },
+    async () => ({
+      contents: [
+        {
+          uri: ENVIRONMENT_WIDGET_URI,
+          mimeType: ENVIRONMENT_WIDGET_MIME_TYPE,
+          text: environmentWidgetHtml(controlPlaneOrigin),
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              domain: controlPlaneOrigin,
+              csp: { connectDomains: [], resourceDomains: [] },
+            },
+            "openai/widgetDescription":
+              "Shows the authoritative state and controls for the user's private development environment.",
+            "openai/widgetCSP": {
+              redirect_domains: [controlPlaneOrigin, "https://github.com"],
+            },
+          },
+        },
+      ],
+    }),
   );
 
   registerAppTool(
@@ -214,6 +249,12 @@ export function createServer(env, props) {
       }),
       securitySchemes: SECURITY_SCHEMES.open_environment,
       annotations: annotations("open_environment"),
+      _meta: {
+        ui: { resourceUri: ENVIRONMENT_WIDGET_URI },
+        "openai/outputTemplate": ENVIRONMENT_WIDGET_URI,
+        "openai/toolInvocation/invoking": "Opening environment…",
+        "openai/toolInvocation/invoked": "Environment opened.",
+      },
     },
     async () => {
       const requestProps = currentProps(props);
@@ -240,6 +281,10 @@ export function createServer(env, props) {
       }),
       securitySchemes: SECURITY_SCHEMES.close_environment,
       annotations: annotations("close_environment"),
+      _meta: {
+        "openai/toolInvocation/invoking": "Closing environment…",
+        "openai/toolInvocation/invoked": "Environment close requested.",
+      },
     },
     async () => {
       const requestProps = currentProps(props);
@@ -272,10 +317,10 @@ function currentProps(fallback) {
 }
 
 function registerAppTool(server, name, config, handler) {
-  const { securitySchemes, ...serverConfig } = config;
+  const { securitySchemes, _meta, ...serverConfig } = config;
   server.registerTool(name, {
     ...serverConfig,
-    _meta: { securitySchemes },
+    _meta: { ..._meta, securitySchemes },
   }, handler);
 }
 

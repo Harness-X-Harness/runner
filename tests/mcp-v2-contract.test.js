@@ -86,7 +86,7 @@ test("MCP control plane declares the stateless SDK v2 boundary", async () => {
 test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const props = {
     githubUserId: "test-user",
-    oauthScopes: ["tasks:read", "tasks:run", "tasks:cancel", "repos:read", "repos:write", "pull_requests:write"],
+    oauthScopes: ["tasks:read", "tasks:run", "tasks:cancel", "repos:read", "repos:write", "pull_requests:write", "environments:manage"],
   };
   const modernBody = {
     jsonrpc: "2.0",
@@ -110,7 +110,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
       },
       body: JSON.stringify(modernBody),
     }),
-    {},
+    { TASK_CONTROL_PLANE_URL: "https://runner.example" },
     props,
     { props },
   );
@@ -131,6 +131,14 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
     destructiveHint: false,
     openWorldHint: true,
   });
+  assert.deepEqual(
+    modernTools.find(({ name }) => name === "open_environment")._meta?.ui,
+    { resourceUri: "ui://environment/v1.html" },
+  );
+  assert.equal(
+    modernTools.find(({ name }) => name === "open_environment")._meta?.["openai/outputTemplate"],
+    "ui://environment/v1.html",
+  );
   assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").securitySchemes, [
     { type: "oauth2", scopes: ["environments:manage"] },
   ]);
@@ -149,7 +157,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
     }),
-    {},
+    { TASK_CONTROL_PLANE_URL: "https://runner.example" },
     props,
     { props },
   );
@@ -163,4 +171,74 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
     destructiveHint: false,
     openWorldHint: false,
   });
+});
+
+test("MCP v2 serves one credential-free Environment widget resource", async () => {
+  const props = {
+    githubUserId: "test-user",
+    oauthScopes: ["environments:manage"],
+  };
+  const request = async (id, method, params = {}) => {
+    const response = await handleMcpRequest(
+      new Request("https://runner.example/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "mcp-method": method,
+          "mcp-protocol-version": "2026-07-28",
+          ...(method === "resources/read" ? { "mcp-name": params.uri } : {}),
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method,
+          params: {
+            ...params,
+            _meta: {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                name: "widget-contract-test",
+                version: "1.0.0",
+              },
+            },
+          },
+        }),
+      }),
+      { TASK_CONTROL_PLANE_URL: "https://runner.example" },
+      props,
+      { props },
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  const listed = await request(1, "resources/list");
+  assert.deepEqual(
+    listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
+    [{ uri: "ui://environment/v1.html", mimeType: "text/html;profile=mcp-app" }],
+  );
+
+  const read = await request(2, "resources/read", {
+    uri: "ui://environment/v1.html",
+  });
+  assert.equal(read.result.contents.length, 1);
+  const resource = read.result.contents[0];
+  assert.equal(resource.uri, "ui://environment/v1.html");
+  assert.equal(resource.mimeType, "text/html;profile=mcp-app");
+  assert.deepEqual(resource._meta.ui, {
+    prefersBorder: true,
+    domain: "https://runner.example",
+    csp: { connectDomains: [], resourceDomains: [] },
+  });
+  assert.deepEqual(resource._meta["openai/widgetCSP"], {
+    redirect_domains: ["https://runner.example", "https://github.com"],
+  });
+  assert.match(resource.text, /Private Development Environment/);
+  assert.match(resource.text, /tools\/call/);
+  assert.match(resource.text, /open_environment/);
+  assert.match(resource.text, /close_environment/);
+  assert.match(resource.text, /openExternal/);
+  assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
+  assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
 });
