@@ -165,6 +165,7 @@ export async function completeAuthorizationCallback(
       env,
       authorization,
       fetchImpl,
+      logger,
     );
   } else {
     response = html("Authorization error", "<p>Unknown GitHub authorization request.</p>", 400);

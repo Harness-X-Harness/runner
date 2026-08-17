@@ -42,6 +42,41 @@ test("ready OIDC accepts only the exact repository, workflow, ref, and run", () 
   }
 });
 
+test("Environment identity reports the failing GitHub stage without upstream details", async () => {
+  const authorization = {
+    code: "github-code",
+    callback: "https://runner.example/github/callback",
+    codeVerifier: "verifier",
+  };
+  const env = {
+    GITHUB_APP_CLIENT_ID: "Iv1.example",
+    GITHUB_APP_CLIENT_SECRET: "client-secret",
+  };
+  const tokenFailure = await completeEnvironmentAuthorization(
+    env,
+    authorization,
+    async () => Response.json(
+      { error: "private upstream detail" },
+      { status: 400 },
+    ),
+    { error() {} },
+  );
+  assert.equal(await tokenFailure.text(), "GitHub token exchange failed");
+
+  const profileFailure = await completeEnvironmentAuthorization(
+    env,
+    authorization,
+    async (url) => url === "https://github.com/login/oauth/access_token"
+      ? Response.json({ access_token: "ghu_access" })
+      : Response.json(
+        { message: "private upstream detail" },
+        { status: 403 },
+      ),
+    { error() {} },
+  );
+  assert.equal(await profileFailure.text(), "GitHub profile lookup failed");
+});
+
 test("one GitHub user opens one Environment and repeated open returns it", async () => {
   const environments = fakeEnvironments();
   const dispatches = [];

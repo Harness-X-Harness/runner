@@ -61,9 +61,9 @@ export async function completeEnvironmentAuthorization(
   env,
   authorization,
   fetchImpl = fetch,
+  logger = console,
 ) {
   let token;
-  let profile;
   try {
     token = await exchangeGitHubUserCode(
       env,
@@ -72,9 +72,17 @@ export async function completeEnvironmentAuthorization(
       authorization.codeVerifier,
       fetchImpl,
     );
+  } catch {
+    logger.error("Environment GitHub token exchange failed");
+    return new Response("GitHub token exchange failed", { status: 502 });
+  }
+
+  let profile;
+  try {
     profile = await requestGitHubUserProfile(token.access_token, fetchImpl);
   } catch {
-    return new Response("GitHub identity verification failed", { status: 502 });
+    logger.error("Environment GitHub profile lookup failed");
+    return new Response("GitHub profile lookup failed", { status: 502 });
   }
 
   const origin = new URL(authorization.callback).origin;
