@@ -2,6 +2,18 @@ const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 const installationTokenCache = new Map();
 
+export class EnvironmentDispatchError extends Error {
+  /**
+   * @param {string} message
+   * @param {"rejected" | "unknown"} outcome
+   * @param {{ cause?: unknown }} [options]
+   */
+  constructor(message, outcome, options) {
+    super(message, options);
+    this.outcome = outcome;
+  }
+}
+
 export async function dispatchWorkflow(env, task, fetchImpl = fetch) {
   const token = await installationToken(env, fetchImpl);
   const [owner, repository] = runnerRepository(env);
@@ -36,29 +48,57 @@ export async function dispatchEnvironmentWorkflow(
   environment,
   fetchImpl = fetch,
 ) {
-  const token = await installationToken(env, fetchImpl);
-  const [owner, repository] = runnerRepository(env);
+  let token;
+  let owner;
+  let repository;
+  try {
+    token = await installationToken(env, fetchImpl);
+    [owner, repository] = runnerRepository(env);
+  } catch (error) {
+    throw new EnvironmentDispatchError(
+      error instanceof Error ? error.message : "GitHub Environment dispatch was not issued",
+      "rejected",
+      { cause: error },
+    );
+  }
   const workflow = env.GITHUB_ENVIRONMENT_WORKFLOW_ID ?? "private-runner-session.yml";
-  const response = await githubFetch(
-    `/repos/${owner}/${repository}/actions/workflows/${workflow}/dispatches`,
-    token,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        ref: env.GITHUB_RUNNER_REF ?? "main",
-        inputs: { environment_id: environment.environmentId },
-        return_run_details: true,
-      }),
-    },
-    fetchImpl,
-  );
+  let response;
+  try {
+    response = await githubFetch(
+      `/repos/${owner}/${repository}/actions/workflows/${workflow}/dispatches`,
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ref: env.GITHUB_RUNNER_REF ?? "main",
+          inputs: {
+            environment_id: environment.environmentId,
+            environment_owner: environment.environmentOwner,
+          },
+        }),
+      },
+      fetchImpl,
+    );
+  } catch (error) {
+    throw new EnvironmentDispatchError(
+      "GitHub Environment workflow dispatch outcome is unknown",
+      "unknown",
+      { cause: error },
+    );
+  }
   const run = await response.json().catch(() => undefined);
   if (
     !response.ok ||
     !run?.workflow_run_id ||
     typeof run?.html_url !== "string"
   ) {
-    throw new Error(`GitHub Environment workflow dispatch failed with ${response.status}`);
+    const outcome = response.ok || response.status >= 500 || response.status === 408
+      ? "unknown"
+      : "rejected";
+    throw new EnvironmentDispatchError(
+      `GitHub Environment workflow dispatch failed with ${response.status}`,
+      outcome,
+    );
   }
   return {
     runId: String(run.workflow_run_id),

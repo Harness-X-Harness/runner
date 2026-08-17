@@ -1,28 +1,35 @@
 ---- MODULE RemoteEnvironment ----
-EXTENDS FiniteSets, Naturals
+EXTENDS Naturals
 
 (***************************************************************************)
-(* Requirements model for one authenticated user's current Remote          *)
-(* Development Environment. GitHub owns run lifecycle. The control plane   *)
-(* owns the current generation, connection delivery, close intent, and       *)
-(* pending responsibility for delivery of the exact-run cancel effect.       *)
-(* A generation number also names its representative finite run identity.   *)
+(* Requirements model for one authenticated user's current private         *)
+(* development Environment. GitHub owns workflow-run lifecycle. The        *)
+(* control plane owns one current generation, admission at the early OIDC  *)
+(* claim gate, private descriptor delivery, and exact-run cancellation.     *)
+(*                                                                         *)
+(* A GitHub dispatch can have an unknown outcome. A created run therefore  *)
+(* has to claim its exact GitHub run identity before it receives secrets,  *)
+(* joins the private network, or starts T3. Closing an unclaimed generation *)
+(* invalidates that gate. A delayed run from the invalid generation exits   *)
+(* at the gate instead of becoming an Environment.                          *)
 (***************************************************************************)
 
 VARIABLES generation,
+          validGeneration,
           phase,
           runId,
+          liveRun,
+          admittedRun,
           descriptorGeneration,
           descriptorRun,
           closeRequested,
           cancelPending,
           dispatchIssued,
-          liveRuns,
           cancelledRuns
 
-vars == << generation, phase, runId, descriptorGeneration, descriptorRun,
-           closeRequested, cancelPending, dispatchIssued, liveRuns,
-           cancelledRuns >>
+vars == << generation, validGeneration, phase, runId, liveRun, admittedRun,
+           descriptorGeneration, descriptorRun, closeRequested,
+           cancelPending, dispatchIssued, cancelledRuns >>
 
 Phases == {"idle", "dispatching", "starting", "ready", "closing", "offline"}
 Runs == 1..2
@@ -30,67 +37,147 @@ NoIdentity == 0
 
 Init ==
   /\ generation = NoIdentity
+  /\ validGeneration = NoIdentity
   /\ phase = "idle"
   /\ runId = NoIdentity
+  /\ liveRun = NoIdentity
+  /\ admittedRun = NoIdentity
   /\ descriptorGeneration = NoIdentity
   /\ descriptorRun = NoIdentity
   /\ closeRequested = FALSE
   /\ cancelPending = FALSE
   /\ dispatchIssued = FALSE
-  /\ liveRuns = {}
   /\ cancelledRuns = {}
 
 Open ==
   /\ phase \in {"idle", "offline"}
   /\ generation < 2
   /\ generation' = generation + 1
+  /\ validGeneration' = generation + 1
   /\ phase' = "dispatching"
   /\ runId' = NoIdentity
+  /\ admittedRun' = NoIdentity
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
   /\ closeRequested' = FALSE
   /\ cancelPending' = FALSE
   /\ dispatchIssued' = TRUE
-  /\ UNCHANGED << liveRuns, cancelledRuns >>
+  /\ UNCHANGED << liveRun, cancelledRuns >>
 
+(***************************************************************************)
+(* A response proving rejection means no run was created for this request. *)
+(* An older unclaimed run can still exist and remains unable to pass the    *)
+(* now-invalid claim gate.                                                  *)
+(***************************************************************************)
+DispatchRejected ==
+  /\ phase = "dispatching"
+  /\ dispatchIssued
+  /\ runId = NoIdentity
+  /\ phase' = "offline"
+  /\ validGeneration' = NoIdentity
+  /\ dispatchIssued' = FALSE
+  /\ UNCHANGED << generation, runId, liveRun, admittedRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, cancelledRuns >>
+
+(***************************************************************************)
+(* A successful dispatch response admits the exact run. Workflow           *)
+(* concurrency makes this generation the selected live run for the owner.  *)
+(***************************************************************************)
 CommitDispatch ==
   /\ phase = "dispatching"
   /\ dispatchIssued
+  /\ runId = NoIdentity
+  /\ liveRun' = generation
   /\ runId' = generation
   /\ phase' = "starting"
-  /\ liveRuns' = liveRuns \cup {generation}
-  /\ UNCHANGED << generation, descriptorGeneration, descriptorRun,
-                  closeRequested, cancelPending, dispatchIssued,
-                  cancelledRuns >>
+  /\ dispatchIssued' = FALSE
+  /\ UNCHANGED << generation, validGeneration, admittedRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, cancelledRuns >>
 
+(***************************************************************************)
+(* GitHub may have accepted the request even though the Worker got no       *)
+(* usable response. No retry is issued. The early runner claim can still    *)
+(* establish the exact identity.                                            *)
+(***************************************************************************)
 DispatchOutcomeUnknown ==
   /\ phase = "dispatching"
   /\ dispatchIssued
   /\ runId = NoIdentity
-  /\ generation \notin liveRuns
-  /\ liveRuns' = liveRuns \cup {generation}
-  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
-                  descriptorRun, closeRequested, cancelPending, dispatchIssued,
-                  cancelledRuns >>
+  /\ liveRun' = generation
+  /\ dispatchIssued' = FALSE
+  /\ UNCHANGED << generation, validGeneration, phase, runId, admittedRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, cancelledRuns >>
+
+EarlyRunnerClaim ==
+  /\ phase \in {"dispatching", "starting"}
+  /\ validGeneration = generation
+  /\ liveRun = generation
+  /\ admittedRun = NoIdentity
+  /\ runId \in {NoIdentity, liveRun}
+  /\ runId' = generation
+  /\ admittedRun' = liveRun
+  /\ phase' = "starting"
+  /\ UNCHANGED << generation, validGeneration, liveRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, dispatchIssued, cancelledRuns >>
 
 ReadyCallback ==
   /\ phase = "starting"
-  /\ ~closeRequested
+  /\ validGeneration = generation
+  /\ admittedRun = generation
   /\ runId = generation
+  /\ liveRun = runId
+  /\ ~closeRequested
   /\ phase' = "ready"
   /\ descriptorGeneration' = generation
   /\ descriptorRun' = runId
-  /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
-                  cancelPending, liveRuns, cancelledRuns >>
+  /\ UNCHANGED << generation, validGeneration, runId, liveRun, admittedRun,
+                  closeRequested, cancelPending, dispatchIssued,
+                  cancelledRuns >>
 
-Close ==
-  /\ phase \in {"dispatching", "starting", "ready"}
-  /\ phase' = "closing"
+(***************************************************************************)
+(* Before admission, Close is a generation revocation. A delayed workflow  *)
+(* can execute only the non-sensitive bootstrap and is rejected by claim.   *)
+(***************************************************************************)
+CloseUnclaimed ==
+  /\ phase = "dispatching"
+  /\ runId = NoIdentity
+  /\ phase' = "offline"
+  /\ validGeneration' = NoIdentity
   /\ closeRequested' = TRUE
-  /\ cancelPending' = (runId # NoIdentity)
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
-  /\ UNCHANGED << generation, runId, dispatchIssued, liveRuns,
+  /\ dispatchIssued' = FALSE
+  /\ UNCHANGED << generation, runId, liveRun, admittedRun, cancelPending,
+                  cancelledRuns >>
+
+CloseKnownRun ==
+  /\ phase = "starting"
+  /\ runId # NoIdentity
+  /\ admittedRun = NoIdentity
+  /\ phase' = "closing"
+  /\ validGeneration' = NoIdentity
+  /\ closeRequested' = TRUE
+  /\ cancelPending' = TRUE
+  /\ descriptorGeneration' = NoIdentity
+  /\ descriptorRun' = NoIdentity
+  /\ UNCHANGED << generation, runId, liveRun, admittedRun, dispatchIssued,
+                  cancelledRuns >>
+
+CloseAdmitted ==
+  /\ phase \in {"starting", "ready"}
+  /\ runId # NoIdentity
+  /\ admittedRun = runId
+  /\ phase' = "closing"
+  /\ validGeneration' = NoIdentity
+  /\ closeRequested' = TRUE
+  /\ cancelPending' = TRUE
+  /\ descriptorGeneration' = NoIdentity
+  /\ descriptorRun' = NoIdentity
+  /\ UNCHANGED << generation, runId, liveRun, admittedRun, dispatchIssued,
                   cancelledRuns >>
 
 SendCancel ==
@@ -99,35 +186,40 @@ SendCancel ==
   /\ cancelPending
   /\ runId # NoIdentity
   /\ cancelledRuns' = cancelledRuns \cup {runId}
-  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
-                  descriptorRun, closeRequested, cancelPending,
-                  dispatchIssued, liveRuns >>
+  /\ UNCHANGED << generation, validGeneration, phase, runId, liveRun,
+                  admittedRun, descriptorGeneration, descriptorRun,
+                  closeRequested, cancelPending, dispatchIssued >>
 
 AcknowledgeCancel ==
   /\ phase = "closing"
   /\ cancelPending
   /\ runId \in cancelledRuns
   /\ cancelPending' = FALSE
-  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
-                  descriptorRun, closeRequested, dispatchIssued, liveRuns,
-                  cancelledRuns >>
-
-CommitDispatchAfterClose ==
-  /\ phase = "closing"
-  /\ closeRequested
-  /\ dispatchIssued
-  /\ runId = NoIdentity
-  /\ runId' = generation
-  /\ liveRuns' = liveRuns \cup {generation}
-  /\ cancelPending' = TRUE
-  /\ UNCHANGED << generation, phase, descriptorGeneration, descriptorRun,
+  /\ UNCHANGED << generation, validGeneration, phase, runId, liveRun,
+                  admittedRun, descriptorGeneration, descriptorRun,
                   closeRequested, dispatchIssued, cancelledRuns >>
+
+(***************************************************************************)
+(* A delayed run from an invalid generation is rejected at the early claim *)
+(* gate and exits before sensitive Environment setup.                       *)
+(***************************************************************************)
+StaleRunStopsAtClaim ==
+  /\ liveRun # NoIdentity
+  /\ liveRun # validGeneration
+  /\ liveRun # admittedRun
+  /\ liveRun' = NoIdentity
+  /\ UNCHANGED << generation, validGeneration, phase, runId, admittedRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, dispatchIssued, cancelledRuns >>
 
 GitHubTerminates ==
   /\ phase \in {"starting", "ready", "closing"}
   /\ runId # NoIdentity
+  /\ admittedRun \in {NoIdentity, runId}
   /\ phase' = "offline"
-  /\ liveRuns' = liveRuns \ {runId}
+  /\ validGeneration' = NoIdentity
+  /\ liveRun' = IF liveRun = runId THEN NoIdentity ELSE liveRun
+  /\ admittedRun' = NoIdentity
   /\ cancelPending' = FALSE
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
@@ -136,33 +228,44 @@ GitHubTerminates ==
 
 Next ==
   \/ Open
+  \/ DispatchRejected
   \/ CommitDispatch
   \/ DispatchOutcomeUnknown
+  \/ EarlyRunnerClaim
   \/ ReadyCallback
-  \/ Close
+  \/ CloseUnclaimed
+  \/ CloseKnownRun
+  \/ CloseAdmitted
   \/ SendCancel
   \/ AcknowledgeCancel
-  \/ CommitDispatchAfterClose
+  \/ StaleRunStopsAtClaim
   \/ GitHubTerminates
 
 Spec == Init /\ [][Next]_vars
              /\ WF_vars(SendCancel)
              /\ WF_vars(AcknowledgeCancel)
+             /\ WF_vars(StaleRunStopsAtClaim)
              /\ WF_vars(GitHubTerminates)
 
 TypeOK ==
   /\ generation \in 0..2
+  /\ validGeneration \in 0..2
   /\ phase \in Phases
   /\ runId \in 0..2
+  /\ liveRun \in 0..2
+  /\ admittedRun \in 0..2
   /\ descriptorGeneration \in 0..2
   /\ descriptorRun \in 0..2
   /\ closeRequested \in BOOLEAN
   /\ cancelPending \in BOOLEAN
   /\ dispatchIssued \in BOOLEAN
-  /\ liveRuns \subseteq Runs
   /\ cancelledRuns \subseteq Runs
 
-AtMostOneLiveRun == Cardinality(liveRuns) <= 1
+AdmittedRunIsCurrent ==
+  admittedRun = NoIdentity \/
+    /\ admittedRun = generation
+    /\ runId = admittedRun
+    /\ phase \in {"starting", "ready", "closing"}
 
 DescriptorIsCurrent ==
   descriptorGeneration = NoIdentity \/
@@ -170,50 +273,74 @@ DescriptorIsCurrent ==
     /\ ~closeRequested
     /\ descriptorGeneration = generation
     /\ descriptorRun = runId
+    /\ admittedRun = runId
 
 CloseHidesDescriptor == closeRequested => descriptorGeneration = NoIdentity
 
-ActiveRunIsCurrent ==
-  phase \in {"starting", "ready"} => liveRuns = {runId}
+KnownRunIsCurrent ==
+  phase \in {"starting", "ready"} =>
+    /\ validGeneration = generation
+    /\ runId = generation
+    /\ liveRun = generation
 
-NoFutureRunCancelled == \A cancelled \in cancelledRuns : cancelled <= generation
+ReadyRunIsAdmitted == phase = "ready" => admittedRun = runId
 
 CancelResponsibilityRetained ==
   (/\ phase = "closing"
    /\ runId # NoIdentity
-   /\ runId \in liveRuns
+   /\ liveRun = runId
    /\ runId \notin cancelledRuns)
   => cancelPending
 
 ClosingConverges ==
   []((phase = "closing" /\ runId # NoIdentity) => <>(phase = "offline"))
 
+InvalidGenerationRunStops ==
+  []((liveRun # NoIdentity /\ liveRun # validGeneration /\
+      liveRun # admittedRun) =>
+    <>(liveRun = NoIdentity \/ liveRun = validGeneration))
+
 (***************************************************************************)
-(* Negative witness: an old generation's ready callback is accepted by a   *)
-(* newer generation or after close, and publishes the old descriptor.       *)
+(* Negative witnesses preserve the concrete classes of historical defects. *)
 (***************************************************************************)
 BadReadyCallback ==
   /\ generation = 2
-  /\ phase \in {"starting", "closing"}
+  /\ phase \in {"starting", "closing", "offline"}
   /\ phase' = "ready"
   /\ descriptorGeneration' = 1
   /\ descriptorRun' = 1
-  /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
-                  cancelPending, liveRuns, cancelledRuns >>
+  /\ UNCHANGED << generation, validGeneration, runId, liveRun, admittedRun,
+                  closeRequested, cancelPending, dispatchIssued,
+                  cancelledRuns >>
+
+BadAdmitStaleRun ==
+  /\ generation = 2
+  /\ validGeneration = 2
+  /\ phase = "dispatching"
+  /\ liveRun = 1
+  /\ phase' = "starting"
+  /\ runId' = 1
+  /\ admittedRun' = 1
+  /\ UNCHANGED << generation, validGeneration, liveRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, dispatchIssued, cancelledRuns >>
 
 BadLoseCancelResponsibility ==
   /\ phase = "closing"
   /\ cancelPending
   /\ runId # NoIdentity
-  /\ runId \in liveRuns
+  /\ liveRun = runId
   /\ runId \notin cancelledRuns
   /\ cancelPending' = FALSE
-  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
-                  descriptorRun, closeRequested, dispatchIssued, liveRuns,
-                  cancelledRuns >>
+  /\ UNCHANGED << generation, validGeneration, phase, runId, liveRun,
+                  admittedRun, descriptorGeneration, descriptorRun,
+                  closeRequested, dispatchIssued, cancelledRuns >>
 
-BadNext == Next \/ BadReadyCallback
-BadSpec == Init /\ [][BadNext]_vars
+ReadyBadNext == Next \/ BadReadyCallback
+ReadyBadSpec == Init /\ [][ReadyBadNext]_vars
+
+ClaimBadNext == Next \/ BadAdmitStaleRun
+ClaimBadSpec == Init /\ [][ClaimBadNext]_vars
 
 CancelBadNext == Next \/ BadLoseCancelResponsibility
 CancelBadSpec == Init /\ [][CancelBadNext]_vars

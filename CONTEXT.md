@@ -16,6 +16,10 @@ _Avoid_: Code Task, persistent Session, repository workflow
 The GitHub Actions workflow run that creates and terminates one Remote Development Environment. Its native GitHub status is lifecycle authority. The control plane stores only owner association, opaque generation, exact run identity, private delivery, and close intent.
 _Avoid_: Code Task, control-plane Session
 
+**Environment Admission**:
+The OIDC-authenticated claim that binds one exact GitHub run to the current user generation before the workflow receives executor credentials, joins Tailscale, or starts T3. A workflow from a closed or older generation fails at this gate and is not a Remote Development Environment.
+_Avoid_: workflow dispatch response, ready callback, repository authorization
+
 **Connection Descriptor**:
 The current private connection information for one active Environment, such as its Tailscale hostname and T3 origin or pairing entry. The runner publishes it once to the owner-specific control-plane state through GitHub OIDC.
 _Avoid_: Stable Tunnel, credential log, artifact

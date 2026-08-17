@@ -6,6 +6,7 @@ import test, { afterEach } from "node:test";
 import {
   dispatchEnvironmentWorkflow,
   dispatchWorkflow,
+  EnvironmentDispatchError,
   getEnvironmentWorkflowRun,
 } from "../apps/chatgpt-app/src/github.js";
 import { resolveRepositoryAccess } from "../apps/chatgpt-app/src/repository-authorization.js";
@@ -175,7 +176,10 @@ test("Environment dispatch returns the exact GitHub workflow run identity", asyn
       GITHUB_ENVIRONMENT_WORKFLOW_ID: "private-runner-session.yml",
       GITHUB_RUNNER_REF: "main",
     },
-    { environmentId: "environment-generation" },
+    {
+      environmentId: "environment-generation",
+      environmentOwner: "owner-slot",
+    },
   );
 
   assert.deepEqual(run, {
@@ -186,9 +190,48 @@ test("Environment dispatch returns the exact GitHub workflow run identity", asyn
   assert.equal(dispatch.init.headers["x-github-api-version"], "2026-03-10");
   assert.deepEqual(JSON.parse(dispatch.init.body), {
     ref: "main",
-    inputs: { environment_id: "environment-generation" },
-    return_run_details: true,
+    inputs: {
+      environment_id: "environment-generation",
+      environment_owner: "owner-slot",
+    },
   });
+});
+
+test("Environment dispatch distinguishes rejection from an unknown effect", async () => {
+  const cases = [
+    { status: 422, body: { message: "invalid" }, outcome: "rejected" },
+    { status: 503, body: { message: "unavailable" }, outcome: "unknown" },
+    { status: 200, body: {}, outcome: "unknown" },
+  ];
+  for (const expected of cases) {
+    const fetchImpl = async (url) => {
+      if (String(url).endsWith("/repos/Harness-X-Harness/runner/installation")) {
+        return Response.json({ id: 987654 });
+      }
+      if (String(url).endsWith("/app/installations/987654/access_tokens")) {
+        return Response.json({ token: "installation-token" });
+      }
+      return Response.json(expected.body, { status: expected.status });
+    };
+    await assert.rejects(
+      dispatchEnvironmentWorkflow(
+        {
+          GITHUB_APP_ID: "4385224",
+          GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+          GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
+          GITHUB_ENVIRONMENT_WORKFLOW_ID: "private-runner-session.yml",
+          GITHUB_RUNNER_REF: "main",
+        },
+        {
+          environmentId: "environment-generation",
+          environmentOwner: "owner-slot",
+        },
+        fetchImpl,
+      ),
+      (error) => error instanceof EnvironmentDispatchError &&
+        error.outcome === expected.outcome,
+    );
+  }
 });
 
 test("Environment terminal readback observes one exact GitHub workflow run", async () => {

@@ -24,7 +24,9 @@ export class EnvironmentObject extends DurableObject {
         const environment = {
           ownerId: String(requestBody.ownerId),
           generation: String(requestBody.generation),
+          slot: current?.slot ?? crypto.randomUUID(),
           status: "dispatching",
+          dispatchOutcome: "unconfirmed",
           cancelPending: false,
           createdAt: new Date().toISOString(),
         };
@@ -34,16 +36,25 @@ export class EnvironmentObject extends DurableObject {
       return Response.json(result, { status: result.dispatch ? 201 : 200 });
     }
 
-    if (request.method === "POST" && path === "/environment/dispatch") {
+    if (
+      request.method === "POST" &&
+      (path === "/environment/dispatch" || path === "/environment/claim")
+    ) {
       const event = await request.json();
       const result = await this.ctx.storage.transaction(async (storage) => {
         const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
         if (!current || current.generation !== String(event.generation)) {
           return undefined;
         }
-        if (current.status === "closing" && !current.runId) {
+        if (
+          (current.status === "closing" ||
+            (path === "/environment/dispatch" &&
+              current.status === "offline" && current.closeRequested)) &&
+          !current.runId
+        ) {
           const environment = {
             ...current,
+            status: "closing",
             runId: String(event.runId),
             runUrl: String(event.runUrl),
             cancelPending: true,
@@ -52,14 +63,24 @@ export class EnvironmentObject extends DurableObject {
           await storage.put(STORAGE_KEY, environment);
           return { environment, cancel: true };
         }
+        if (
+          ["starting", "ready", "closing"].includes(current.status) &&
+          current.runId === String(event.runId)
+        ) {
+          return {
+            environment: current,
+            cancel: current.status === "closing" && current.cancelPending !== false,
+          };
+        }
         if (current.status !== "dispatching") {
-          return { environment: current, cancel: false };
+          return undefined;
         }
         const environment = {
           ...current,
           status: "starting",
           runId: String(event.runId),
           runUrl: String(event.runUrl),
+          dispatchOutcome: undefined,
           cancelPending: false,
           updatedAt: new Date().toISOString(),
         };
@@ -72,6 +93,52 @@ export class EnvironmentObject extends DurableObject {
           { error: "environment generation mismatch" },
           { status: 409 },
         );
+    }
+
+    if (request.method === "POST" && path === "/environment/dispatch-unknown") {
+      const event = await request.json();
+      const result = await this.ctx.storage.transaction(async (storage) => {
+        const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
+        if (!current || current.generation !== String(event.generation)) {
+          return undefined;
+        }
+        if (current.status !== "dispatching") return current;
+        const environment = {
+          ...current,
+          dispatchOutcome: "unknown",
+          updatedAt: new Date().toISOString(),
+        };
+        await storage.put(STORAGE_KEY, environment);
+        return environment;
+      });
+      return result
+        ? Response.json(result)
+        : Response.json({ error: "environment generation mismatch" }, { status: 409 });
+    }
+
+    if (request.method === "POST" && path === "/environment/dispatch-failed") {
+      const event = await request.json();
+      const result = await this.ctx.storage.transaction(async (storage) => {
+        const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
+        if (!current || current.generation !== String(event.generation)) {
+          return undefined;
+        }
+        if (current.status !== "dispatching" || current.runId) return current;
+        const environment = {
+          ownerId: current.ownerId,
+          generation: current.generation,
+          slot: current.slot,
+          status: "offline",
+          cancelPending: false,
+          closeRequested: false,
+          updatedAt: new Date().toISOString(),
+        };
+        await storage.put(STORAGE_KEY, environment);
+        return environment;
+      });
+      return result
+        ? Response.json(result)
+        : Response.json({ error: "environment generation mismatch" }, { status: 409 });
     }
 
     if (request.method === "POST" && path === "/environment/ready") {
@@ -104,6 +171,19 @@ export class EnvironmentObject extends DurableObject {
       const result = await this.ctx.storage.transaction(async (storage) => {
         const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
         if (!current || !ACTIVE_STATUSES.has(current.status)) return undefined;
+        if (current.status === "dispatching" && !current.runId) {
+          const environment = {
+            ownerId: current.ownerId,
+            generation: current.generation,
+            slot: current.slot,
+            status: "offline",
+            cancelPending: false,
+            closeRequested: true,
+            updatedAt: new Date().toISOString(),
+          };
+          await storage.put(STORAGE_KEY, environment);
+          return { environment, cancel: false };
+        }
         if (current.status === "closing") {
           const cancelPending = Boolean(
             current.runId && current.cancelPending !== false,
@@ -162,10 +242,12 @@ export class EnvironmentObject extends DurableObject {
         const environment = {
           ownerId: current.ownerId,
           generation: current.generation,
+          slot: current.slot,
           runId: current.runId,
           runUrl: current.runUrl,
           status: "offline",
           cancelPending: false,
+          closeRequested: current.closeRequested,
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);

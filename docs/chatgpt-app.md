@@ -61,9 +61,12 @@ The public tools are:
 
 `open_environment` has no input. The authenticated GitHub user is the owner
 identity. A per-user `EnvironmentObject` enforces at most one active
-Environment, stores the exact GitHub run returned by workflow dispatch, and
-returns only the stable `https://runners.trustedtunnel.app/environment` entry
-plus a non-sensitive run link.
+Environment. It stores an opaque owner slot and generation before dispatch.
+GitHub normally returns the exact run ID in the dispatch response. If that
+response is lost or is a server error, the workflow can still claim its exact
+run through GitHub OIDC. The tool returns only the stable
+`https://runners.trustedtunnel.app/environment` entry plus a non-sensitive run
+link when the exact run is known.
 
 ChatGPT can render this result as one inline MCP Apps control card. The card
 shows Starting, Ready, Closing, or Offline and offers only the actions valid
@@ -74,9 +77,11 @@ the Worker and `EnvironmentObject` remain lifecycle authority. Pairing URLs,
 T3 tokens, and Tailscale details are not sent to the card.
 
 The browser entry verifies GitHub identity independently. While the runner
-starts, it displays Preparing. After T3, Quick Tunnel, and Tailscale are ready,
-the runner uses GitHub Actions OIDC to publish one descriptor for the exact
-repository, workflow, run, signed generation, and Environment. The entry then
+starts, it displays Preparing. Immediately after checkout, the workflow uses
+GitHub Actions OIDC to claim its repository, workflow, run, signed generation,
+and Environment. This claim runs before executor credentials, Tailscale, T3,
+or Quick Tunnel setup. After those interfaces are ready, a second OIDC callback
+publishes the private descriptor for the already claimed run. The entry then
 redirects the owner to T3's native pairing page. Pairing URLs, T3 origins,
 Tailscale details, provider endpoints, and credentials never enter MCP output.
 
@@ -84,7 +89,11 @@ Tailscale details, provider endpoints, and credentials never enter MCP output.
 connection delivery, and cancels the exact recorded GitHub run. Repeated close
 requests do not cancel another run. Cancellation responsibility remains pending
 until GitHub accepts the request, so a failed delivery can be repeated only for
-that same run. A delayed ready callback cannot restore a closed descriptor.
+that same run. Before a run is claimed, close instead revokes the generation
+and returns Offline. A delayed run then fails at the early claim gate. If the
+dispatch response concurrently returns an exact run, the control plane binds
+it only for cancellation. A delayed ready callback cannot restore a closed
+descriptor.
 When GitHub reports the run terminal, the Environment entry converges to
 Offline. GitHub Actions remains lifecycle authority; users can cancel the run
 directly if ChatGPT is unavailable.
@@ -93,6 +102,94 @@ The open and close commands do not preflight the recorded run through GitHub.
 They use the serialized Environment record for the idempotent command path.
 The stable browser entry is the single read boundary that observes GitHub and
 converges a terminal run to Offline.
+
+### Distributed lifecycle and failure contract
+
+The design separates four facts that cannot be made atomic across Cloudflare
+and GitHub: local intent, dispatch effect, exact-run admission, and terminal
+observation. GitHub's documented
+[workflow-dispatch request](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
+accepts a ref and workflow inputs and returns the exact run ID on success; it
+does not expose an application idempotency key. Therefore, an absent or `5xx`
+response is an unknown outcome and must not cause another dispatch. The early
+claim is the recovery path for an accepted request; close is the recovery path
+when no run claims the generation.
+
+| Delayed or failed boundary | Stored authority | Observable result | Convergence path |
+| --- | --- | --- | --- |
+| ChatGPT request does not reach the Worker | No state changes | Client transport error | A later open is a new request |
+| ChatGPT loses a completed tool response | Durable Object keeps the committed generation and run | Repeated open returns the same Environment | Serialized owner state prevents another dispatch |
+| Duplicate or delayed `open_environment` | Per-user Durable Object | Same active Environment; no second dispatch | Serialized open claim |
+| Durable Object rejects open before commit | No generation is committed | Tool error; no GitHub effect | Call open after the store is healthy |
+| Durable Object commits open but its response is lost | Generation stays Dispatching and unconfirmed; no GitHub call is made | A later open returns Starting without dispatch | Close revokes the unconfirmed generation |
+| GitHub rejects before creating a run | Generation becomes Offline | Tool reports the GitHub stage | A later open can create a new generation |
+| GitHub accepts and returns run ID | Exact run is admitted | Starting with run link | Ready callback or GitHub terminal state |
+| Dispatch response is lost or `5xx` | Generation stays Dispatching with unknown outcome | Starting, initially without run link | Early OIDC claim binds the run; close revokes the generation |
+| Runner claim races with the unknown response | Claim transaction owns the exact run | Starting with run link | The late unknown marker is idempotent |
+| Exact-run storage response is lost after commit | The run is already owned, or the early claim can still own it | Tool transport error or Starting | Repeated open reads the same record; no new dispatch |
+| Duplicate workflow run for one owner | GitHub owner-slot concurrency plus generation gate | Only the current generation can be admitted | GitHub supersedes the old run; stale claim fails |
+| Close races with dispatch | Generation revocation or exact-run close wins atomically | Offline before admission, Closing after admission | Late exact response is cancelled; late claim fails |
+| Checkout or early claim fails | No sensitive setup is admitted | GitHub run fails; unknown generation can still show Preparing | User closes the unclaimed generation |
+| Claim store fails before commit | No run is admitted and no sensitive setup starts | Workflow fails | User closes the unclaimed generation |
+| Claim response is lost after storage commit | Exact run remains stored | Workflow fails before sensitive setup | Environment entry observes terminal GitHub state |
+| Tool install, Tailscale, Tunnel, or T3 fails | Exact run remains stored | GitHub run fails | Environment entry observes terminal GitHub state |
+| Ready callback is delayed or rejected | No new descriptor is published | Preparing or Offline | Exact generation and run checks reject stale delivery |
+| Ready callback commits but its response is lost | Descriptor may exist briefly while the workflow fails | Entry checks GitHub before redirect | Terminal observation removes the descriptor and returns Offline |
+| Close storage response is lost | Revocation or `cancelPending` remains committed | Tool transport error | Repeated close is safe and can cancel only the same run |
+| Close cancel response is lost or GitHub is unavailable | `cancelPending` remains on the exact run | Closing | Repeated close retries only that run; terminal observation clears it |
+| User cancels in GitHub | GitHub is lifecycle authority | Entry changes to Offline | Exact-run observation in the stable entry |
+| GitHub run lookup is delayed or unavailable | Durable Object state is not rewritten | Entry request fails without changing lifecycle | Refresh the stable entry after GitHub recovers |
+| Browser identity expires | Environment state is unchanged | GitHub identity prompt | New browser session reads the same owner record |
+| Another GitHub user opens the stable entry | Owner-keyed state is inaccessible | Offline page | No descriptor or run ownership crosses users |
+
+Workflow-level
+[concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+is keyed by an opaque, stable owner slot and uses `cancel-in-progress`. It
+contains duplicate GitHub runs but does not replace the generation gate:
+ordering of concurrent runs is not an identity or freshness proof. The
+workflow keeps the native
+[GitHub-hosted job limit](https://docs.github.com/en/actions/reference/limits);
+the control plane adds no heartbeat, dispatch retry, fallback runner, or
+cleanup worker.
+
+The requirements model is in `formal/RemoteEnvironment.tla`. Its positive
+configuration checks current-run admission, descriptor freshness, close
+privacy, exact cancellation responsibility, closing convergence, and eventual
+exit of an invalid generation. Separate faulty configurations preserve
+counterexamples for stale descriptor publication, stale-run admission, and
+premature loss of cancel responsibility.
+
+| Model transition | Implementation seam |
+| --- | --- |
+| `Open` | `EnvironmentObject /environment/open` commits owner slot and generation before dispatch |
+| `DispatchRejected` | Typed pre-effect or non-ambiguous GitHub rejection calls `/environment/dispatch-failed` |
+| `CommitDispatch` | Successful GitHub response calls `/environment/dispatch` with the exact run |
+| `DispatchOutcomeUnknown` | Lost response, malformed success, `408`, or `5xx` calls `/environment/dispatch-unknown` without retry |
+| `EarlyRunnerClaim` | First workflow callback uses OIDC and `/environment/claim` |
+| `ReadyCallback` | Final workflow callback publishes the descriptor for the claimed generation and run |
+| `CloseUnclaimed` | `/environment/close` revokes a dispatching generation without a run ID |
+| `CloseKnownRun` / `CloseAdmitted` | Close hides the descriptor and retains exact-run `cancelPending` |
+| `StaleRunStopsAtClaim` | A revoked or older generation receives `409` before sensitive setup |
+| `GitHubTerminates` | The authenticated Environment entry reads the exact run and commits Offline |
+
+The model proves application safety for every represented ordering, not the
+availability of GitHub or Cloudflare. Its liveness claims use these explicit
+external assumptions:
+
+- GitHub validates one workflow-level concurrency group and eventually stops a
+  superseded or terminal hosted run.
+- A run that reaches the local lifecycle Action can obtain a GitHub OIDC token
+  whose repository, workflow ref, branch, and run ID are authentic.
+- The workflow stops when the early lifecycle Action returns non-success.
+- GitHub eventually returns a successful exact-run read after a temporary API
+  outage; until then, the control plane does not infer terminal state.
+- A user closes an unclaimed generation that never reaches the early claim.
+  There is intentionally no autonomous timer or liveness claim for that case.
+
+Static workflow checks prove ordering in the checked-in workflow. They do not
+prove GitHub service availability, Quick Tunnel availability, Tailscale control
+plane availability, browser completion of GitHub login, or successful T3
+pairing. Those claims remain scoped to the human Live Story after deployment.
 
 The initial MCP challenge and protected-resource metadata request the complete
 App capability set. The single `submit_task` tool also declares every scope it

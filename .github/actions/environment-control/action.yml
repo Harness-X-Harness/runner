@@ -1,6 +1,9 @@
-name: Environment control-plane callback
-description: Publish the ready private Environment descriptor.
+name: Environment control-plane lifecycle
+description: Claim the exact run and publish its ready private descriptor.
 inputs:
+  phase:
+    description: Claim the run or publish the ready descriptor.
+    required: true
   control-plane-url:
     description: Worker control-plane URL.
     required: true

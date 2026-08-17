@@ -11,6 +11,12 @@ Connection Descriptor through a GitHub OIDC-authenticated callback. The stable
 control-plane Environment entry verifies GitHub browser identity before it
 redirects the owner to T3's native pairing flow.
 
+The workflow also performs an OIDC-authenticated admission claim immediately
+after checkout and before credentials, private networking, T3, or Quick Tunnel.
+This lets a run recover an accepted dispatch whose response was lost. Closing
+before admission revokes the generation, so a delayed workflow fails at the
+claim gate instead of becoming an Environment.
+
 ## Considered options
 
 - MCP does not relay T3 interaction or own process lifecycle.
