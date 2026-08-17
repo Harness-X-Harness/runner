@@ -82,10 +82,17 @@ Tailscale details, provider endpoints, and credentials never enter MCP output.
 
 `close_environment` has no input. It records close intent, removes private
 connection delivery, and cancels the exact recorded GitHub run. Repeated close
-requests do not cancel another run. A delayed ready callback cannot restore a
-closed descriptor. When GitHub reports the run terminal, the Environment entry
-converges to Offline. GitHub Actions remains lifecycle authority; users can
-cancel the run directly if ChatGPT is unavailable.
+requests do not cancel another run. Cancellation responsibility remains pending
+until GitHub accepts the request, so a failed delivery can be repeated only for
+that same run. A delayed ready callback cannot restore a closed descriptor.
+When GitHub reports the run terminal, the Environment entry converges to
+Offline. GitHub Actions remains lifecycle authority; users can cancel the run
+directly if ChatGPT is unavailable.
+
+The open and close commands do not preflight the recorded run through GitHub.
+They use the serialized Environment record for the idempotent command path.
+The stable browser entry is the single read boundary that observes GitHub and
+converges a terminal run to Offline.
 
 The initial MCP challenge and protected-resource metadata request the complete
 App capability set. The single `submit_task` tool also declares every scope it

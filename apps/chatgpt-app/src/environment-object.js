@@ -25,6 +25,7 @@ export class EnvironmentObject extends DurableObject {
           ownerId: String(requestBody.ownerId),
           generation: String(requestBody.generation),
           status: "dispatching",
+          cancelPending: false,
           createdAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
@@ -45,6 +46,7 @@ export class EnvironmentObject extends DurableObject {
             ...current,
             runId: String(event.runId),
             runUrl: String(event.runUrl),
+            cancelPending: true,
             updatedAt: new Date().toISOString(),
           };
           await storage.put(STORAGE_KEY, environment);
@@ -58,6 +60,7 @@ export class EnvironmentObject extends DurableObject {
           status: "starting",
           runId: String(event.runId),
           runUrl: String(event.runUrl),
+          cancelPending: false,
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
@@ -102,11 +105,19 @@ export class EnvironmentObject extends DurableObject {
         const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
         if (!current || !ACTIVE_STATUSES.has(current.status)) return undefined;
         if (current.status === "closing") {
-          return { environment: current, cancel: false };
+          const cancelPending = Boolean(
+            current.runId && current.cancelPending !== false,
+          );
+          const environment = current.cancelPending === undefined
+            ? { ...current, cancelPending }
+            : current;
+          if (environment !== current) await storage.put(STORAGE_KEY, environment);
+          return { environment, cancel: cancelPending };
         }
         const environment = {
           ...current,
           status: "closing",
+          cancelPending: Boolean(current.runId),
           pairingUrl: undefined,
           t3Url: undefined,
           tailscaleHost: undefined,
@@ -120,6 +131,29 @@ export class EnvironmentObject extends DurableObject {
         : Response.json({ error: "environment not found" }, { status: 404 });
     }
 
+    if (request.method === "POST" && path === "/environment/cancel") {
+      const event = await request.json();
+      const result = await this.ctx.storage.transaction(async (storage) => {
+        const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
+        if (
+          !current ||
+          current.status !== "closing" ||
+          current.runId !== String(event.runId)
+        ) return undefined;
+        if (current.cancelPending === false) return current;
+        const environment = {
+          ...current,
+          cancelPending: false,
+          updatedAt: new Date().toISOString(),
+        };
+        await storage.put(STORAGE_KEY, environment);
+        return environment;
+      });
+      return result
+        ? Response.json(result)
+        : Response.json({ error: "environment run mismatch" }, { status: 409 });
+    }
+
     if (request.method === "POST" && path === "/environment/terminal") {
       const event = await request.json();
       const result = await this.ctx.storage.transaction(async (storage) => {
@@ -131,6 +165,7 @@ export class EnvironmentObject extends DurableObject {
           runId: current.runId,
           runUrl: current.runUrl,
           status: "offline",
+          cancelPending: false,
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);

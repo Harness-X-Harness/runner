@@ -13,16 +13,10 @@ export async function openEnvironment(
   dispatch = dispatchEnvironmentWorkflow,
   newGeneration = () => issueEnvironmentIdentity(ownerId, env.ENVIRONMENT_SESSION_SECRET),
   cancel = cancelEnvironmentWorkflow,
-  observe = getEnvironmentWorkflowRun,
 ) {
-  let current = await readEnvironment(env, ownerId);
+  const current = await readEnvironment(env, ownerId);
   if (current && ACTIVE_STATUSES.has(current.status)) {
-    if (current.runId) {
-      current = await reconcileEnvironment(env, ownerId, current, observe);
-    }
-    if (ACTIVE_STATUSES.has(current.status)) {
-      return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
-    }
+    return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
   }
   const generation = await newGeneration();
   const claim = await environmentRequest(env, ownerId, "/environment/open", {
@@ -43,7 +37,14 @@ export async function openEnvironment(
       },
     );
     environment = committed.environment;
-    if (committed.cancel) await cancel(env, run.runId);
+    if (committed.cancel) {
+      environment = await cancelRecordedEnvironment(
+        env,
+        ownerId,
+        environment,
+        cancel,
+      );
+    }
   }
   return publicEnvironment(environment, env.TASK_CONTROL_PLANE_URL);
 }
@@ -52,23 +53,19 @@ export async function closeEnvironment(
   env,
   ownerId,
   cancel = cancelEnvironmentWorkflow,
-  observe = getEnvironmentWorkflowRun,
 ) {
   const closing = await environmentRequest(env, ownerId, "/environment/close", {
     method: "POST",
   });
   if (!closing) return { status: "offline" };
   let environment = closing.environment;
-  if (environment.runId) {
-    const run = await observe(env, environment.runId);
-    if (run.status === "completed") {
-      environment = await environmentRequest(env, ownerId, "/environment/terminal", {
-        method: "POST",
-        body: JSON.stringify({ runId: environment.runId }),
-      });
-    } else if (closing.cancel) {
-      await cancel(env, environment.runId);
-    }
+  if (environment.runId && closing.cancel) {
+    environment = await cancelRecordedEnvironment(
+      env,
+      ownerId,
+      environment,
+      cancel,
+    );
   }
   return publicEnvironment(environment, env.TASK_CONTROL_PLANE_URL);
 }
@@ -99,6 +96,14 @@ export async function reconcileEnvironment(
   const run = await observe(env, environment.runId);
   if (run.status !== "completed") return environment;
   return environmentRequest(env, ownerId, "/environment/terminal", {
+    method: "POST",
+    body: JSON.stringify({ runId: environment.runId }),
+  });
+}
+
+async function cancelRecordedEnvironment(env, ownerId, environment, cancel) {
+  await cancel(env, environment.runId);
+  return environmentRequest(env, ownerId, "/environment/cancel", {
     method: "POST",
     body: JSON.stringify({ runId: environment.runId }),
   });

@@ -98,8 +98,6 @@ test("one GitHub user opens one Environment and repeated open returns it", async
     "42",
     dispatch,
     () => "generation-two",
-    async () => {},
-    async () => ({ status: "in_progress" }),
   );
 
   assert.deepEqual(first, {
@@ -110,6 +108,69 @@ test("one GitHub user opens one Environment and repeated open returns it", async
   assert.deepEqual(second, first);
   assert.deepEqual(dispatches, [{ environmentId: "generation-one" }]);
   assert.equal(environments.get("github-42").generation, "generation-one");
+});
+
+test("Environment commands do not preflight an already recorded GitHub run", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  const run = {
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  };
+  await openEnvironment(env, "42", async () => run, () => "generation-one");
+  Object.defineProperty(env, "GITHUB_APP_ID", {
+    get() {
+      throw new Error("GitHub Environment workflow lookup failed with 520");
+    },
+  });
+
+  const repeated = await openEnvironment(
+    env,
+    "42",
+    async () => { throw new Error("must not dispatch twice"); },
+    () => "generation-two",
+  );
+  const cancellations = [];
+  const closed = await closeEnvironment(
+    env,
+    "42",
+    async (_env, runId) => cancellations.push(runId),
+  );
+
+  assert.equal(repeated.status, "starting");
+  assert.equal(closed.status, "closing");
+  assert.deepEqual(cancellations, ["123456"]);
+});
+
+test("failed cancellation retains responsibility for the same recorded run", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }), () => "generation-one");
+  const attempts = [];
+  await assert.rejects(
+    closeEnvironment(env, "42", async (_env, runId) => {
+      attempts.push(runId);
+      throw new Error("GitHub cancellation unavailable");
+    }),
+    /GitHub cancellation unavailable/,
+  );
+
+  const recovered = await closeEnvironment(env, "42", async (_env, runId) => {
+    attempts.push(runId);
+  });
+
+  assert.equal(recovered.status, "closing");
+  assert.deepEqual(attempts, ["123456", "123456"]);
+  assert.equal(environments.get("github-42").cancelPending, false);
 });
 
 test("an uncertain dispatch failure holds the owner instead of risking a second run", async () => {
@@ -235,8 +296,6 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
     "42",
     async () => { throw new Error("must not dispatch a second run"); },
     () => "ignored-generation",
-    async () => {},
-    async () => ({ status: "in_progress" }),
   );
   assert.deepEqual(publicReady, {
     status: "ready",
@@ -295,6 +354,13 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
     pairingUrl: "https://second-tunnel.example/pair#token=private",
     tailscaleHost: "gha-840000-1",
   })).status, 200);
+  const directTerminal = await reconcileEnvironment(
+    env,
+    "84",
+    environments.get("github-84"),
+    async () => ({ status: "completed", conclusion: "cancelled" }),
+  );
+  assert.equal(directTerminal.status, "offline");
   const reopenedAfterDirectCancel = await openEnvironment(
     env,
     "84",
@@ -303,8 +369,6 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
       runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/850000",
     }),
     () => "generation-after-direct-cancel",
-    async () => {},
-    async () => ({ status: "completed", conclusion: "cancelled" }),
   );
   assert.equal(reopenedAfterDirectCancel.status, "starting");
   assert.equal(
@@ -335,22 +399,9 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   const cancellations = [];
   const first = await closeEnvironment(env, "42", async (_env, runId) => {
     cancellations.push(runId);
-  }, async () => ({ status: "in_progress" }));
-  const second = await closeEnvironment(env, "42", async () => {
-    throw new Error("must not cancel twice");
-  }, async () => ({ status: "completed", conclusion: "cancelled" }));
-  assert.equal(first.status, "closing");
-  assert.deepEqual(second, { status: "offline" });
-  assert.deepEqual(cancellations, ["123456"]);
-  const late = await publishEnvironmentReady(env, generation, "123456", {
-    t3Url: "https://quick-tunnel.example",
-    pairingUrl: "https://quick-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-123456-1",
   });
-  assert.equal(late.status, 409);
-  assert.equal(environments.get("github-42").status, "offline");
-  assert.equal(environments.get("github-42").pairingUrl, undefined);
-
+  assert.equal(first.status, "closing");
+  assert.deepEqual(cancellations, ["123456"]);
   const offline = await reconcileEnvironment(
     env,
     "42",
@@ -362,6 +413,18 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   );
   assert.equal(offline.status, "offline");
   assert.equal(offline.pairingUrl, undefined);
+  const second = await closeEnvironment(env, "42", async () => {
+    throw new Error("must not cancel twice");
+  });
+  assert.deepEqual(second, { status: "offline" });
+  const late = await publishEnvironmentReady(env, generation, "123456", {
+    t3Url: "https://quick-tunnel.example",
+    pairingUrl: "https://quick-tunnel.example/pair#token=private",
+    tailscaleHost: "gha-123456-1",
+  });
+  assert.equal(late.status, 409);
+  assert.equal(environments.get("github-42").status, "offline");
+  assert.equal(environments.get("github-42").pairingUrl, undefined);
   const oldGeneration = generation;
   await openEnvironment(env, "42", async () => ({
     runId: "654321",
@@ -437,6 +500,7 @@ function fakeEnvironments() {
               ownerId: body.ownerId,
               generation: body.generation,
               status: "dispatching",
+              cancelPending: false,
             };
             records.set(ownerId, environment);
             return Response.json({ environment, dispatch: true }, { status: 201 });
@@ -451,6 +515,7 @@ function fakeEnvironments() {
                 ...current,
                 runId: String(body.runId),
                 runUrl: body.runUrl,
+                cancelPending: true,
               };
               records.set(ownerId, environment);
               return Response.json({ environment, cancel: true });
@@ -460,6 +525,7 @@ function fakeEnvironments() {
               status: "starting",
               runId: String(body.runId),
               runUrl: body.runUrl,
+              cancelPending: false,
             };
             records.set(ownerId, environment);
             return Response.json({ environment, cancel: false });
@@ -482,17 +548,36 @@ function fakeEnvironments() {
               return Response.json({ error: "not found" }, { status: 404 });
             }
             if (current.status === "closing") {
-              return Response.json({ environment: current, cancel: false });
+              const cancelPending = Boolean(
+                current.runId && current.cancelPending !== false,
+              );
+              const environment = current.cancelPending === undefined
+                ? { ...current, cancelPending }
+                : current;
+              records.set(ownerId, environment);
+              return Response.json({ environment, cancel: cancelPending });
             }
             const environment = {
               ...current,
               status: "closing",
+              cancelPending: Boolean(current.runId),
               pairingUrl: undefined,
               t3Url: undefined,
               tailscaleHost: undefined,
             };
             records.set(ownerId, environment);
-            return Response.json({ environment, cancel: true });
+            return Response.json({ environment, cancel: environment.cancelPending });
+          }
+          if (path === "/environment/cancel" && init.method === "POST") {
+            const current = records.get(ownerId);
+            if (
+              !current ||
+              current.status !== "closing" ||
+              current.runId !== body.runId
+            ) return Response.json({ error: "mismatch" }, { status: 409 });
+            const environment = { ...current, cancelPending: false };
+            records.set(ownerId, environment);
+            return Response.json(environment);
           }
           if (path === "/environment/terminal" && init.method === "POST") {
             const current = records.get(ownerId);
@@ -505,6 +590,7 @@ function fakeEnvironments() {
               runId: current.runId,
               runUrl: current.runUrl,
               status: "offline",
+              cancelPending: false,
             };
             records.set(ownerId, environment);
             return Response.json(environment);

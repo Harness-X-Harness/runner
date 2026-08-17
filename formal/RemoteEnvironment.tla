@@ -4,7 +4,8 @@ EXTENDS FiniteSets, Naturals
 (***************************************************************************)
 (* Requirements model for one authenticated user's current Remote          *)
 (* Development Environment. GitHub owns run lifecycle. The control plane   *)
-(* owns only the current generation, connection delivery, and close intent. *)
+(* owns the current generation, connection delivery, close intent, and       *)
+(* pending responsibility for delivery of the exact-run cancel effect.       *)
 (* A generation number also names its representative finite run identity.   *)
 (***************************************************************************)
 
@@ -14,12 +15,14 @@ VARIABLES generation,
           descriptorGeneration,
           descriptorRun,
           closeRequested,
+          cancelPending,
           dispatchIssued,
           liveRuns,
           cancelledRuns
 
 vars == << generation, phase, runId, descriptorGeneration, descriptorRun,
-           closeRequested, dispatchIssued, liveRuns, cancelledRuns >>
+           closeRequested, cancelPending, dispatchIssued, liveRuns,
+           cancelledRuns >>
 
 Phases == {"idle", "dispatching", "starting", "ready", "closing", "offline"}
 Runs == 1..2
@@ -32,6 +35,7 @@ Init ==
   /\ descriptorGeneration = NoIdentity
   /\ descriptorRun = NoIdentity
   /\ closeRequested = FALSE
+  /\ cancelPending = FALSE
   /\ dispatchIssued = FALSE
   /\ liveRuns = {}
   /\ cancelledRuns = {}
@@ -45,6 +49,7 @@ Open ==
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
   /\ closeRequested' = FALSE
+  /\ cancelPending' = FALSE
   /\ dispatchIssued' = TRUE
   /\ UNCHANGED << liveRuns, cancelledRuns >>
 
@@ -55,7 +60,8 @@ CommitDispatch ==
   /\ phase' = "starting"
   /\ liveRuns' = liveRuns \cup {generation}
   /\ UNCHANGED << generation, descriptorGeneration, descriptorRun,
-                  closeRequested, dispatchIssued, cancelledRuns >>
+                  closeRequested, cancelPending, dispatchIssued,
+                  cancelledRuns >>
 
 DispatchOutcomeUnknown ==
   /\ phase = "dispatching"
@@ -64,7 +70,7 @@ DispatchOutcomeUnknown ==
   /\ generation \notin liveRuns
   /\ liveRuns' = liveRuns \cup {generation}
   /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
-                  descriptorRun, closeRequested, dispatchIssued,
+                  descriptorRun, closeRequested, cancelPending, dispatchIssued,
                   cancelledRuns >>
 
 ReadyCallback ==
@@ -75,18 +81,36 @@ ReadyCallback ==
   /\ descriptorGeneration' = generation
   /\ descriptorRun' = runId
   /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
-                  liveRuns, cancelledRuns >>
+                  cancelPending, liveRuns, cancelledRuns >>
 
 Close ==
   /\ phase \in {"dispatching", "starting", "ready"}
   /\ phase' = "closing"
   /\ closeRequested' = TRUE
+  /\ cancelPending' = (runId # NoIdentity)
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
-  /\ cancelledRuns' = IF runId = NoIdentity
-                         THEN cancelledRuns
-                         ELSE cancelledRuns \cup {runId}
-  /\ UNCHANGED << generation, runId, dispatchIssued, liveRuns >>
+  /\ UNCHANGED << generation, runId, dispatchIssued, liveRuns,
+                  cancelledRuns >>
+
+SendCancel ==
+  /\ phase = "closing"
+  /\ closeRequested
+  /\ cancelPending
+  /\ runId # NoIdentity
+  /\ cancelledRuns' = cancelledRuns \cup {runId}
+  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
+                  descriptorRun, closeRequested, cancelPending,
+                  dispatchIssued, liveRuns >>
+
+AcknowledgeCancel ==
+  /\ phase = "closing"
+  /\ cancelPending
+  /\ runId \in cancelledRuns
+  /\ cancelPending' = FALSE
+  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
+                  descriptorRun, closeRequested, dispatchIssued, liveRuns,
+                  cancelledRuns >>
 
 CommitDispatchAfterClose ==
   /\ phase = "closing"
@@ -95,15 +119,16 @@ CommitDispatchAfterClose ==
   /\ runId = NoIdentity
   /\ runId' = generation
   /\ liveRuns' = liveRuns \cup {generation}
-  /\ cancelledRuns' = cancelledRuns \cup {generation}
+  /\ cancelPending' = TRUE
   /\ UNCHANGED << generation, phase, descriptorGeneration, descriptorRun,
-                  closeRequested, dispatchIssued >>
+                  closeRequested, dispatchIssued, cancelledRuns >>
 
 GitHubTerminates ==
   /\ phase \in {"starting", "ready", "closing"}
   /\ runId # NoIdentity
   /\ phase' = "offline"
   /\ liveRuns' = liveRuns \ {runId}
+  /\ cancelPending' = FALSE
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
   /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
@@ -115,10 +140,15 @@ Next ==
   \/ DispatchOutcomeUnknown
   \/ ReadyCallback
   \/ Close
+  \/ SendCancel
+  \/ AcknowledgeCancel
   \/ CommitDispatchAfterClose
   \/ GitHubTerminates
 
-Spec == Init /\ [][Next]_vars /\ WF_vars(GitHubTerminates)
+Spec == Init /\ [][Next]_vars
+             /\ WF_vars(SendCancel)
+             /\ WF_vars(AcknowledgeCancel)
+             /\ WF_vars(GitHubTerminates)
 
 TypeOK ==
   /\ generation \in 0..2
@@ -127,6 +157,7 @@ TypeOK ==
   /\ descriptorGeneration \in 0..2
   /\ descriptorRun \in 0..2
   /\ closeRequested \in BOOLEAN
+  /\ cancelPending \in BOOLEAN
   /\ dispatchIssued \in BOOLEAN
   /\ liveRuns \subseteq Runs
   /\ cancelledRuns \subseteq Runs
@@ -147,6 +178,13 @@ ActiveRunIsCurrent ==
 
 NoFutureRunCancelled == \A cancelled \in cancelledRuns : cancelled <= generation
 
+CancelResponsibilityRetained ==
+  (/\ phase = "closing"
+   /\ runId # NoIdentity
+   /\ runId \in liveRuns
+   /\ runId \notin cancelledRuns)
+  => cancelPending
+
 ClosingConverges ==
   []((phase = "closing" /\ runId # NoIdentity) => <>(phase = "offline"))
 
@@ -161,9 +199,23 @@ BadReadyCallback ==
   /\ descriptorGeneration' = 1
   /\ descriptorRun' = 1
   /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
-                  liveRuns, cancelledRuns >>
+                  cancelPending, liveRuns, cancelledRuns >>
+
+BadLoseCancelResponsibility ==
+  /\ phase = "closing"
+  /\ cancelPending
+  /\ runId # NoIdentity
+  /\ runId \in liveRuns
+  /\ runId \notin cancelledRuns
+  /\ cancelPending' = FALSE
+  /\ UNCHANGED << generation, phase, runId, descriptorGeneration,
+                  descriptorRun, closeRequested, dispatchIssued, liveRuns,
+                  cancelledRuns >>
 
 BadNext == Next \/ BadReadyCallback
 BadSpec == Init /\ [][BadNext]_vars
+
+CancelBadNext == Next \/ BadLoseCancelResponsibility
+CancelBadSpec == Init /\ [][CancelBadNext]_vars
 
 ====
