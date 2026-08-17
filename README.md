@@ -18,7 +18,8 @@ The workflow is deliberately declarative and happy-path:
 - Tailscale uses its official Linux installer.
 
 The main workflow declares the environment through local actions for
-development tools, private network, T3, readiness, and one-shot Lark delivery.
+development tools, private network, T3, readiness, and the authenticated
+Environment callback.
 There is no development-tool cache, fixed multi-language bootstrap, custom tool
 home, or shell wrapper for these commands. The workflow does not clone a repository.
 Users authenticate tools, clone zero or more projects, and follow each
@@ -26,7 +27,7 @@ project's own documentation after connection.
 
 Service readiness depends on the connection values emitted by the native
 processes, not a fixed startup delay. Dependency-free local Node actions model
-that wait and send one ready connection card.
+that wait and publish one private ready descriptor to the control plane.
 
 ## Configure the fixed Environment
 
@@ -45,15 +46,10 @@ Configure these repository secrets:
 | `MINI_END_USER_KEY` | Shared scoped bearer key used by Codex and Grok |
 | `MINI_CODEX_BASE_URL` | Confidential Codex provider base URL |
 | `MINI_GROK_BASE_URL` | Confidential Grok provider base URL |
-| `LARK_APP_ID` | Lark custom application ID |
-| `LARK_APP_SECRET` | Lark custom application secret |
-| `LARK_CHAT_NAME` | Exact destination chat name |
 
-The workflow only accepts zero-input `workflow_dispatch` and has read-only
-GitHub token permissions.
-
-The LarkSend card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
-`LARK_CHAT_NAME` secrets. See [LarkSend connection card](docs/lark-reporting.md).
+The workflow accepts one opaque `environment_id` from the control plane. It
+uses read-only repository permission plus `id-token: write` for its exact
+GitHub OIDC-authenticated ready callback.
 
 The two auth badges report separate daily native-CLI checks. Each workflow can
 also be dispatched manually. It installs the current official CLI, loads the
@@ -73,8 +69,9 @@ tagged runners over Tailscale SSH.
 
 ## Start and connect
 
-Dispatch **Private Development Environment**. The workflow has no inputs. The
-runner uses Tailscale SSH:
+In ChatGPT, call `open_environment` and open the returned stable Environment
+URL. After GitHub verifies the browser identity, the page shows Preparing and
+then redirects to T3's native pairing flow. The runner also uses Tailscale SSH:
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>
@@ -89,12 +86,13 @@ Private connection data is mode `0600` under:
 The file records the Cloudflare public origin and a pairing URL issued by T3
 for that origin. The workflow waits for the Quick Tunnel, then uses T3's native
 `auth pairing create --base-url` command; it does not parse credentials or
-construct pairing URLs. After all connections are ready, LarkSend publishes one
-non-forwardable card containing the native pairing URL. It never writes that
-URL to Actions logs, summaries, or artifacts, and the card is not updated when
-the run ends.
+construct pairing URLs. After all connections are ready, a GitHub
+OIDC-authenticated callback publishes the descriptor to the user-owned Durable
+Object. Pairing data never enters MCP results, Actions logs, summaries,
+artifacts, or public documentation.
 The initial workspace is `$HOME/workspace`. The user manages its repositories,
-credentials, and processes directly. Cancel the GitHub run when finished. The
+credentials, and processes directly. Call `close_environment` when finished,
+or cancel the authoritative GitHub run directly if ChatGPT is unavailable. The
 Quick Tunnel URL and all runner state disappear when the run ends or reaches
 the GitHub-hosted platform limit.
 
@@ -108,7 +106,6 @@ or diagnostic-artifact layer.
 
 ```bash
 bash tests/workflow-security.test.sh
-node --test tests/lark-send.test.js
 node --test tests/await-log.test.js
 shellcheck --severity=warning tests/*.sh
 actionlint
@@ -117,9 +114,9 @@ actionlint
 See the [operations runbook](docs/runner-operations-runbook.md) for the concise
 operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 
-For ChatGPT-driven code tasks, see the [ChatGPT code-task app](docs/chatgpt-app.md).
-It adds a stable Cloudflare Worker `/mcp` control plane while keeping the
-temporary development-environment workflow as a separate path.
+For ChatGPT-driven environments and code tasks, see the
+[ChatGPT app](docs/chatgpt-app.md). The same stable Worker exposes two separate
+interfaces: Remote Development Environments and Batch Code Tasks.
 Public-repository analysis runs without installing the GitHub App. Private
 repositories and write modes request repository installation only when their
 required access is missing; the original task remains waiting and resumes only

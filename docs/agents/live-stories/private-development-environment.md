@@ -1,157 +1,107 @@
 # Live Story: Private Development Environment
 
-Use this story after a merged change affects the Private Development
-Environment workflow, Tailscale, T3, Quick Tunnel, LarkSend, connection files,
-or environment cleanup. This is a human-in-the-loop production acceptance
-story for vibe coding. It is not an automated test or a CI job.
+Use this human-in-the-loop story after a merged and deployed change affects
+the ChatGPT Environment tools, workflow, Tailscale, T3, Quick Tunnel, private
+entry, or cleanup. Do not convert it into CI automation.
 
 ## User story
 
-As the owner, I can start one zero-input temporary development machine, receive
-its private connection descriptor in Lark, connect through Tailscale SSH and T3,
-and cancel the GitHub run without leaving a live runner or publishing pairing
-credentials.
+As the authenticated owner, I can ask ChatGPT to open one temporary development
+machine, use one stable private entry to complete native T3 pairing, connect by
+Tailscale SSH, and close the same runner without publishing pairing credentials.
 
 ## Preconditions
 
-- The change is merged to `main`; `session--none` only permits that branch.
+- The change is merged to `main` and the Worker is deployed.
 - `gh` is authenticated for `Harness-X-Harness/runner`.
-- The Agent's machine is online in the same Tailscale network.
-- The user can read the configured Lark chat and complete T3 pairing.
-- No pairing URL, token, private IP, provider endpoint, or secret is copied into
-  chat, issue comments, Actions output, summaries, or artifacts.
+- The Agent machine is in the same Tailscale network.
+- The user can refresh and reconnect the ChatGPT MCP connection.
+- No pairing URL, token, private address, provider endpoint, or secret is copied
+  into chat, issues, Actions output, summaries, artifacts, or tracked files.
 
 ## Roles
 
-The Agent performs all non-sensitive probes, keeps the user informed, and
-cancels the run after acceptance. The Agent must pause at the explicit user
-gates instead of operating the user's Lark or pairing UI.
-
-The user confirms the Lark card and completes native T3 pairing. The user does
-not need to copy the pairing URL back to the Agent.
+The Agent performs all non-sensitive probes and cleanup. It pauses for the user
+to refresh or reconnect ChatGPT, confirm GitHub browser identity, and complete
+native T3 pairing. The user never pastes pairing access back to the Agent.
 
 ## Story
 
-### 1. Start one environment
+### 1. Refresh the ChatGPT connection
 
-The Agent dispatches **Private Development Environment** on `main` without
-inputs and records the new run only for the current acceptance session.
+Pause. The user refreshes the MCP metadata, reconnects once, and confirms the
+single Environment-management permission. The user starts a new conversation.
 
-Wait by observing GitHub step state. Do not use a fixed sleep as a readiness
-signal. Continue when these steps have succeeded and **Keep environment
-running** is active:
+### 2. Open one Environment
 
-- development tools
-- private network
-- T3 session
-- LarkSend
+The user calls `open_environment` without arguments. Confirm that it returns:
 
-### 2. Confirm the one-shot Lark delivery
+- status Starting or Ready;
+- the stable `https://runners.trustedtunnel.app/environment` entry;
+- the exact non-sensitive GitHub run link;
+- no T3 origin, pairing URL, token, private address, or provider endpoint.
 
-Pause for the user to confirm that the newest run produced:
+Call it again and confirm that it returns the same active run instead of
+dispatching another one.
 
-- exactly one Ready card;
-- no Starting card;
-- Open T3, Pair T3, GitHub run, and Tailscale SSH information;
-- no message update when an earlier run was cancelled.
+### 3. Confirm identity and pair T3
 
-Do not add Lark message-history permission only to automate this confirmation.
+Pause. The user opens the stable Environment entry, completes GitHub identity
+confirmation, sees Preparing, and then completes T3's native pairing flow. The
+user does not copy the destination or token into ChatGPT.
 
-### 3. Probe the private machine
+### 4. Probe the private machine
 
-The Agent finds the peer named `gha-<run-id>-<run-attempt>` in Tailscale and
-connects as `runner` through Tailscale SSH.
+The Agent observes the exact GitHub run until **Keep environment running** is
+active. It finds `gha-<run-id>-<run-attempt>` in Tailscale, connects as `runner`,
+and verifies without changing the workspace:
 
-Verify without changing the workspace:
-
-- the peer is online and SSH succeeds;
+- peer online and Tailscale SSH succeeds;
 - `$HOME/workspace` is empty, owned by `runner`, and mode `0700`;
 - `codex --version`, `claude --version`, and `grok --version` succeed;
 - T3 on `127.0.0.1:3773` returns HTTP 200;
 - `t3-url`, `pairing-url`, and `connection.txt` are mode `0600`.
 
-Version numbers are evidence, not pinned expectations. The workflow installs
-the official current versions.
+Read URL files only inside a remote boolean probe. Verify that the two HTTPS
+URLs share one Quick Tunnel origin, pairing uses `/pair`, its fragment contains
+a token, and the pairing route returns HTTP 200. Never print either URL.
 
-### 4. Probe the public T3 descriptor
+### 5. Close and prove cleanup
 
-Read the two runner-local URL files only inside a remote probe. Print boolean
-results, never the values.
+The user calls `close_environment` without arguments. The Agent confirms:
 
-Verify:
+- the exact run becomes `completed` with conclusion `cancelled`;
+- the matching Tailscale peer becomes offline;
+- the stable Environment entry reports Offline;
+- a repeated close stays Offline and does not affect another run;
+- the run has zero artifacts;
+- MCP results, run logs, summaries, and artifacts contain no actual temporary
+  origin or pairing URL value.
 
-- the T3 origin is an HTTPS Quick Tunnel;
-- the pairing URL is an HTTPS Quick Tunnel;
-- both URLs have the same origin;
-- the pairing path is `/pair`;
-- a `token` exists in the URL fragment;
-- the pairing route returns HTTP 200.
-
-The expected evidence shape is:
-
-```text
-TUNNEL_PUBLIC=true
-PAIRING_PUBLIC=true
-ORIGINS_MATCH=true
-PAIR_PATH_VALID=true
-PAIR_TOKEN_PRESENT=true
-PAIR_ROUTE_HTTP=200
-```
-
-This story does not prescribe a shell loop. The workflow's `await-log` Action
-waits for the Quick Tunnel log value before T3 issues the public pairing URL.
-
-### 5. Complete native pairing
-
-Pause. The user opens **Pair T3** from the newest Lark card and confirms that
-native pairing succeeds. Do not ask the user to paste the URL or token.
-
-If this gate is unavailable, cancel the run and record pairing as not tested.
-Do not leave the runner active while waiting for a later session.
-
-### 6. Cancel and prove cleanup
-
-After the user confirms pairing, the Agent cancels the same GitHub run and
-waits for:
-
-- GitHub status `completed` with conclusion `cancelled`;
-- the matching Tailscale peer to report offline and inactive;
-- zero artifacts;
-- zero actual Quick Tunnel or pairing URL values in the completed run log.
-
-Source-code strings such as `Pairing URL:` or `PAIRING_URL=` are not credential
-leaks. Count only lines that contain an actual URL value.
-
-LarkSend has no cleanup update. The existing Ready card remains, while GitHub
-Actions is authoritative for whether the environment is still online.
+If ChatGPT is unavailable, cancel the exact GitHub run directly and confirm the
+same terminal and Offline state.
 
 ## Stop conditions
 
-Cancel the run before further diagnosis when:
-
-- the user or Agent exposes a pairing URL or token outside the trusted Lark
-  delivery;
-- Pair T3 uses a loopback or different origin;
-- the workflow fails before keep-alive;
-- the user cannot complete the manual gate in the current session.
-
-Do not hide a failure with a retry, fallback tunnel, fixed sleep, or a second
-notification lifecycle.
+Cancel the run before more diagnosis if a pairing credential is exposed, T3
+pairing uses loopback or a different origin, startup fails before keep-alive,
+or the user cannot complete the current manual gate. Do not add a fallback
+tunnel, fixed sleep, heartbeat, or second lifecycle owner.
 
 ## Acceptance record
 
-Record only a short, redacted conclusion:
+Record only this redacted state in local project memory:
 
 ```text
-Environment startup: passed | failed | not tested
-Lark one-shot card: passed | failed | not tested
+Worker and MCP contracts: passed | failed | not tested
+ChatGPT refresh and permission: passed | failed | not tested
+Stable Environment entry and ownership: passed | failed | not tested
+Native T3 pairing: passed | failed | not tested
 Tailscale SSH and workspace: passed | failed | not tested
 Installed CLIs: passed | failed | not tested
-T3 public descriptor: passed | failed | not tested
-Native pairing: passed | failed | not tested
-Cancellation and peer offline: passed | failed | not tested
+Private descriptor: passed | failed | not tested
+Close, terminal run, and peer offline: passed | failed | not tested
 Credential log/artifact scan: passed | failed | not tested
 ```
 
-Do not preserve transient run IDs, host addresses, URLs, tokens, or full logs in
-this document.
+Do not preserve run IDs, addresses, URLs, tokens, or full logs.

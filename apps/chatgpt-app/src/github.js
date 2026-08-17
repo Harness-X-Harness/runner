@@ -1,5 +1,6 @@
 const API = "https://api.github.com";
-const API_VERSION = "2022-11-28";
+const API_VERSION = "2026-03-10";
+const installationTokenCache = new Map();
 
 export async function dispatchWorkflow(env, task, fetchImpl = fetch) {
   const token = await installationToken(env, fetchImpl);
@@ -30,6 +31,41 @@ export async function dispatchWorkflow(env, task, fetchImpl = fetch) {
   }
 }
 
+export async function dispatchEnvironmentWorkflow(
+  env,
+  environment,
+  fetchImpl = fetch,
+) {
+  const token = await installationToken(env, fetchImpl);
+  const [owner, repository] = runnerRepository(env);
+  const workflow = env.GITHUB_ENVIRONMENT_WORKFLOW_ID ?? "private-runner-session.yml";
+  const response = await githubFetch(
+    `/repos/${owner}/${repository}/actions/workflows/${workflow}/dispatches`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ref: env.GITHUB_RUNNER_REF ?? "main",
+        inputs: { environment_id: environment.environmentId },
+        return_run_details: true,
+      }),
+    },
+    fetchImpl,
+  );
+  const run = await response.json().catch(() => undefined);
+  if (
+    !response.ok ||
+    !run?.workflow_run_id ||
+    typeof run?.html_url !== "string"
+  ) {
+    throw new Error(`GitHub Environment workflow dispatch failed with ${response.status}`);
+  }
+  return {
+    runId: String(run.workflow_run_id),
+    runUrl: run.html_url,
+  };
+}
+
 export async function cancelWorkflow(env, task, fetchImpl = fetch) {
   if (!task.runId) return;
   const token = await installationToken(env, fetchImpl);
@@ -45,7 +81,41 @@ export async function cancelWorkflow(env, task, fetchImpl = fetch) {
   }
 }
 
+export async function cancelEnvironmentWorkflow(env, runId, fetchImpl = fetch) {
+  const token = await installationToken(env, fetchImpl);
+  const [owner, repository] = runnerRepository(env);
+  const response = await githubFetch(
+    `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(runId)}/cancel`,
+    token,
+    { method: "POST" },
+    fetchImpl,
+  );
+  if (!response.ok) {
+    throw new Error(`GitHub Environment workflow cancellation failed with ${response.status}`);
+  }
+}
+
+export async function getEnvironmentWorkflowRun(env, runId, fetchImpl = fetch) {
+  const token = await installationToken(env, fetchImpl);
+  const [owner, repository] = runnerRepository(env);
+  const response = await githubFetch(
+    `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(runId)}`,
+    token,
+    {},
+    fetchImpl,
+  );
+  const run = await response.json().catch(() => undefined);
+  if (!response.ok || typeof run?.status !== "string") {
+    throw new Error(`GitHub Environment workflow lookup failed with ${response.status}`);
+  }
+  return { status: run.status, conclusion: run.conclusion ?? undefined };
+}
+
 async function installationToken(env, fetchImpl) {
+  const cacheKey = `${env.GITHUB_APP_ID}:${env.GITHUB_RUNNER_REPOSITORY}`;
+  const cached = installationTokenCache.get(cacheKey);
+  if (cached?.expiresAt > Date.now() + 60_000) return cached.token;
+
   const appJwt = await signAppJwt(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
   const [owner, repository] = runnerRepository(env);
   const installationResponse = await githubFetch(
@@ -75,7 +145,15 @@ async function installationToken(env, fetchImpl) {
     fetchImpl,
   );
   if (!response.ok) throw new Error(`GitHub App token request failed with ${response.status}`);
-  return (await response.json()).token;
+  const installation = await response.json();
+  const expiresAt = Date.parse(installation.expires_at ?? "");
+  if (installation.token && Number.isFinite(expiresAt)) {
+    installationTokenCache.set(cacheKey, {
+      token: installation.token,
+      expiresAt,
+    });
+  }
+  return installation.token;
 }
 
 function runnerRepository(env) {

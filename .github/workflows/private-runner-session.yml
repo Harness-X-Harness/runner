@@ -2,19 +2,22 @@ name: Private Development Environment
 
 on:
   workflow_dispatch:
+    inputs:
+      environment_id:
+        description: Opaque control-plane Environment identity.
+        required: true
+        type: string
 run-name: Private environment · #${{ github.run_number }}
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   session:
     runs-on: ubuntu-24.04
     environment: session--none
     env:
-      LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
-      LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
-      LARK_CHAT_NAME: ${{ secrets.LARK_CHAT_NAME }}
       MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
 
     steps:
@@ -48,7 +51,10 @@ jobs:
 
       - uses: ./.github/actions/t3-session
 
-      - uses: ./.github/actions/lark-send
+      - uses: ./.github/actions/environment-control
+        with:
+          control-plane-url: ${{ vars.TASK_CONTROL_PLANE_URL }}
+          environment-id: ${{ inputs.environment_id }}
 
       - name: Keep environment running
         shell: bash

@@ -11,6 +11,7 @@ import {
 import { completeGitHubUserAuthorization } from "./github-user-auth.js";
 import { consentScopes, describeScopes } from "./oauth-scopes.js";
 import { completeInstallationAuthorization } from "./repository-authorization.js";
+import { completeEnvironmentAuthorization } from "./environment-page.js";
 
 const CONSENT_TTL = 600;
 const CONSENT_COOKIE = "__Host-RUNNER_CSRF";
@@ -159,6 +160,12 @@ export async function completeAuthorizationCallback(
       fetchImpl,
     );
     response = await completionPage(installationResponse);
+  } else if (authorization.payload?.kind === "environment") {
+    response = await completeEnvironmentAuthorization(
+      env,
+      authorization,
+      fetchImpl,
+    );
   } else {
     response = html("Authorization error", "<p>Unknown GitHub authorization request.</p>", 400);
   }

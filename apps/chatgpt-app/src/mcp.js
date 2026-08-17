@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { cancelWorkflow, dispatchWorkflow } from "./github.js";
+import { closeEnvironment, openEnvironment } from "./environment.js";
 import {
   createInstallationRequest,
   resolveRepositoryAccess,
@@ -22,6 +23,8 @@ const SECURITY_SCHEMES = Object.freeze({
   get_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
   cancel_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:cancel"] }]),
   get_task_result: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
+  open_environment: Object.freeze([{ type: "oauth2", scopes: ["environments:manage"] }]),
+  close_environment: Object.freeze([{ type: "oauth2", scopes: ["environments:manage"] }]),
 });
 
 const statusSchema = z.enum(TASK_STATUSES);
@@ -197,6 +200,58 @@ export function createServer(env, props) {
     },
   );
 
+  registerAppTool(
+    server,
+    "open_environment",
+    {
+      title: "Open private development environment",
+      description: "Use this when the user wants to open their temporary private development environment.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({
+        status: z.enum(["starting", "ready", "closing"]),
+        environmentUrl: z.string(),
+        runUrl: z.string().optional(),
+      }),
+      securitySchemes: SECURITY_SCHEMES.open_environment,
+      annotations: annotations("open_environment"),
+    },
+    async () => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.open_environment[0].scopes);
+      const environment = await openEnvironment(
+        env,
+        requiredGitHubUserId(requestProps),
+      );
+      return result(environment, `Environment is ${environment.status}.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "close_environment",
+    {
+      title: "Close private development environment",
+      description: "Use this when the user explicitly wants to stop their temporary private development environment.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({
+        status: z.enum(["closing", "offline"]),
+        environmentUrl: z.string().optional(),
+        runUrl: z.string().optional(),
+      }),
+      securitySchemes: SECURITY_SCHEMES.close_environment,
+      annotations: annotations("close_environment"),
+    },
+    async () => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.close_environment[0].scopes);
+      const environment = await closeEnvironment(
+        env,
+        requiredGitHubUserId(requestProps),
+      );
+      return result(environment, `Environment is ${environment.status}.`);
+    },
+  );
+
   return server;
 }
 
@@ -305,4 +360,11 @@ function requireScopes(props, required) {
   const granted = new Set(props?.oauthScopes ?? []);
   const missing = required.filter((scope) => !granted.has(scope));
   if (missing.length > 0) throw new Error(`Missing OAuth scope: ${missing.join(", ")}`);
+}
+
+function requiredGitHubUserId(props) {
+  if (props?.githubUserId === undefined) {
+    throw new Error("GitHub authorization is required");
+  }
+  return String(props.githubUserId);
 }

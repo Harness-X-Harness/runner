@@ -25,8 +25,12 @@ import {
 } from "./repository-authorization.js";
 import { TaskObject } from "./task-object.js";
 import { AuthorizationStateObject } from "./authorization-state-object.js";
+import { EnvironmentObject } from "./environment-object.js";
+import { environmentEntry } from "./environment-page.js";
+import { publishEnvironmentReady } from "./environment-callback.js";
+import { trustedRunnerClaims } from "./runner-identity.js";
 
-export { AuthorizationStateObject, TaskObject };
+export { AuthorizationStateObject, EnvironmentObject, TaskObject };
 
 export class McpApi extends WorkerEntrypoint {
   fetch(request) {
@@ -85,6 +89,14 @@ async function defaultFetch(request, env) {
     return internalTaskFetch(request, env, url);
   }
 
+  if (url.pathname.startsWith("/internal/environments/")) {
+    return internalEnvironmentFetch(request, env, url);
+  }
+
+  if (url.pathname === "/environment" && request.method === "GET") {
+    return environmentEntry(request, env);
+  }
+
   if (url.pathname === "/authorize" && request.method === "GET") {
     return authorizePage(request, env);
   }
@@ -102,6 +114,29 @@ async function defaultFetch(request, env) {
   }
 
   return new Response("Not found", { status: 404 });
+}
+
+async function internalEnvironmentFetch(request, env, url) {
+  if (request.method !== "POST" || !url.pathname.endsWith("/ready")) {
+    return json({ error: "not found" }, 404);
+  }
+  let claims;
+  try {
+    claims = await verifyRunnerIdentity(
+      request,
+      env,
+      env.GITHUB_ENVIRONMENT_WORKFLOW_ID ?? "private-runner-session.yml",
+    );
+  } catch {
+    return json({ error: "runner authorization required" }, 401);
+  }
+  const environmentId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+  return publishEnvironmentReady(
+    env,
+    environmentId,
+    String(claims.run_id),
+    await request.json(),
+  );
 }
 
 async function internalTaskFetch(request, env, url) {
@@ -160,20 +195,18 @@ const githubOidcKeys = createRemoteJWKSet(
   new URL("https://token.actions.githubusercontent.com/.well-known/jwks"),
 );
 
-async function verifyRunnerIdentity(request, env) {
+async function verifyRunnerIdentity(
+  request,
+  env,
+  workflowId = env.GITHUB_WORKFLOW_ID ?? "execute-task.yml",
+) {
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) throw new Error("runner identity required");
   const { payload } = await jwtVerify(token, githubOidcKeys, {
     issuer: "https://token.actions.githubusercontent.com",
     audience: env.TASK_CONTROL_PLANE_URL,
   });
-  const configuredRef = env.GITHUB_RUNNER_REF ?? "main";
-  const workflowRef = configuredRef.startsWith("refs/") ? configuredRef : `refs/heads/${configuredRef}`;
-  const expectedWorkflow = `${env.GITHUB_RUNNER_REPOSITORY}/.github/workflows/${env.GITHUB_WORKFLOW_ID ?? "execute-task.yml"}@${workflowRef}`;
-  if (payload.repository !== env.GITHUB_RUNNER_REPOSITORY || payload.workflow_ref !== expectedWorkflow || !payload.run_id) {
-    throw new Error("runner identity is not trusted");
-  }
-  return payload;
+  return trustedRunnerClaims(payload, env, workflowId);
 }
 
 function json(value, status = 200) {

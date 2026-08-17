@@ -10,6 +10,8 @@ test("tool contract separates task reads from writes", () => {
     { name: "get_task", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     { name: "cancel_task", readOnlyHint: false, openWorldHint: false, destructiveHint: true },
     { name: "get_task_result", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    { name: "open_environment", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+    { name: "close_environment", readOnlyHint: false, openWorldHint: true, destructiveHint: true },
   ]);
 });
 

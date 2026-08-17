@@ -13,11 +13,11 @@ One user-owned, general-purpose GitHub-hosted runner that exists for exactly one
 _Avoid_: Code Task, persistent Session, repository workflow
 
 **Environment Run**:
-The GitHub Actions workflow run that creates, owns, and terminates one Remote Development Environment. Its native GitHub status is the only Environment lifecycle state. There is no separate Environment ID, store, sleeping, restoring, or resume state.
+The GitHub Actions workflow run that creates and terminates one Remote Development Environment. Its native GitHub status is lifecycle authority. The control plane stores only owner association, opaque generation, exact run identity, private delivery, and close intent.
 _Avoid_: Code Task, control-plane Session
 
 **Connection Descriptor**:
-The current private connection information for one active Environment, such as its Tailscale hostname and T3 origin or pairing entry. LarkSend delivers it once after startup.
+The current private connection information for one active Environment, such as its Tailscale hostname and T3 origin or pairing entry. The runner publishes it once to the owner-specific control-plane state through GitHub OIDC.
 _Avoid_: Stable Tunnel, credential log, artifact
 
 **T3 Interface**:
@@ -28,6 +28,6 @@ _Avoid_: Environment control plane, MCP transport
 The Tailscale/Headscale connection to the Environment. It provides Tailscale SSH today and can support another remote client only when that client's protocol and required port are explicitly verified and authorized.
 _Avoid_: T3 Tunnel, proof of client compatibility
 
-**LarkSend**:
-A reusable one-shot Action that sends one non-forwardable card to the exactly configured Lark chat. It does not know Environment lifecycle, update a prior message, or run cleanup.
-_Avoid_: Session reporter, notification state machine
+**Environment Entry**:
+The stable authenticated browser route that shows Preparing, redirects the owner to T3 native pairing when ready, and becomes Offline after the authoritative GitHub run terminates.
+_Avoid_: Stable Tunnel, pairing-token MCP result, lifecycle authority

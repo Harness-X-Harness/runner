@@ -1,11 +1,11 @@
-# ChatGPT code-task app
+# ChatGPT runner app
 
 The repository now contains a separate Cloudflare Worker control plane under
 `apps/chatgpt-app`. Its stable public endpoint is
-`https://runners.trustedtunnel.app/mcp`; the temporary GitHub runner remains
-the execution plane. The zero-input
-Private Development Environment workflow remains independent of
-the ChatGPT code-task control plane.
+`https://runners.trustedtunnel.app/mcp`; temporary GitHub runners remain the
+execution plane. Remote Development Environments and Batch Code Tasks share
+authentication and dispatch infrastructure, but keep separate product
+interfaces and lifecycle state.
 
 ## Request flow
 
@@ -40,7 +40,9 @@ The storage boundary is deliberate. The OAuth provider alone uses its required
 `OAUTH_KV` binding. Consent, GitHub callback, and repository-installation state
 use one strongly consistent `AuthorizationStateObject` Durable Object per
 opaque state identifier. Each code task uses its own `TaskObject` Durable Object
-for serialized lifecycle updates. D1 is not part of the current design. See
+for serialized lifecycle updates. Each GitHub user has one `EnvironmentObject`
+for strong ownership, generation freshness, exact run identity, private
+descriptor delivery, and close intent. D1 is not part of the current design. See
 [ADR 0001](adr/0001-oauth-kv-task-durable-objects.md) for the alternatives and
 the conditions that would justify revisiting this choice.
 
@@ -52,6 +54,30 @@ The public tools are:
 | `get_task` | Read current status | None |
 | `cancel_task` | Request cancellation | Cancels a GitHub run when its run ID is known |
 | `get_task_result` | Read summary, commit, or PR | None |
+| `open_environment` | Open or return the caller's one active Environment | Starts one runner when none is active |
+| `close_environment` | Close the caller's active Environment | Cancels its exact GitHub run |
+
+## Remote Development Environment flow
+
+`open_environment` has no input. The authenticated GitHub user is the owner
+identity. A per-user `EnvironmentObject` enforces at most one active
+Environment, stores the exact GitHub run returned by workflow dispatch, and
+returns only the stable `https://runners.trustedtunnel.app/environment` entry
+plus a non-sensitive run link.
+
+The browser entry verifies GitHub identity independently. While the runner
+starts, it displays Preparing. After T3, Quick Tunnel, and Tailscale are ready,
+the runner uses GitHub Actions OIDC to publish one descriptor for the exact
+repository, workflow, run, signed generation, and Environment. The entry then
+redirects the owner to T3's native pairing page. Pairing URLs, T3 origins,
+Tailscale details, provider endpoints, and credentials never enter MCP output.
+
+`close_environment` has no input. It records close intent, removes private
+connection delivery, and cancels the exact recorded GitHub run. Repeated close
+requests do not cancel another run. A delayed ready callback cannot restore a
+closed descriptor. When GitHub reports the run terminal, the Environment entry
+converges to Offline. GitHub Actions remains lifecycle authority; users can
+cancel the run directly if ChatGPT is unavailable.
 
 The initial MCP challenge and protected-resource metadata request the complete
 App capability set. The single `submit_task` tool also declares every scope it
@@ -100,6 +126,7 @@ npx wrangler kv namespace create OAUTH_KV
 npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY
 npx wrangler secret put GITHUB_APP_CLIENT_SECRET
+npx wrangler secret put ENVIRONMENT_SESSION_SECRET
 npx wrangler deploy
 ```
 
@@ -204,6 +231,11 @@ must pass both user authorization and current installation-permission checks.
 The App installation token remains the short-lived execution credential used
 to dispatch the runner workflow and modify an installed target repository.
 No separate GitHub OAuth App or broad `repo` OAuth scope is required.
+
+The runner repository also needs the variable `TASK_CONTROL_PLANE_URL` with the
+same fixed origin. The Environment workflow receives only the opaque signed
+`environment_id`; it does not receive a user prompt, repository, pairing URL,
+or callback secret.
 
 ## Repository authorization states
 
