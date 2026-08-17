@@ -27,7 +27,10 @@ import { TaskObject } from "./task-object.js";
 import { AuthorizationStateObject } from "./authorization-state-object.js";
 import { EnvironmentObject } from "./environment-object.js";
 import { environmentEntry } from "./environment-page.js";
-import { publishEnvironmentReady } from "./environment-callback.js";
+import {
+  claimEnvironmentRun,
+  publishEnvironmentReady,
+} from "./environment-callback.js";
 import { trustedRunnerClaims } from "./runner-identity.js";
 
 export { AuthorizationStateObject, EnvironmentObject, TaskObject };
@@ -117,7 +120,11 @@ async function defaultFetch(request, env) {
 }
 
 async function internalEnvironmentFetch(request, env, url) {
-  if (request.method !== "POST" || !url.pathname.endsWith("/ready")) {
+  const operation = url.pathname.split("/").at(-1);
+  if (
+    request.method !== "POST" ||
+    (operation !== "claim" && operation !== "ready")
+  ) {
     return json({ error: "not found" }, 404);
   }
   let claims;
@@ -131,6 +138,14 @@ async function internalEnvironmentFetch(request, env, url) {
     return json({ error: "runner authorization required" }, 401);
   }
   const environmentId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+  if (operation === "claim") {
+    return claimEnvironmentRun(
+      env,
+      environmentId,
+      String(claims.run_id),
+      `https://github.com/${env.GITHUB_RUNNER_REPOSITORY}/actions/runs/${claims.run_id}`,
+    );
+  }
   return publishEnvironmentReady(
     env,
     environmentId,

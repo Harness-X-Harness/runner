@@ -50,9 +50,12 @@ export async function environmentEntry(
   const runLink = environment.runUrl
     ? `<p><a href="${escapeHtml(environment.runUrl)}">View the GitHub Actions run</a></p>`
     : "";
+  const preparing = environment.dispatchOutcome
+    ? "GitHub has not confirmed whether startup was accepted. Close this Environment from ChatGPT if it does not start."
+    : "Your temporary runner and T3 Code are starting.";
   return page(
     "Preparing private development environment",
-    `<p>Your temporary runner and T3 Code are starting.</p>${runLink}`,
+    `<p>${escapeHtml(preparing)}</p>${runLink}`,
     '<meta http-equiv="refresh" content="10">',
   );
 }

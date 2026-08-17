@@ -4,8 +4,10 @@
 
 Call `open_environment` from the connected ChatGPT app and open its stable
 Environment URL. The control plane dispatches **Private Development
-Environment** with one opaque correlation input. The workflow uses the fixed
-`session--none` GitHub Environment. It creates an empty
+Environment** with one signed generation and one opaque owner concurrency
+slot. The workflow uses the fixed `session--none` GitHub Environment. It
+claims its exact run through GitHub OIDC before loading credentials or starting
+private interfaces. It then creates an empty
 `$HOME/workspace`, joins Headscale, and starts T3 through a Quick Tunnel.
 
 ## Connect
@@ -39,7 +41,39 @@ output and exit status; the workflow has no custom retry, timeout, fallback, or
 diagnostic-artifact layer.
 
 GitHub Actions is authoritative for current run status. The control plane only
-stores ownership, exact run identity, private delivery, and close intent.
+stores ownership, generation admission, exact run identity, private delivery,
+and close intent.
+
+If GitHub rejects dispatch before it creates a run, `open_environment` reports
+the failure and releases that generation. Do not retry while GitHub has a known
+service outage.
+
+If GitHub returns `5xx` or the response is lost, the tool returns Starting and
+does not dispatch again. The stable entry says that GitHub has not confirmed
+startup until the early OIDC claim supplies the exact run. If the workflow does
+not claim, call `close_environment`. Closing an unclaimed generation returns
+Offline and invalidates every delayed callback from that generation. A delayed
+workflow can perform checkout, but it fails its claim before executor secrets,
+Tailscale, T3, or Quick Tunnel setup.
+
+The same user action applies if Cloudflare committed the generation but the
+Worker did not receive the Durable Object response. A repeated open returns the
+same unconfirmed generation and does not infer that dispatch is safe. Close it,
+then open a new generation after the platform is healthy.
+
+If an exact run is already known and cancellation cannot be delivered,
+`close_environment` returns Closing and keeps the cancellation pending.
+Repeating close can affect only that same run. The stable Environment entry
+observes the exact run and changes to Offline after GitHub makes it terminal.
+If that exact-run lookup is temporarily unavailable, the entry request can
+fail, but it does not rewrite Environment state. Refresh it after GitHub
+recovers; do not use an empty list or a failed lookup to start another run.
+
+This is not exactly-once network delivery. GitHub does not accept an
+application idempotency key for workflow dispatch. Safety comes from an
+at-most-once dispatch attempt, the early generation gate, owner-slot workflow
+concurrency, and exact-run cancellation. No empty workflow listing or `5xx`
+response is treated as proof that GitHub created no run.
 
 ## Local checks
 

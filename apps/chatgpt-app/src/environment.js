@@ -1,6 +1,7 @@
 import {
   cancelEnvironmentWorkflow,
   dispatchEnvironmentWorkflow,
+  EnvironmentDispatchError,
   getEnvironmentWorkflowRun,
 } from "./github.js";
 import { issueEnvironmentIdentity } from "./environment-identity.js";
@@ -26,7 +27,31 @@ export async function openEnvironment(
 
   let environment = claim.environment;
   if (claim.dispatch) {
-    const run = await dispatch(env, { environmentId: generation });
+    let run;
+    try {
+      run = await dispatch(env, {
+        environmentId: generation,
+        environmentOwner: environment.slot,
+      });
+    } catch (error) {
+      if (error instanceof EnvironmentDispatchError && error.outcome === "rejected") {
+        await environmentRequest(env, ownerId, "/environment/dispatch-failed", {
+          method: "POST",
+          body: JSON.stringify({ generation }),
+        });
+        throw error;
+      }
+      environment = await environmentRequest(
+        env,
+        ownerId,
+        "/environment/dispatch-unknown",
+        {
+          method: "POST",
+          body: JSON.stringify({ generation }),
+        },
+      );
+      return publicEnvironment(environment, env.TASK_CONTROL_PLANE_URL);
+    }
     const committed = await environmentRequest(
       env,
       ownerId,
@@ -102,7 +127,11 @@ export async function reconcileEnvironment(
 }
 
 async function cancelRecordedEnvironment(env, ownerId, environment, cancel) {
-  await cancel(env, environment.runId);
+  try {
+    await cancel(env, environment.runId);
+  } catch {
+    return environment;
+  }
   return environmentRequest(env, ownerId, "/environment/cancel", {
     method: "POST",
     body: JSON.stringify({ runId: environment.runId }),

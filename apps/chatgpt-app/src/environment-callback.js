@@ -1,6 +1,35 @@
 import { environmentRequest } from "./environment.js";
 import { verifyEnvironmentIdentity } from "./environment-identity.js";
 
+export async function claimEnvironmentRun(env, environmentId, runId, runUrl) {
+  const identity = await verifyEnvironmentIdentity(
+    environmentId,
+    env.ENVIRONMENT_SESSION_SECRET,
+  );
+  if (!identity) return json({ error: "invalid environment identity" }, 404);
+
+  try {
+    const result = await environmentRequest(
+      env,
+      identity.ownerId,
+      "/environment/claim",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          generation: environmentId,
+          runId: String(runId),
+          runUrl: String(runUrl),
+        }),
+      },
+    );
+    return result.cancel
+      ? json({ error: "environment is closing" }, 409)
+      : json({ status: result.environment.status });
+  } catch {
+    return json({ error: "environment claim is stale" }, 409);
+  }
+}
+
 export async function publishEnvironmentReady(env, environmentId, runId, descriptor) {
   const identity = await verifyEnvironmentIdentity(
     environmentId,

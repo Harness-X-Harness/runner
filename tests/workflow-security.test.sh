@@ -32,20 +32,36 @@ for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$E
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
-# GitHub Actions is the complete environment lifecycle. The workflow has one
-# fixed profile and publishes one ready descriptor through runner OIDC.
+# GitHub Actions is the complete environment lifecycle. The workflow claims
+# its run through OIDC before sensitive setup, then publishes one descriptor.
 grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
   fail 'private environment must use manual workflow dispatch'
 grep -Fq '      environment_id:' "$WORKFLOW" || \
   fail 'private environment workflow must receive one opaque Environment identity'
+grep -Fq '      environment_owner:' "$WORKFLOW" || \
+  fail 'private environment workflow must receive one opaque owner slot'
+grep -Fq 'group: private-environment-${{ inputs.environment_owner }}' "$WORKFLOW" || \
+  fail 'private environment workflow must contain duplicate runs by owner slot'
+grep -Fq 'cancel-in-progress: true' "$WORKFLOW" || \
+  fail 'a newer owner generation must supersede an older workflow run'
 grep -Fq 'environment: session--none' "$WORKFLOW" || \
   fail 'private environment must use the fixed session--none profile'
 grep -Fq 'uses: ./.github/actions/private-network' "$WORKFLOW" || \
   fail 'private environment must always join the private network'
 grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must always start T3'
-[[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 1 ]] || \
-  fail 'private environment must publish exactly one authenticated ready callback'
+[[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 2 ]] || \
+  fail 'private environment must have one claim and one ready callback'
+[[ "$(grep -Fc 'phase: claim' "$WORKFLOW")" == 1 ]] || \
+  fail 'private environment must claim the exact run once'
+[[ "$(grep -Fc 'phase: ready' "$WORKFLOW")" == 1 ]] || \
+  fail 'private environment must publish the ready descriptor once'
+claim_line="$(grep -nF 'phase: claim' "$WORKFLOW" | cut -d: -f1)"
+secret_line="$(grep -nF 'MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}' "$WORKFLOW" | cut -d: -f1)"
+network_line="$(grep -nF 'uses: ./.github/actions/private-network' "$WORKFLOW" | cut -d: -f1)"
+t3_line="$(grep -nF 'uses: ./.github/actions/t3-session' "$WORKFLOW" | cut -d: -f1)"
+(( claim_line < secret_line && claim_line < network_line && claim_line < t3_line )) || \
+  fail 'runner claim must precede credentials, private network, and T3 setup'
 grep -Fq 'id-token: write' "$WORKFLOW" || \
   fail 'private environment must request OIDC identity for its callback'
 grep -Fq 'run: sleep infinity' "$WORKFLOW" || \

@@ -7,7 +7,15 @@ on:
         description: Opaque control-plane Environment identity.
         required: true
         type: string
+      environment_owner:
+        description: Opaque owner concurrency slot.
+        required: true
+        type: string
 run-name: Private environment · #${{ github.run_number }}
+
+concurrency:
+  group: private-environment-${{ inputs.environment_owner }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,13 +25,16 @@ jobs:
   session:
     runs-on: ubuntu-24.04
     environment: session--none
-    env:
-      MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+
+      - uses: ./.github/actions/environment-control
+        with:
+          phase: claim
+          control-plane-url: ${{ vars.TASK_CONTROL_PLANE_URL }}
+          environment-id: ${{ inputs.environment_id }}
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -34,9 +45,11 @@ jobs:
       - name: Configure Mini executors
         shell: bash
         env:
+          MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
           MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
           MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
         run: |
+          printf 'MINI_END_USER_KEY=%s\n' "$MINI_END_USER_KEY" >> "$GITHUB_ENV"
           install -d -m 0700 "$HOME/.codex" "$HOME/.grok"
           printf 'model = "gpt-5.6-sol"\nmodel_provider = "mini_codex"\n\n[model_providers.mini_codex]\nname = "Mini Codex"\nbase_url = "%s"\nwire_api = "responses"\nenv_key = "MINI_END_USER_KEY"\n' \
             "$MINI_CODEX_BASE_URL" > "$HOME/.codex/config.toml"
@@ -53,6 +66,7 @@ jobs:
 
       - uses: ./.github/actions/environment-control
         with:
+          phase: ready
           control-plane-url: ${{ vars.TASK_CONTROL_PLANE_URL }}
           environment-id: ${{ inputs.environment_id }}
 
