@@ -22,4 +22,16 @@ test("control plane uses one fixed Custom Domain without workers.dev", async () 
     configuration.vars.TASK_CONTROL_PLANE_URL,
     "https://runners.trustedtunnel.app",
   );
+  assert.deepEqual(
+    configuration.durable_objects.bindings.find(({ name }) => name === "ENVIRONMENTS"),
+    { name: "ENVIRONMENTS", class_name: "EnvironmentObject" },
+  );
+  assert.deepEqual(configuration.migrations.at(-1), {
+    tag: "v3",
+    new_sqlite_classes: ["EnvironmentObject"],
+  });
+  assert.equal(
+    configuration.vars.GITHUB_ENVIRONMENT_WORKFLOW_ID,
+    "private-runner-session.yml",
+  );
 });

@@ -116,13 +116,29 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   );
   assert.equal(modernResponse.status, 200);
   const modernTools = (await modernResponse.json()).result.tools;
-  assert.equal(modernTools.length, 4);
+  assert.equal(modernTools.length, 6);
   assert.deepEqual(modernTools.find(({ name }) => name === "submit_task").securitySchemes, [
     {
       type: "oauth2",
       scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"],
     },
   ]);
+  assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").securitySchemes, [
+    { type: "oauth2", scopes: ["environments:manage"] },
+  ]);
+  assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").annotations, {
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: true,
+  });
+  assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").securitySchemes, [
+    { type: "oauth2", scopes: ["environments:manage"] },
+  ]);
+  assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").annotations, {
+    readOnlyHint: false,
+    destructiveHint: true,
+    openWorldHint: true,
+  });
 
   const legacyResponse = await handleMcpRequest(
     new Request("https://runner.example/mcp", {
@@ -141,7 +157,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const eventData = (await legacyResponse.text()).match(/^data: (.+)$/m)?.[1];
   assert.ok(eventData);
   const legacyTools = JSON.parse(eventData).result.tools;
-  assert.equal(legacyTools.length, 4);
+  assert.equal(legacyTools.length, 6);
   assert.deepEqual(legacyTools.find(({ name }) => name === "get_task").annotations, {
     readOnlyHint: true,
     destructiveHint: false,

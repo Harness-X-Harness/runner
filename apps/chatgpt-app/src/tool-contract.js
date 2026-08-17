@@ -23,4 +23,16 @@ export const TOOL_CONTRACT = Object.freeze([
     openWorldHint: false,
     destructiveHint: false,
   }),
+  Object.freeze({
+    name: "open_environment",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: false,
+  }),
+  Object.freeze({
+    name: "close_environment",
+    readOnlyHint: false,
+    openWorldHint: true,
+    destructiveHint: true,
+  }),
 ]);

@@ -4,7 +4,9 @@ import { readFile } from "node:fs/promises";
 import test, { afterEach } from "node:test";
 
 import {
+  dispatchEnvironmentWorkflow,
   dispatchWorkflow,
+  getEnvironmentWorkflowRun,
 } from "../apps/chatgpt-app/src/github.js";
 import { resolveRepositoryAccess } from "../apps/chatgpt-app/src/repository-authorization.js";
 
@@ -143,6 +145,104 @@ test("workflow dispatch resolves the App installation from the runner repository
     JSON.parse(requests[2].init.body).inputs.repository_access,
     "public_read",
   );
+});
+
+test("Environment dispatch returns the exact GitHub workflow run identity", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/repos/Harness-X-Harness/runner/installation")) {
+      return Response.json({ id: 987654 });
+    }
+    if (String(url).endsWith("/app/installations/987654/access_tokens")) {
+      return Response.json({ token: "installation-token" });
+    }
+    if (String(url).endsWith("/actions/workflows/private-runner-session.yml/dispatches")) {
+      return Response.json({
+        workflow_run_id: 24680,
+        run_url: "https://api.github.com/repos/Harness-X-Harness/runner/actions/runs/24680",
+        html_url: "https://github.com/Harness-X-Harness/runner/actions/runs/24680",
+      });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+
+  const run = await dispatchEnvironmentWorkflow(
+    {
+      GITHUB_APP_ID: "4385224",
+      GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+      GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
+      GITHUB_ENVIRONMENT_WORKFLOW_ID: "private-runner-session.yml",
+      GITHUB_RUNNER_REF: "main",
+    },
+    { environmentId: "environment-generation" },
+  );
+
+  assert.deepEqual(run, {
+    runId: "24680",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/24680",
+  });
+  const dispatch = requests.at(-1);
+  assert.equal(dispatch.init.headers["x-github-api-version"], "2026-03-10");
+  assert.deepEqual(JSON.parse(dispatch.init.body), {
+    ref: "main",
+    inputs: { environment_id: "environment-generation" },
+    return_run_details: true,
+  });
+});
+
+test("Environment terminal readback observes one exact GitHub workflow run", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/repos/Harness-X-Harness/runner/installation")) {
+      return Response.json({ id: 987654 });
+    }
+    if (String(url).endsWith("/app/installations/987654/access_tokens")) {
+      return Response.json({ token: "installation-token" });
+    }
+    if (String(url).endsWith("/actions/runs/24680")) {
+      return Response.json({ status: "completed", conclusion: "cancelled" });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const run = await getEnvironmentWorkflowRun({
+    GITHUB_APP_ID: "4385224",
+    GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+    GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
+  }, "24680");
+  assert.deepEqual(run, { status: "completed", conclusion: "cancelled" });
+  assert.match(requests.at(-1).url, /\/actions\/runs\/24680$/);
+});
+
+test("Environment readback reuses one unexpired installation token", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/repos/Harness-X-Harness/cache-runner/installation")) {
+      return Response.json({ id: 777 });
+    }
+    if (String(url).endsWith("/app/installations/777/access_tokens")) {
+      return Response.json({
+        token: "cached-installation-token",
+        expires_at: "2999-01-01T00:00:00Z",
+      });
+    }
+    if (String(url).includes("/actions/runs/")) {
+      return Response.json({ status: "in_progress", conclusion: null });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+  const env = {
+    GITHUB_APP_ID: "cache-test-app",
+    GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+    GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/cache-runner",
+  };
+  await getEnvironmentWorkflowRun(env, "100");
+  await getEnvironmentWorkflowRun(env, "100");
+  assert.equal(requests.filter(({ url }) => url.endsWith("/installation")).length, 1);
+  assert.equal(requests.filter(({ url }) => url.endsWith("/access_tokens")).length, 1);
+  assert.equal(requests.filter(({ url }) => url.endsWith("/actions/runs/100")).length, 2);
 });
 
 test("workflow selects exactly one target checkout authorization path", async () => {

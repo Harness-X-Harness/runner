@@ -23,6 +23,10 @@
       {
         "name": "AUTHORIZATION_STATES",
         "class_name": "AuthorizationStateObject"
+      },
+      {
+        "name": "ENVIRONMENTS",
+        "class_name": "EnvironmentObject"
       }
     ]
   },
@@ -34,6 +38,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["AuthorizationStateObject"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["EnvironmentObject"]
     }
   ],
   "kv_namespaces": [
@@ -45,6 +53,7 @@
   "vars": {
     "GITHUB_RUNNER_REPOSITORY": "Harness-X-Harness/runner",
     "GITHUB_WORKFLOW_ID": "execute-task.yml",
+    "GITHUB_ENVIRONMENT_WORKFLOW_ID": "private-runner-session.yml",
     "GITHUB_RUNNER_REF": "main",
     "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
     "TASK_CONTROL_PLANE_URL": "https://runners.trustedtunnel.app"

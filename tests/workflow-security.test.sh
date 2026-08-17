@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract checks for public-repo safety and the one-shot Lark connection card.
+# Contract checks for public-repo safety and authenticated Environment delivery.
 # These are policy assertions over workflow YAML, not behavioral tests.
 # Implementation details (installer URLs, package versions) belong elsewhere.
 
@@ -14,8 +14,8 @@ TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
-LARK_ACTION="$ROOT_DIR/.github/actions/lark-send/action.yml"
-LARK_SCRIPT="$ROOT_DIR/.github/actions/lark-send/index.js"
+ENVIRONMENT_ACTION="$ROOT_DIR/.github/actions/environment-control/action.yml"
+ENVIRONMENT_SCRIPT="$ROOT_DIR/.github/actions/environment-control/index.js"
 CONTROL_ACTION="$ROOT_DIR/.github/actions/task-control/action.yml"
 CONTROL_SCRIPT="$ROOT_DIR/.github/actions/task-control/index.js"
 
@@ -28,25 +28,26 @@ fail() {
 [[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
 [[ -f "$CODEX_AUTH_WORKFLOW" ]] || fail "missing workflow: $CODEX_AUTH_WORKFLOW"
 [[ -f "$GROK_AUTH_WORKFLOW" ]] || fail "missing workflow: $GROK_AUTH_WORKFLOW"
-for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$LARK_ACTION" "$CONTROL_ACTION"; do
+for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$CONTROL_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
 # GitHub Actions is the complete environment lifecycle. The workflow has one
-# fixed profile, no dispatch parameters, and sends one ready connection card.
+# fixed profile and publishes one ready descriptor through runner OIDC.
 grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
   fail 'private environment must use manual workflow dispatch'
-if rg -q '^    inputs:|inputs[.]' "$WORKFLOW"; then
-  fail 'private environment workflow must have zero inputs'
-fi
+grep -Fq '      environment_id:' "$WORKFLOW" || \
+  fail 'private environment workflow must receive one opaque Environment identity'
 grep -Fq 'environment: session--none' "$WORKFLOW" || \
   fail 'private environment must use the fixed session--none profile'
 grep -Fq 'uses: ./.github/actions/private-network' "$WORKFLOW" || \
   fail 'private environment must always join the private network'
 grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must always start T3'
-[[ "$(grep -Fc 'uses: ./.github/actions/lark-send' "$WORKFLOW")" == 1 ]] || \
-  fail 'private environment must send exactly one Lark connection card'
+[[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 1 ]] || \
+  fail 'private environment must publish exactly one authenticated ready callback'
+grep -Fq 'id-token: write' "$WORKFLOW" || \
+  fail 'private environment must request OIDC identity for its callback'
 grep -Fq 'run: sleep infinity' "$WORKFLOW" || \
   fail 'private environment must remain until cancellation or platform limit'
 if rg -q 'TARGET_REPO|TARGET_REPO_AUTH|enable_ssh|non_durable|target-workspace' \
@@ -66,28 +67,15 @@ grep -Fq -- '--base-url "$backend_url"' "$T3_ACTION" || \
 grep -Fq -- '--json | jq -er .pairUrl' "$T3_ACTION" || \
   fail 'T3 session must consume the native pairUrl JSON field'
 
-grep -Fq 'using: node24' "$LARK_ACTION" || \
-  fail 'LarkSend must use the current Node 24 Action runtime'
-if grep -Fq 'post:' "$LARK_ACTION"; then
-  fail 'LarkSend must not define a post cleanup hook'
+grep -Fq 'using: node24' "$ENVIRONMENT_ACTION" || \
+  fail 'Environment callback must use the current Node 24 Action runtime'
+grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$ENVIRONMENT_SCRIPT" || \
+  fail 'Environment callback must obtain a GitHub OIDC token'
+grep -Fq '::add-mask::${pairingUrl}' "$ENVIRONMENT_SCRIPT" || \
+  fail 'Environment callback must mask native T3 pairing access'
+if rg -q 'LARK_APP_|LARK_CHAT_|lark-send' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'mandatory Lark delivery must not remain in the Environment path'
 fi
-grep -Fq 'Authorization: `Bearer ${accessToken}`' "$LARK_SCRIPT" || \
-  fail 'Lark card requests must use the application access token'
-[[ "$(grep -Fc 'method: "POST"' "$LARK_SCRIPT")" == 2 ]] || \
-  fail 'LarkSend must only request a token and create one message'
-if rg -q 'method: "PATCH"|message_id|GITHUB_STATE|Offline|Starting' "$LARK_ACTION" "$LARK_SCRIPT"; then
-  fail 'LarkSend still contains lifecycle update state'
-fi
-grep -Fq '"pairing-url"' "$LARK_SCRIPT" || \
-  fail 'LarkSend must read the native T3 pairing URL'
-grep -Fq 'enable_forward: false' "$LARK_SCRIPT" || \
-  fail 'Lark connection card containing pairing access must not be forwardable'
-grep -Fq 'secrets.LARK_APP_ID' "$WORKFLOW" || \
-  fail 'workflow must pass LARK_APP_ID'
-grep -Fq 'secrets.LARK_APP_SECRET' "$WORKFLOW" || \
-  fail 'workflow must pass LARK_APP_SECRET'
-grep -Fq 'secrets.LARK_CHAT_NAME' "$WORKFLOW" || \
-  fail 'workflow must pass LARK_CHAT_NAME'
 
 # The control-plane workflow receives task metadata only. The private prompt is
 # fetched through a GitHub OIDC-authenticated callback after the runner starts.
@@ -252,7 +240,7 @@ fi
 
 # Public repository: never publish pairing material, private repo names, or
 # token-bearing service logs through Actions-visible channels. Pairing access
-# belongs only in the configured non-forwardable Lark card.
+# belongs only in the authenticated Environment entry.
 if rg -q 'GITHUB_STEP_SUMMARY' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'workflow writes GitHub step summary (public on public repos)'
 fi

@@ -1,0 +1,12 @@
+name: Environment control-plane callback
+description: Publish the ready private Environment descriptor.
+inputs:
+  control-plane-url:
+    description: Worker control-plane URL.
+    required: true
+  environment-id:
+    description: Opaque Environment generation identifier.
+    required: true
+runs:
+  using: node24
+  main: index.js

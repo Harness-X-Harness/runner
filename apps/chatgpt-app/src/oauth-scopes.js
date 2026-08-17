@@ -29,6 +29,11 @@ const SCOPE_DETAILS = Object.freeze({
     title: "Create pull requests",
     description: "Create a pull request when pull-request mode is selected.",
   }),
+  "environments:manage": Object.freeze({
+    group: "Environment permissions",
+    title: "Manage private development environments",
+    description: "Open and close your temporary private development environment.",
+  }),
 });
 
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));

@@ -9,7 +9,7 @@
 - 通过 Headscale/Tailscale SSH 提供私有 shell；
 - 运行 Codex、Claude Code 和 T3 Code；
 - 通过 Cloudflare Quick Tunnel 暴露带 T3 应用层认证的临时公网入口；
-- 使用 Lark 应用机器人发送一张 ready 连接卡片。
+- 通过 GitHub OIDC 向认证后的 Environment 入口发布一次 ready descriptor。
 
 GitHub-hosted runner 会在 job 结束后销毁，但这不是进程级沙箱。用户在环境中运行的代码、开发工具、T3 Code 和取得 SSH 访问权的主体均以 runner 用户权限运行，并能访问当前 run 中该用户可读的文件与凭证。
 
@@ -52,20 +52,19 @@ GitHub 安装返回的 `installation_id` 和通知本身不是授权证据。Wor
 
 ## 凭证与固定 GitHub Environment
 
-Remote Development Environment workflow 固定使用受保护的 `session--none` GitHub Environment。它不接收 Environment 或目标仓库输入。
+Remote Development Environment workflow 固定使用受保护的 `session--none`
+GitHub Environment。它只接收控制面签发的不透明 `environment_id`，不接收目标仓库或用户指令。
 
 | 配置 | 建议范围 | 用途 |
 | --- | --- | --- |
 | `HEADSCALE_AUTHKEY` | `session--none` Environment secret | tagged ephemeral auth key |
 | `HEADSCALE_URL` | Repository secret | Headscale control server URL |
-| `LARK_APP_ID` | Repository secret | Lark 自建应用 ID |
-| `LARK_APP_SECRET` | Repository secret | Lark 自建应用密钥 |
-| `LARK_CHAT_NAME` | Repository secret | 机器人所在目标群的精确名称 |
 | `GITHUB_APP_ID` | Worker secret | 调度 workflow 的 GitHub App |
 | `GITHUB_APP_PRIVATE_KEY` | Worker secret | 调度 workflow 的 GitHub App 私钥 |
 | `RUNNER_GITHUB_APP_ID` | Runner repository secret | 目标仓库授权使用的同一个 GitHub App；避开 GitHub 保留的 `GITHUB_` secret 前缀 |
 | `RUNNER_GITHUB_APP_PRIVATE_KEY` | Runner repository secret | 目标仓库授权使用的 GitHub App 私钥；只注入 token 创建 Action |
 | `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
+| `ENVIRONMENT_SESSION_SECRET` | Worker secret | 签名 Environment 浏览器会话与 opaque generation |
 | `MINI_END_USER_KEY` | Runner repository secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
 | `MINI_CODEX_BASE_URL` | Runner repository secret | Codex provider base URL；不得写入仓库、日志或 artifact |
 | `MINI_GROK_BASE_URL` | Runner repository secret | Grok provider base URL；不得写入仓库、日志或 artifact |
@@ -81,7 +80,9 @@ login、`auth.json` 或 `XAI_API_KEY` fallback。独立 auth workflows 使用官
 安装器和原生 user config 执行最小模型请求，并丢弃模型输出；它们不自行模拟
 provider 的认证协议。
 
-Lark secrets 当前作为 job 环境变量提供，因此 workflow 中的所有步骤和 local action 进程都属于其信任边界。Ready 卡片包含 pairing URL，因此目标 Lark 群的所有成员也属于凭证信任边界。仅允许受信任代码进入可访问这些 secrets 的分支与 Environment，并限制目标群成员资格。
+Environment ready callback 使用 GitHub Actions OIDC。Worker 必须同时验证
+audience、repository、workflow ref 和精确 run ID；opaque generation 只用于把
+回调路由到原 GitHub 用户，不替代 OIDC authority。
 
 ## 网络边界
 
@@ -99,9 +100,9 @@ Cloudflare Quick Tunnel URL 是公网可达地址，不是秘密或认证凭据�
 
 workflow 先等待 Quick Tunnel URL，再通过 T3 原生 `auth pairing create --base-url` 命令为该 public origin 签发 pairing URL。workflow 不解析 credential，不自行拼接 URL，也不从 `serve` 日志复用 loopback pairing URL。
 
-连接信息写入 runner 上 `~/private-runner-session` 下的 mode-`0600` 文件，不写入 Actions step summary。LarkSend 在全部连接就绪后发送一张包含临时 T3 origin 和 pairing URL 的不可转发卡片。它不保存 message ID，也不更新或清理该卡片。
+连接信息写入 runner 上 `~/private-runner-session` 下的 mode-`0600` 文件，不写入 Actions step summary。全部连接就绪后，OIDC callback 将 descriptor 写入 owner 专属 Durable Object。认证后的稳定 Environment 入口只在 ready 状态重定向到原生 pairing URL。
 
-除配置的 Lark 群外，不要把 pairing URL、连接文件、Git credential、内部地址或包含私有仓库信息的日志上传为 artifact，也不要粘贴到其它聊天、公开 issue 或 pull request。Lark 卡片不是状态监控面；连接是否仍有效以 GitHub Actions run 状态为准。
+不要把 pairing URL、连接文件、Git credential、内部地址或包含私有仓库信息的日志上传为 artifact，也不要粘贴到聊天、公开 issue 或 pull request。连接是否仍有效以 GitHub Actions run 状态为准。
 
 ## Fork 与 pull request
 
@@ -141,7 +142,7 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 [ ] `session--none` 只允许受保护默认分支部署
 [ ] Headscale grants 不允许 runner 横向访问
 [ ] Quick Tunnel 仍依赖 T3 应用层认证
-[ ] pairing URL 只进入 mode-0600 runner 文件和指定的不可转发 Lark 卡片，不进入日志、summary 或 artifact
+[ ] pairing URL 只进入 mode-0600 runner 文件和认证后的 Environment state，不进入 MCP、日志、summary 或 artifact
 [ ] 官方工具安装入口已经复核
 [ ] ChatGPT Worker 的 OAuth KV、GitHub App client ID 和控制面 URL 已配置
 [ ] Worker 只绑定 `runners.trustedtunnel.app`，且 `workers.dev` 和 Preview URLs 已关闭
