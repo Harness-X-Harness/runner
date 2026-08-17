@@ -132,6 +132,9 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
     env,
   );
   assert.equal(login.status, 302);
+  assert.equal(login.headers.get("cache-control"), "no-store");
+  assert.equal(login.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(login.headers.get("x-frame-options"), "DENY");
   const github = new URL(login.headers.get("location"));
   assert.equal(github.origin, "https://github.com");
   assert.equal(github.searchParams.get("code_challenge_method"), "S256");

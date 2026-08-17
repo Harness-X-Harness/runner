@@ -40,6 +40,15 @@ export async function startGitHubAuthorization(
       location: githubUserAuthorizationUrl(env, callback, state, codeChallenge).toString(),
     },
   });
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  response.headers.set("referrer-policy", "no-referrer");
+  response.headers.set("x-content-type-options", "nosniff");
+  response.headers.set("x-frame-options", "DENY");
+  response.headers.set(
+    "content-security-policy",
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  );
   response.headers.append("set-cookie", secureCookie(STATE_COOKIE, browserBinding));
   return response;
 }
