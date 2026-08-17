@@ -33,6 +33,7 @@ runs:
         pairing_url="$(
           npx --yes t3@latest auth pairing create \
             --base-url "$backend_url" \
+            --ttl 6h \
             --json | jq -er .pairUrl
         )"
         umask 077
