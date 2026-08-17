@@ -222,6 +222,8 @@ grep -Fq 'https://claude.ai/install.sh' "$TOOLS_ACTION" || \
   fail 'missing official Claude Code installer'
 grep -Fq 'npx --yes t3@latest serve' "$T3_ACTION" || \
   fail 'missing latest T3 Code entrypoint'
+grep -Fq -- '--ttl 6h' "$T3_ACTION" || \
+  fail 'T3 pairing credential must remain valid for the GitHub-hosted session lifetime'
 grep -Fq 'https://pkg.cloudflare.com/cloudflared noble main' "$T3_ACTION" || \
   fail 'missing official cloudflared package repository'
 grep -Fq 'apt-get install -y -qq cloudflared' "$T3_ACTION" || \
