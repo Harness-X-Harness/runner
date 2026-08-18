@@ -117,6 +117,10 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   assert.equal(modernResponse.status, 200);
   const modernTools = (await modernResponse.json()).result.tools;
   assert.equal(modernTools.length, 6);
+  assert.deepEqual(
+    modernTools.find(({ name }) => name === "submit_task").inputSchema.properties.executor.enum,
+    ["codex", "grok"],
+  );
   assert.deepEqual(modernTools.find(({ name }) => name === "submit_task").securitySchemes, [
     {
       type: "oauth2",

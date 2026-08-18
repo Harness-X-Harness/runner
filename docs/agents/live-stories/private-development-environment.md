@@ -62,7 +62,7 @@ and verifies without changing the workspace:
 
 - peer online and Tailscale SSH succeeds;
 - `$HOME/workspace` is empty, owned by `runner`, and mode `0700`;
-- `codex --version`, `claude --version`, and `grok --version` succeed;
+- `codex --version` and `grok --version` succeed;
 - T3 on `127.0.0.1:3773` returns HTTP 200;
 - `t3-url`, `pairing-url`, and `connection.txt` are mode `0600`.
 

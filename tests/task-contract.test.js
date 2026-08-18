@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyTaskEvent, publicTask, validateSubmitInput } from "../apps/chatgpt-app/src/task.js";
+import { applyTaskEvent, EXECUTORS, publicTask, validateSubmitInput } from "../apps/chatgpt-app/src/task.js";
 import { TOOL_CONTRACT } from "../apps/chatgpt-app/src/tool-contract.js";
 
 test("tool contract separates task reads from writes", () => {
@@ -16,6 +16,7 @@ test("tool contract separates task reads from writes", () => {
 });
 
 test("submit input is normalized to the task contract", () => {
+  assert.deepEqual(EXECUTORS, ["codex", "grok"]);
   assert.deepEqual(validateSubmitInput({
     repo: "owner/project",
     prompt: "Implement the feature",
