@@ -15,6 +15,8 @@ T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
 ENVIRONMENT_ACTION="$ROOT_DIR/.github/actions/environment-control/action.yml"
 ENVIRONMENT_SCRIPT="$ROOT_DIR/.github/actions/environment-control/index.js"
+SESSION_RUNTIME_ACTION="$ROOT_DIR/.github/actions/session-runtime/action.yml"
+SESSION_RUNTIME_SCRIPT="$ROOT_DIR/.github/actions/session-runtime/index.js"
 CONTROL_ACTION="$ROOT_DIR/.github/actions/task-control/action.yml"
 CONTROL_SCRIPT="$ROOT_DIR/.github/actions/task-control/index.js"
 
@@ -27,12 +29,12 @@ fail() {
 [[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
 [[ -f "$CODEX_AUTH_WORKFLOW" ]] || fail "missing workflow: $CODEX_AUTH_WORKFLOW"
 [[ -f "$GROK_AUTH_WORKFLOW" ]] || fail "missing workflow: $GROK_AUTH_WORKFLOW"
-for action in "$TOOLS_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$CONTROL_ACTION"; do
+for action in "$TOOLS_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$SESSION_RUNTIME_ACTION" "$CONTROL_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
 # GitHub Actions is the complete environment lifecycle. The workflow claims
-# its run through OIDC before sensitive setup, then publishes one descriptor.
+# its run through OIDC before sensitive setup, then opens one outbound channel.
 grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
   fail 'private environment must use manual workflow dispatch'
 grep -Fq '      environment_id:' "$WORKFLOW" || \
@@ -62,13 +64,14 @@ if rg -q 'apt-get update' "$ROOT_DIR/.github/actions" "$ROOT_DIR/.github/workflo
 fi
 grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must always start T3'
-[[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 2 ]] || \
-  fail 'private environment must have one claim and one ready callback'
-[[ "$(grep -Fc 'phase: claim' "$WORKFLOW")" == 1 ]] || \
+[[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 1 ]] || \
   fail 'private environment must claim the exact run once'
-[[ "$(grep -Fc 'phase: ready' "$WORKFLOW")" == 1 ]] || \
-  fail 'private environment must publish the ready descriptor once'
-claim_line="$(grep -nF 'phase: claim' "$WORKFLOW" | cut -d: -f1)"
+[[ "$(grep -Fc 'uses: ./.github/actions/session-runtime' "$WORKFLOW")" == 1 ]] || \
+  fail 'private environment must use one long-lived Session runtime'
+if grep -Fq 'phase: ready' "$WORKFLOW" || grep -Fq 'run: sleep infinity' "$WORKFLOW"; then
+  fail 'Session runtime must replace the ready callback and passive keep-alive'
+fi
+claim_line="$(grep -nF 'uses: ./.github/actions/environment-control' "$WORKFLOW" | cut -d: -f1)"
 secret_line="$(grep -nF 'MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}' "$WORKFLOW" | cut -d: -f1)"
 network_line="$(grep -nF 'uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' "$WORKFLOW" | cut -d: -f1)"
 t3_line="$(grep -nF 'uses: ./.github/actions/t3-session' "$WORKFLOW" | cut -d: -f1)"
@@ -76,8 +79,9 @@ t3_line="$(grep -nF 'uses: ./.github/actions/t3-session' "$WORKFLOW" | cut -d: -
   fail 'runner claim must precede credentials, private network, and T3 setup'
 grep -Fq 'id-token: write' "$WORKFLOW" || \
   fail 'private environment must request OIDC identity for its callback'
-grep -Fq 'run: sleep infinity' "$WORKFLOW" || \
-  fail 'private environment must remain until cancellation or platform limit'
+runtime_line="$(grep -nF 'uses: ./.github/actions/session-runtime' "$WORKFLOW" | cut -d: -f1)"
+(( t3_line < runtime_line )) || \
+  fail 'Session runtime must start after T3 publishes its private descriptor'
 if rg -q 'TARGET_REPO|TARGET_REPO_AUTH|enable_ssh|non_durable|target-workspace' \
   "$WORKFLOW" "$T3_ACTION"; then
   fail 'private environment still contains repository or optional-lifecycle inputs'
@@ -99,8 +103,14 @@ grep -Fq 'using: node24' "$ENVIRONMENT_ACTION" || \
   fail 'Environment callback must use the current Node 24 Action runtime'
 grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$ENVIRONMENT_SCRIPT" || \
   fail 'Environment callback must obtain a GitHub OIDC token'
-grep -Fq '::add-mask::${pairingUrl}' "$ENVIRONMENT_SCRIPT" || \
-  fail 'Environment callback must mask native T3 pairing access'
+grep -Fq 'using: node24' "$SESSION_RUNTIME_ACTION" || \
+  fail 'Session runtime must use the current Node 24 Action runtime'
+grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$SESSION_RUNTIME_SCRIPT" || \
+  fail 'Session runtime must obtain a fresh GitHub OIDC token'
+grep -Fq '::add-mask::${pairingUrl}' "$SESSION_RUNTIME_SCRIPT" || \
+  fail 'Session runtime must mask native T3 pairing access'
+grep -Fq 'new WebSocket(' "$SESSION_RUNTIME_SCRIPT" || \
+  fail 'Session runtime must initiate its outbound control channel'
 if rg -q 'LARK_APP_|LARK_CHAT_|lark-send' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'mandatory Lark delivery must not remain in the Environment path'
 fi

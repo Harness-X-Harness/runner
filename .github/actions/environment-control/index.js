@@ -1,39 +1,17 @@
-const fs = require("node:fs/promises");
-const path = require("node:path");
-
 async function main() {
   const controlPlaneUrl = input("control-plane-url").replace(/\/$/, "");
   const environmentId = input("environment-id");
-  const phase = input("phase");
-  let descriptor = {};
-  if (phase === "ready") {
-    const sessionDirectory = path.join(
-      process.env.HOME,
-      "private-runner-session",
-      "t3code",
-    );
-    const [t3Url, pairingUrl] = await Promise.all([
-      read(path.join(sessionDirectory, "t3-url")),
-      read(path.join(sessionDirectory, "pairing-url")),
-    ]);
-    process.stdout.write(`::add-mask::${t3Url}\n::add-mask::${pairingUrl}\n`);
-    descriptor = {
-      t3Url,
-      pairingUrl,
-      tailscaleHost: `gha-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`,
-    };
-  }
   const token = await oidcToken(controlPlaneUrl);
   process.stdout.write(`::add-mask::${token}\n`);
   const response = await fetch(
-    `${controlPlaneUrl}/internal/environments/${encodeURIComponent(environmentId)}/${phase}`,
+    `${controlPlaneUrl}/internal/environments/${encodeURIComponent(environmentId)}/claim`,
     {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify(descriptor),
+      body: "{}",
     },
   );
   if (!response.ok) {
@@ -43,10 +21,6 @@ async function main() {
 
 function input(name) {
   return process.env[`INPUT_${name.toUpperCase()}`] ?? "";
-}
-
-async function read(file) {
-  return (await fs.readFile(file, "utf8")).trim();
 }
 
 async function oidcToken(audience) {

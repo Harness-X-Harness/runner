@@ -1,5 +1,5 @@
-name: Environment admission
-description: Claim the exact run before the workflow receives shared credentials.
+name: Agent Session runtime
+description: Connect the admitted Environment to its private Session control channel.
 inputs:
   control-plane-url:
     description: Worker control-plane URL.
@@ -10,3 +10,4 @@ inputs:
 runs:
   using: node24
   main: index.js
+

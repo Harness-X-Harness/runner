@@ -1,7 +1,7 @@
 import { environmentRequest } from "./environment.js";
 import { verifyEnvironmentIdentity } from "./environment-identity.js";
 
-export async function claimEnvironmentRun(env, environmentId, runId, runUrl) {
+export async function claimEnvironmentRun(env, environmentId, runId, runAttempt, runUrl) {
   const identity = await verifyEnvironmentIdentity(
     environmentId,
     env.ENVIRONMENT_SESSION_SECRET,
@@ -18,6 +18,7 @@ export async function claimEnvironmentRun(env, environmentId, runId, runUrl) {
         body: JSON.stringify({
           generation: environmentId,
           runId: String(runId),
+          runAttempt: String(runAttempt),
           runUrl: String(runUrl),
         }),
       },
@@ -30,7 +31,13 @@ export async function claimEnvironmentRun(env, environmentId, runId, runUrl) {
   }
 }
 
-export async function publishEnvironmentReady(env, environmentId, runId, descriptor) {
+export async function prepareEnvironmentChannel(
+  env,
+  environmentId,
+  runId,
+  runAttempt,
+  descriptor,
+) {
   const identity = await verifyEnvironmentIdentity(
     environmentId,
     env.ENVIRONMENT_SESSION_SECRET,
@@ -40,19 +47,20 @@ export async function publishEnvironmentReady(env, environmentId, runId, descrip
     typeof descriptor?.pairingUrl !== "string" ||
     typeof descriptor?.t3Url !== "string" ||
     typeof descriptor?.tailscaleHost !== "string" ||
-    !validDescriptor(descriptor)
+    !validEnvironmentDescriptor(descriptor)
   ) return json({ error: "invalid environment descriptor" }, 400);
 
   try {
     const environment = await environmentRequest(
       env,
       identity.ownerId,
-      "/environment/ready",
+      "/environment/channel/prepare",
       {
         method: "POST",
         body: JSON.stringify({
           generation: environmentId,
           runId: String(runId),
+          runAttempt: String(runAttempt),
           pairingUrl: descriptor.pairingUrl,
           t3Url: descriptor.t3Url,
           tailscaleHost: descriptor.tailscaleHost,
@@ -61,11 +69,30 @@ export async function publishEnvironmentReady(env, environmentId, runId, descrip
     );
     return json({ status: environment.status });
   } catch {
-    return json({ error: "environment callback is stale" }, 409);
+    return json({ error: "environment channel preparation is stale" }, 409);
   }
 }
 
-function validDescriptor(descriptor) {
+export async function openEnvironmentChannel(env, environmentId, claims) {
+  const identity = await verifyEnvironmentIdentity(
+    environmentId,
+    env.ENVIRONMENT_SESSION_SECRET,
+  );
+  if (!identity) return json({ error: "invalid environment identity" }, 404);
+  const stub = env.ENVIRONMENTS.get(
+    env.ENVIRONMENTS.idFromName(`github-${identity.ownerId}`),
+  );
+  return stub.fetch("https://environment/environment/channel", {
+    headers: {
+      upgrade: "websocket",
+      "x-environment-generation": environmentId,
+      "x-environment-run-id": String(claims.run_id),
+      "x-environment-run-attempt": String(claims.run_attempt),
+    },
+  });
+}
+
+export function validEnvironmentDescriptor(descriptor) {
   try {
     const t3 = new URL(descriptor.t3Url);
     const pairing = new URL(descriptor.pairingUrl);

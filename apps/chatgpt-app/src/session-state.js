@@ -137,6 +137,19 @@ export async function expireSessions(storage, { now = () => new Date() } = {}) {
   return expired;
 }
 
+export async function pendingGenerationCommands(storage, generation) {
+  const sessions = await listAll(storage, SESSION_META_PREFIX);
+  const pending = [];
+  for (const session of sessions.values()) {
+    if (session.generation !== String(generation) || session.phase === "terminal") continue;
+    const commands = await listAll(storage, commandPrefix(session.sessionId));
+    for (const command of commands.values()) {
+      if (!command.processed) pending.push({ sessionId: session.sessionId, ...publicCommand(command) });
+    }
+  }
+  return pending.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
 async function createSession(storage, input, now) {
   const required = ["sessionId", "generation", "controllerGrantId", "executor", "workingDirectory"];
   if (required.some((field) => !validText(input[field]))) {

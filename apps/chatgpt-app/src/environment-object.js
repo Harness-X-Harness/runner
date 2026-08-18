@@ -3,8 +3,16 @@ import { DurableObject } from "cloudflare:workers";
 import {
   expireSessions,
   handleSessionRequest,
+  pendingGenerationCommands,
   terminateGenerationSessions,
 } from "./session-state.js";
+import {
+  ENVIRONMENT_CHANNEL_PROTOCOL,
+  channelAllowsSessionAction,
+  connectEnvironmentChannel as connectChannelState,
+  disconnectEnvironmentChannel,
+  parseEnvironmentChannelMessage,
+} from "./environment-channel.js";
 
 const STORAGE_KEY = "environment";
 const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
@@ -14,7 +22,18 @@ export class EnvironmentObject extends DurableObject {
     const path = new URL(request.url).pathname;
 
     if (path === "/sessions" || path.startsWith("/sessions/")) {
-      return handleSessionRequest(this.ctx.storage, request);
+      const action = request.method === "POST"
+        ? await request.clone().json().catch(() => undefined)
+        : undefined;
+      const environment = /** @type {any} */ (await this.ctx.storage.get(STORAGE_KEY));
+      if (!channelAllowsSessionAction(environment, action)) {
+        return Response.json({ error: "Environment channel is disconnected" }, { status: 409 });
+      }
+      const response = await handleSessionRequest(this.ctx.storage, request);
+      if (request.method === "POST" && response.ok && action?.generation) {
+        await this.sendPendingCommands(String(action.generation));
+      }
+      return response;
     }
 
     if (request.method === "GET" && path === "/environment") {
@@ -67,6 +86,7 @@ export class EnvironmentObject extends DurableObject {
             status: "closing",
             runId: String(event.runId),
             runUrl: String(event.runUrl),
+            runAttempt: path === "/environment/claim" ? String(event.runAttempt) : undefined,
             cancelPending: true,
             updatedAt: new Date().toISOString(),
           };
@@ -77,6 +97,20 @@ export class EnvironmentObject extends DurableObject {
           ["starting", "ready", "closing"].includes(current.status) &&
           current.runId === String(event.runId)
         ) {
+          if (path === "/environment/claim") {
+            const runAttempt = String(event.runAttempt);
+            if (current.runAttempt !== undefined && current.runAttempt !== runAttempt) {
+              return undefined;
+            }
+            if (current.runAttempt === undefined) {
+              const environment = { ...current, runAttempt };
+              await storage.put(STORAGE_KEY, environment);
+              return {
+                environment,
+                cancel: current.status === "closing" && current.cancelPending !== false,
+              };
+            }
+          }
           return {
             environment: current,
             cancel: current.status === "closing" && current.cancelPending !== false,
@@ -90,6 +124,7 @@ export class EnvironmentObject extends DurableObject {
           status: "starting",
           runId: String(event.runId),
           runUrl: String(event.runUrl),
+          runAttempt: path === "/environment/claim" ? String(event.runAttempt) : undefined,
           dispatchOutcome: undefined,
           cancelPending: false,
           updatedAt: new Date().toISOString(),
@@ -156,7 +191,7 @@ export class EnvironmentObject extends DurableObject {
         : Response.json({ error: "environment generation mismatch" }, { status: 409 });
     }
 
-    if (request.method === "POST" && path === "/environment/ready") {
+    if (request.method === "POST" && path === "/environment/channel/prepare") {
       const event = await request.json();
       const result = await this.ctx.storage.transaction(async (storage) => {
         const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
@@ -164,14 +199,16 @@ export class EnvironmentObject extends DurableObject {
           !current ||
           current.generation !== String(event.generation) ||
           current.runId !== String(event.runId) ||
-          current.status !== "starting"
+          current.runAttempt !== String(event.runAttempt) ||
+          !["starting", "ready"].includes(current.status)
         ) return undefined;
         const environment = {
           ...current,
-          status: "ready",
-          pairingUrl: String(event.pairingUrl),
-          t3Url: String(event.t3Url),
-          tailscaleHost: String(event.tailscaleHost),
+          channelPreparation: {
+            pairingUrl: String(event.pairingUrl),
+            t3Url: String(event.t3Url),
+            tailscaleHost: String(event.tailscaleHost),
+          },
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
@@ -179,7 +216,47 @@ export class EnvironmentObject extends DurableObject {
       });
       return result
         ? Response.json(result)
-        : Response.json({ error: "environment callback is stale" }, { status: 409 });
+        : Response.json({ error: "environment channel preparation is stale" }, { status: 409 });
+    }
+
+    if (request.method === "GET" && path === "/environment/channel") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return Response.json({ error: "WebSocket upgrade required" }, { status: 426 });
+      }
+      const attachment = {
+        generation: request.headers.get("x-environment-generation") ?? "",
+        runId: request.headers.get("x-environment-run-id") ?? "",
+        runAttempt: request.headers.get("x-environment-run-attempt") ?? "",
+        connectionId: crypto.randomUUID(),
+      };
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      server.serializeAttachment(attachment);
+      this.ctx.acceptWebSocket(server, ["environment-channel"]);
+      const environment = await this.ctx.storage.transaction(async (storage) => {
+        const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
+        const next = connectChannelState(current, {
+          ...attachment,
+          descriptor: current?.channelPreparation,
+        });
+        if (!next) return undefined;
+        next.channelPreparation = undefined;
+        await storage.put(STORAGE_KEY, next);
+        return next;
+      });
+      if (!environment) {
+        server.close(1008, "stale Environment channel");
+        return Response.json({ error: "environment channel is stale" }, { status: 409 });
+      }
+      for (const socket of this.ctx.getWebSockets("environment-channel")) {
+        if (socket !== server) socket.close(1000, "Environment channel replaced");
+      }
+      await this.sendPendingCommands(environment.generation, server);
+      return new Response(null, {
+        status: 101,
+        headers: { "sec-websocket-protocol": ENVIRONMENT_CHANNEL_PROTOCOL },
+        webSocket: client,
+      });
     }
 
     if (request.method === "POST" && path === "/environment/close") {
@@ -221,11 +298,17 @@ export class EnvironmentObject extends DurableObject {
           pairingUrl: undefined,
           t3Url: undefined,
           tailscaleHost: undefined,
+          channelState: "disconnected",
+          connectionId: undefined,
+          channelPreparation: undefined,
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
         return { environment, cancel: true };
       });
+      if (result?.environment?.status === "closing" || result?.environment?.status === "offline") {
+        this.closeChannels();
+      }
       return result
         ? Response.json(result)
         : Response.json({ error: "environment not found" }, { status: 404 });
@@ -278,6 +361,7 @@ export class EnvironmentObject extends DurableObject {
         );
         return environment;
       });
+      if (result) this.closeChannels();
       return result
         ? Response.json(result)
         : Response.json({ error: "environment run mismatch" }, { status: 409 });
@@ -288,5 +372,72 @@ export class EnvironmentObject extends DurableObject {
 
   async alarm() {
     await expireSessions(this.ctx.storage);
+  }
+
+  async webSocketMessage(socket, message) {
+    const attachment = socket.deserializeAttachment();
+    const current = /** @type {any} */ (await this.ctx.storage.get(STORAGE_KEY));
+    if (
+      current?.status !== "ready" ||
+      current.connectionId !== attachment?.connectionId ||
+      current.generation !== attachment?.generation
+    ) {
+      socket.close(1008, "stale Environment channel");
+      return;
+    }
+    const incoming = parseEnvironmentChannelMessage(message, attachment);
+    if (!incoming) {
+      socket.close(1008, "invalid Environment channel message");
+      return;
+    }
+    const action = incoming.type === "ack"
+      ? { type: "process_command", generation: incoming.generation, commandId: incoming.commandId }
+      : { type: "append_event", generation: incoming.generation, event: incoming.event };
+    const response = await handleSessionRequest(
+      this.ctx.storage,
+      new Request(`https://environment/sessions/${incoming.sessionId}`, {
+        method: "POST",
+        body: JSON.stringify(action),
+      }),
+    );
+    if (!response.ok) socket.close(1008, "rejected Environment channel message");
+  }
+
+  async webSocketClose(socket) {
+    await this.disconnectChannel(socket.deserializeAttachment());
+  }
+
+  async webSocketError(socket) {
+    await this.disconnectChannel(socket.deserializeAttachment());
+  }
+
+  async disconnectChannel(attachment) {
+    await this.ctx.storage.transaction(async (storage) => {
+      const current = await storage.get(STORAGE_KEY);
+      const next = disconnectEnvironmentChannel(current, attachment);
+      if (next !== current) await storage.put(STORAGE_KEY, next);
+    });
+  }
+
+  async sendPendingCommands(generation, onlySocket) {
+    const commands = await pendingGenerationCommands(this.ctx.storage, generation);
+    if (commands.length === 0) return;
+    const message = JSON.stringify({ type: "commands", generation, commands });
+    const sockets = onlySocket ? [onlySocket] : this.ctx.getWebSockets("environment-channel");
+    for (const socket of sockets) {
+      const attachment = socket.deserializeAttachment();
+      if (attachment?.generation !== generation) continue;
+      try {
+        socket.send(message);
+      } catch {
+        // The close/error handler owns durable disconnect state.
+      }
+    }
+  }
+
+  closeChannels() {
+    for (const socket of this.ctx.getWebSockets("environment-channel")) {
+      socket.close(1000, "Environment ended");
+    }
   }
 }

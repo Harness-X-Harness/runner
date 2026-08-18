@@ -8,7 +8,7 @@ import {
 } from "../apps/chatgpt-app/src/environment.js";
 import {
   claimEnvironmentRun,
-  publishEnvironmentReady,
+  prepareEnvironmentChannel,
 } from "../apps/chatgpt-app/src/environment-callback.js";
 import { EnvironmentDispatchError } from "../apps/chatgpt-app/src/github.js";
 import { completeAuthorizationCallback } from "../apps/chatgpt-app/src/authorization.js";
@@ -28,6 +28,7 @@ test("ready OIDC accepts only the exact repository, workflow, ref, and run", () 
     repository: "Harness-X-Harness/runner",
     workflow_ref: "Harness-X-Harness/runner/.github/workflows/private-runner-session.yml@refs/heads/main",
     run_id: "123456",
+    run_attempt: "1",
   };
   assert.equal(
     trustedRunnerClaims(claims, env, "private-runner-session.yml"),
@@ -38,6 +39,7 @@ test("ready OIDC accepts only the exact repository, workflow, ref, and run", () 
     { ...claims, workflow_ref: claims.workflow_ref.replace("private-runner-session", "execute-task") },
     { ...claims, workflow_ref: claims.workflow_ref.replace("main", "feature") },
     { ...claims, run_id: "" },
+    { ...claims, run_attempt: "" },
   ]) {
     assert.throws(
       () => trustedRunnerClaims(altered, env, "private-runner-session.yml"),
@@ -311,6 +313,7 @@ test("an OIDC claim recovers an accepted dispatch whose response was lost", asyn
     env,
     generation,
     "123456",
+    "1",
     "https://github.example/runs/123456",
   );
   assert.equal(claimed.status, 200);
@@ -330,6 +333,7 @@ test("an early claim wins the race with a later unknown dispatch response", asyn
       env,
       request.environmentId,
       "123456",
+      "1",
       "https://github.example/runs/123456",
     );
     assert.equal(claim.status, 200);
@@ -367,6 +371,7 @@ test("a delayed claim from a revoked generation cannot enter a reopened Environm
     env,
     revoked,
     "123456",
+    "1",
     "https://github.example/runs/123456",
   );
   assert.equal(stale.status, 409);
@@ -838,6 +843,18 @@ test("close during dispatch revokes admission and cancels a run returned afterwa
   assert.equal(environments.get("github-42").runId, "123456");
 });
 
+async function publishEnvironmentReady(env, generation, runId, descriptor) {
+  const claim = await claimEnvironmentRun(
+    env,
+    generation,
+    runId,
+    "1",
+    `https://github.com/Harness-X-Harness/runner/actions/runs/${runId}`,
+  );
+  if (!claim.ok) return claim;
+  return prepareEnvironmentChannel(env, generation, runId, "1", descriptor);
+}
+
 function fakeEnvironments() {
   const records = new Map();
   return {
@@ -888,6 +905,7 @@ function fakeEnvironments() {
                 status: "closing",
                 runId: String(body.runId),
                 runUrl: body.runUrl,
+                runAttempt: path === "/environment/claim" ? String(body.runAttempt) : undefined,
                 cancelPending: true,
               };
               records.set(ownerId, environment);
@@ -897,6 +915,20 @@ function fakeEnvironments() {
               ["starting", "ready", "closing"].includes(current.status) &&
               current.runId === String(body.runId)
             ) {
+              if (path === "/environment/claim") {
+                const runAttempt = String(body.runAttempt);
+                if (current.runAttempt !== undefined && current.runAttempt !== runAttempt) {
+                  return Response.json({ error: "stale" }, { status: 409 });
+                }
+                if (current.runAttempt === undefined) {
+                  const environment = { ...current, runAttempt };
+                  records.set(ownerId, environment);
+                  return Response.json({
+                    environment,
+                    cancel: current.status === "closing" && current.cancelPending !== false,
+                  });
+                }
+              }
               return Response.json({
                 environment: current,
                 cancel: current.status === "closing" && current.cancelPending !== false,
@@ -910,6 +942,7 @@ function fakeEnvironments() {
               status: "starting",
               runId: String(body.runId),
               runUrl: body.runUrl,
+              runAttempt: path === "/environment/claim" ? String(body.runAttempt) : undefined,
               dispatchOutcome: undefined,
               cancelPending: false,
             };
@@ -945,15 +978,24 @@ function fakeEnvironments() {
             records.set(ownerId, environment);
             return Response.json(environment);
           }
-          if (path === "/environment/ready" && init.method === "POST") {
+          if (path === "/environment/channel/prepare" && init.method === "POST") {
             const current = records.get(ownerId);
             if (
               !current ||
               current.generation !== body.generation ||
               current.runId !== body.runId ||
-              current.status !== "starting"
+              current.runAttempt !== body.runAttempt ||
+              !["starting", "ready"].includes(current.status)
             ) return Response.json({ error: "stale" }, { status: 409 });
-            const environment = { ...current, ...body, status: "ready" };
+            const environment = {
+              ...current,
+              pairingUrl: body.pairingUrl,
+              t3Url: body.t3Url,
+              tailscaleHost: body.tailscaleHost,
+              status: "ready",
+              channelState: "connected",
+              connectionId: "fake-connection",
+            };
             records.set(ownerId, environment);
             return Response.json(environment);
           }

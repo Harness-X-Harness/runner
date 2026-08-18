@@ -5,6 +5,7 @@ import {
   SESSION_RETENTION_MS,
   expireSessions,
   handleSessionRequest,
+  pendingGenerationCommands,
   terminateGenerationSessions,
 } from "../apps/chatgpt-app/src/session-state.js";
 
@@ -169,6 +170,13 @@ test("duplicate command delivery records one native effect", async () => {
 
   const pending = await sessionRequest(storage, "GET", "/sessions/session-1/commands");
   assert.deepEqual((await pending.json()).commands.map(({ commandId }) => commandId), ["command-a"]);
+  assert.deepEqual(
+    (await pendingGenerationCommands(storage, "generation-1")).map(({ sessionId, commandId }) => ({
+      sessionId,
+      commandId,
+    })),
+    [{ sessionId: "session-1", commandId: "command-a" }],
+  );
 
   const processed = {
     type: "process_command",
@@ -184,6 +192,7 @@ test("duplicate command delivery records one native effect", async () => {
     (await (await sessionRequest(storage, "GET", "/sessions/session-1/commands")).json()).commands,
     [],
   );
+  assert.deepEqual(await pendingGenerationCommands(storage, "generation-1"), []);
 });
 
 test("generation gates and terminal monotonicity reject stale Session mutations", async () => {
