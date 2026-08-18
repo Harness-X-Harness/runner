@@ -43,7 +43,7 @@ The user calls `open_environment` without arguments. Confirm that it returns:
 
 If ChatGPT renders the inline card, confirm that it leaves Loading after the
 tool result arrives and that both the stable Environment action and the GitHub
-run action are enabled. The card is a snapshot and does not poll for Ready.
+run action are enabled. The card does not poll Starting for Ready.
 
 Call it again and confirm that it returns the same active run instead of
 dispatching another one.
@@ -81,6 +81,12 @@ The user calls `close_environment` without arguments. The Agent confirms:
 - the run has zero artifacts;
 - MCP results, run logs, summaries, and artifacts contain no actual temporary
   origin or pairing URL value.
+
+For a change that affects reopen convergence, call `open_environment` before
+the cancelled run becomes terminal. Confirm that the card shows Closing,
+repeats the Open intent without another user action, then changes to Starting
+with one new exact run. Confirm that no second replacement run is dispatched,
+then close the replacement run and repeat the cleanup checks above.
 
 If ChatGPT is unavailable, cancel the exact GitHub run directly and confirm the
 same terminal and Offline state.

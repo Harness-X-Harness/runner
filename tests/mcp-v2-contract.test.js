@@ -141,11 +141,11 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   });
   assert.deepEqual(
     modernTools.find(({ name }) => name === "open_environment")._meta?.ui,
-    { resourceUri: "ui://environment/v2.html" },
+    { resourceUri: "ui://environment/v3.html" },
   );
   assert.equal(
     modernTools.find(({ name }) => name === "open_environment")._meta?.["openai/outputTemplate"],
-    "ui://environment/v2.html",
+    "ui://environment/v3.html",
   );
   assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").securitySchemes, [
     { type: "oauth2", scopes: ["environments:manage"] },
@@ -225,17 +225,17 @@ test("MCP v2 serves credential-free Environment and Task widget resources", asyn
   assert.deepEqual(
     listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
     [
-      { uri: "ui://environment/v2.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://environment/v3.html", mimeType: "text/html;profile=mcp-app" },
       { uri: "ui://task/v1.html", mimeType: "text/html;profile=mcp-app" },
     ],
   );
 
   const read = await request(2, "resources/read", {
-    uri: "ui://environment/v2.html",
+    uri: "ui://environment/v3.html",
   });
   assert.equal(read.result.contents.length, 1);
   const resource = read.result.contents[0];
-  assert.equal(resource.uri, "ui://environment/v2.html");
+  assert.equal(resource.uri, "ui://environment/v3.html");
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
   assert.deepEqual(resource._meta.ui, {
     prefersBorder: true,

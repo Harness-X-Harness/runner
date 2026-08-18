@@ -1,4 +1,4 @@
-export const ENVIRONMENT_WIDGET_URI = "ui://environment/v2.html";
+export const ENVIRONMENT_WIDGET_URI = "ui://environment/v3.html";
 export const ENVIRONMENT_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 export function environmentWidgetHtml(controlPlaneUrl) {
@@ -65,6 +65,8 @@ export function environmentWidgetHtml(controlPlaneUrl) {
     const pendingRequests = new Map();
     let nextRequestId = 1;
     let current;
+    let closingRefresh;
+    let reopenRequested = true;
 
     function safeUrl(value, kind) {
       try {
@@ -83,7 +85,7 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       const states = {
         starting: ["Starting", "Your temporary runner and development tools are starting."],
         ready: ["Ready", "Your private environment is ready. Open it to continue in T3."],
-        closing: ["Closing", "The runner is stopping and its private network access is being removed."],
+        closing: ["Closing", "The runner is stopping. A replacement will start automatically."],
         offline: ["Offline", "The temporary environment is closed."],
       };
       const state = states[current.status] ? current.status : "starting";
@@ -100,6 +102,17 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       run.dataset.href = runUrl || "";
       stop.hidden = state === "closing" || state === "offline";
       message.textContent = "";
+      scheduleClosingRefresh(state);
+    }
+
+    function scheduleClosingRefresh(state) {
+      if (closingRefresh !== undefined) clearTimeout(closingRefresh);
+      closingRefresh = undefined;
+      if (state !== "closing" || !reopenRequested) return;
+      closingRefresh = setTimeout(() => {
+        closingRefresh = undefined;
+        callTool("open_environment");
+      }, 10_000);
     }
 
     function request(method, params) {
@@ -113,10 +126,19 @@ export function environmentWidgetHtml(controlPlaneUrl) {
     }
 
     async function callTool(name) {
+      reopenRequested = name === "open_environment";
       setBusy(true);
-      const result = await request("tools/call", { name, arguments: {} });
-      if (result?.structuredContent) render(result.structuredContent);
-      setBusy(false);
+      let failed = false;
+      try {
+        const result = await request("tools/call", { name, arguments: {} });
+        if (result?.structuredContent) render(result.structuredContent);
+      } catch {
+        failed = true;
+      } finally {
+        setBusy(false);
+      }
+      if (failed) message.textContent = current?.status === "closing" ? "Still closing. Retrying…" : "Could not update the environment.";
+      if (name === "open_environment" && current?.status === "closing") scheduleClosingRefresh("closing");
     }
 
     async function openLink(href) {

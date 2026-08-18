@@ -69,6 +69,11 @@ Calling `open_environment` while Starting, Ready, or Closing observes only that
 exact run. If GitHub confirms it terminal, the same request creates one
 replacement generation; if the run is still live or the lookup is unavailable,
 it returns the current phase and does not dispatch.
+When an Open result is Closing, the ChatGPT Environment card repeats that Open
+intent every ten seconds. Each call observes the same exact run; only terminal
+evidence permits one replacement dispatch. An explicit Close does not repeat
+Open. The Worker does not persist a user token or create a background reopen
+job.
 If that exact-run lookup is temporarily unavailable, the entry request can
 fail, but it does not rewrite Environment state. Refresh it after GitHub
 recovers; do not use an empty list or a failed lookup to start another run.
