@@ -74,6 +74,10 @@ format. It publishes only user-visible Agent text, generic activity, and safe
 task lifecycle snapshots. It does not publish model reasoning, raw commands,
 prompt text, or provider credentials.
 
+Before Codex starts, the fixed GitHub-hosted Ubuntu runner enables
+unprivileged user namespaces and clears Ubuntu's AppArmor user-namespace gate
+so the native bubblewrap sandbox can execute model-issued commands.
+
 The Action batches events and authenticates each callback with GitHub Actions
 OIDC. `TaskObject` assigns one monotonic sequence, retains the latest 256
 events, and rejects driver events after `completed`, `failed`, or `cancelled`.
