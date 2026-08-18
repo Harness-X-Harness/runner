@@ -34,6 +34,11 @@ const SCOPE_DETAILS = Object.freeze({
     title: "Manage private development environments",
     description: "Open and close your temporary private development environment.",
   }),
+  "sessions:manage": Object.freeze({
+    group: "Session permissions",
+    title: "Manage coding sessions",
+    description: "Start and control your private Codex and Grok sessions.",
+  }),
 });
 
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));

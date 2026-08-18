@@ -114,6 +114,8 @@ export async function completeGitHubUserAuthorization(
         githubUserId: profile.id,
         githubLogin: profile.login,
         oauthScopes: grantedScopes,
+        mcpControllerGrantId: controllerGrantId(githubAuthorization.payload),
+        mcpClientName: controllerClientName(githubAuthorization.payload),
         ...githubUserTokenProps(token, scopedToken),
       },
     });
@@ -122,6 +124,22 @@ export async function completeGitHubUserAuthorization(
     return new Response("OAuth grant creation failed", { status: 502 });
   }
   return Response.redirect(authorization.redirectTo, 302);
+}
+
+function controllerGrantId(payload) {
+  const value = payload?.controllerGrantId;
+  if (typeof value !== "string" || !/^grant_[A-Za-z0-9-]{1,120}$/.test(value)) {
+    throw new Error("MCP controller identity is invalid");
+  }
+  return value;
+}
+
+function controllerClientName(payload) {
+  const value = payload?.clientName;
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) {
+    throw new Error("MCP client identity is invalid");
+  }
+  return value;
 }
 
 export async function refreshGitHubUserToken(

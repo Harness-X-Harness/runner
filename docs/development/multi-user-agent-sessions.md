@@ -316,7 +316,7 @@ close_environment()
 
 The exhaustive finite configuration uses two Grants, two Turns, two Commands, and two Environment generations. These cardinalities preserve the identities needed for takeover, two-turn FIFO ordering, command redelivery, and a stale generation. It uses no state constraints, symmetry set, or semantic overrides. Deadlock checking is disabled because terminal and quiescent Sessions are valid product states; no liveness claim is made for GitHub responses or WebSocket reconnection.
 
-TLA+ Tools 1.7.4 with TLC 2.19 generated 672,071 states, found 197,116 distinct states, reached depth 18, and found no invariant violation. Two negative configurations demonstrate adequacy: [`AgentSessionsDuplicateFaulty.cfg`](../../formal/AgentSessionsDuplicateFaulty.cfg) repeats a processed command and violates `CommandEffectsAtMostOnce` at depth 4; [`AgentSessionsAuthorityFaulty.cfg`](../../formal/AgentSessionsAuthorityFaulty.cfg) accepts an old-controller write and violates `AcceptedCommandsWereAuthorized` at depth 3. The positive configuration is [`AgentSessions.cfg`](../../formal/AgentSessions.cfg).
+TLA+ Tools 1.7.4 with TLC 2.19 generated 669,511 states, found 197,116 distinct states, reached depth 18, and found no invariant violation. Two negative configurations demonstrate adequacy: [`AgentSessionsDuplicateFaulty.cfg`](../../formal/AgentSessionsDuplicateFaulty.cfg) repeats a processed command and violates `CommandEffectsAtMostOnce` at depth 4; [`AgentSessionsAuthorityFaulty.cfg`](../../formal/AgentSessionsAuthorityFaulty.cfg) accepts an old-controller write and violates `AcceptedCommandsWereAuthorized` at depth 3. The positive configuration is [`AgentSessions.cfg`](../../formal/AgentSessions.cfg).
 
 The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-app/src/session-state.js), reached only through the owner-scoped `EnvironmentObject`:
 
@@ -325,6 +325,7 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `sessionGeneration` and `envGeneration` | Every mutation carries the exact stored `generation`; `terminateGenerationSessions` changes only matching non-terminal Sessions. |
 | `controller` and `TakeOver` | `controllerGrantId` is replaced in the same Durable Object transaction; later controller writes compare against the committed value. |
 | `queue`, `QueueTurn`, and `CancelQueuedTurn` | `queuedTurns` is a durable ordered list; `start_queued` removes only its head and cancellation accepts only an ID still in that list. |
+| `CompleteAndStartQueued` | One Durable Object transaction records completion of the exact active turn, removes the FIFO head, starts it, and journals one stable `start_queued` command. No observable idle state or second client command exists between those effects. |
 | `accepted`, `processed`, and `effectCount` | Stable command IDs index a durable command journal; same-ID same-payload delivery is idempotent, conflicting payloads fail, and processed commands leave the pending command view exactly once. |
 | `eventCount` and `lastEventGeneration` | Per-Session event keys use a strictly increasing durable cursor and every append passes the Session generation gate. |
 | `EnvironmentTerminates` and `TerminalIsSticky` | Exact Environment terminal and confirmed startup-failure paths make matching Sessions terminal; all later mutations fail until seven-day cleanup deletes the immutable record. |
@@ -332,6 +333,14 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `deliveryCount`, `processed`, and `effectCount` | The server redelivers unacknowledged stable command IDs. The generation-local [`session-runtime`](../../.github/actions/session-runtime/index.js) records a receipt before one native effect and acknowledges duplicate delivery without invoking that effect again. If the runtime process ends, the Environment run ends; receipts are never resumed in another generation. |
 | Driver admission and `StartTurn` | The runner starts exactly one [`codex app-server`](../../.github/actions/session-runtime/codex-driver.js) or [`grok agent --no-leader stdio`](../../.github/actions/session-runtime/grok-driver.js) child per Session. After native conversation creation, `admit` reaches modeled `idle`; an optional initial prompt then uses `begin_turn`, which refines to the model's `StartTurn`. |
 | Native completion and user requests | Each driver normalizes only bounded public events. Native completion sends an exact-turn `complete_turn`; server-initiated approval or input sends exact-turn `wait_for_user`. Reasoning, thought, raw protocol payloads, and native IDs do not cross the driver boundary. |
+
+`start_session` reaches one aggregate operation in `EnvironmentObject`. The same
+transaction chooses the current Environment generation or reserves exactly one
+replacement generation and creates the stable `preparing` Session. GitHub
+workflow dispatch is a later effect. A Session created while the old generation
+is `closing` remains bound to the reserved replacement; authenticated Session
+reads reconcile the old run and dispatch that replacement without a second user
+request.
 
 The implementation adds `preparing` before the model's admitted `idle` initial state. It permits one generation-bound driver-start command to create the native conversation, but no model turn begins before runner admission. The `admit` transition is the refinement mapping into the model's initial `idle`; `begin_turn` maps an optional initial prompt to `StartTurn`. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
 

@@ -47,6 +47,7 @@ export async function authorizePage(request, env) {
     `oauth:consent:${csrf}`,
     {
       authRequest,
+      clientName: boundedClientName(client.clientName),
       browserBindingHash: await sha256Base64Url(browserSession),
     },
     CONSENT_TTL,
@@ -127,7 +128,12 @@ export async function submitAuthorizationDecision(request, env) {
   return startGitHubAuthorization(
     env,
     callback,
-    { kind: "mcp", authRequest },
+    {
+      kind: "mcp",
+      authRequest,
+      controllerGrantId: `grant_${crypto.randomUUID()}`,
+      clientName: boundedClientName(consent.value.clientName),
+    },
   );
 }
 
@@ -275,4 +281,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function boundedClientName(value) {
+  return typeof value === "string" && value.length > 0
+    ? value.slice(0, 256)
+    : "MCP client";
 }

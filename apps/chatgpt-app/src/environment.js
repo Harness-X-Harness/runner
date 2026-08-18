@@ -33,51 +33,68 @@ export async function openEnvironment(
 
   let environment = claim.environment;
   if (claim.dispatch) {
-    let run;
-    try {
-      run = await dispatch(env, {
-        environmentId: generation,
-        environmentOwner: environment.slot,
-      });
-    } catch (error) {
-      if (error instanceof EnvironmentDispatchError && error.outcome === "rejected") {
-        await environmentRequest(env, ownerId, "/environment/dispatch-failed", {
-          method: "POST",
-          body: JSON.stringify({ generation }),
-        });
-        throw error;
-      }
-      environment = await environmentRequest(
-        env,
-        ownerId,
-        "/environment/dispatch-unknown",
-        {
-          method: "POST",
-          body: JSON.stringify({ generation }),
-        },
-      );
-      return publicEnvironment(environment, env.TASK_CONTROL_PLANE_URL);
-    }
-    const committed = await environmentRequest(
+    environment = await dispatchClaimedEnvironment(
       env,
       ownerId,
-      "/environment/dispatch",
-      {
-        method: "POST",
-        body: JSON.stringify({ generation, ...run }),
-      },
+      environment,
+      dispatch,
+      cancel,
+      true,
     );
-    environment = committed.environment;
-    if (committed.cancel) {
-      environment = await cancelRecordedEnvironment(
-        env,
-        ownerId,
-        environment,
-        cancel,
-      );
-    }
   }
   return publicEnvironment(environment, env.TASK_CONTROL_PLANE_URL);
+}
+
+export async function dispatchClaimedEnvironment(
+  env,
+  ownerId,
+  environment,
+  dispatch,
+  cancel = missingWorkflowAuthority,
+  throwRejected = false,
+) {
+  const generation = environment.generation;
+  let run;
+  try {
+    run = await dispatch(env, {
+      environmentId: generation,
+      environmentOwner: environment.slot,
+    });
+  } catch (error) {
+    if (error instanceof EnvironmentDispatchError && error.outcome === "rejected") {
+      const failed = await environmentRequest(env, ownerId, "/environment/dispatch-failed", {
+        method: "POST",
+        body: JSON.stringify({ generation }),
+      });
+      if (throwRejected) throw error;
+      return failed;
+    }
+    return environmentRequest(
+      env,
+      ownerId,
+      "/environment/dispatch-unknown",
+      {
+        method: "POST",
+        body: JSON.stringify({ generation }),
+      },
+    );
+  }
+  const committed = await environmentRequest(
+    env,
+    ownerId,
+    "/environment/dispatch",
+    {
+      method: "POST",
+      body: JSON.stringify({ generation, ...run }),
+    },
+  );
+  if (!committed.cancel) return committed.environment;
+  return cancelRecordedEnvironment(
+    env,
+    ownerId,
+    committed.environment,
+    cancel,
+  );
 }
 
 export async function closeEnvironment(

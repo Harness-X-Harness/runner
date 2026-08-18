@@ -27,7 +27,7 @@ const TERMINAL_REASONS = new Set([
   "driver_failed",
 ]);
 const EVENT_FIELDS = {
-  status: new Set(["phase", "channelState", "controllerGrantId", "terminalReason"]),
+  status: new Set(["phase", "channelState", "controllerName", "terminalReason"]),
   user_message: new Set(["text", "turnId", "delivery"]),
   agent_message_chunk: new Set(["text", "turnId"]),
   activity: new Set(["label", "target", "command", "status", "error", "turnId"]),
@@ -48,7 +48,9 @@ export async function handleSessionRequest(storage, request, { now = () => new D
   if (request.method === "POST" && segments.length === 1) {
     const input = await readJson(request);
     if (!input) return json({ error: "invalid JSON" }, 400);
-    return storage.transaction(async (transaction) => createSession(transaction, input, now));
+    const result = await storage.transaction(async (transaction) =>
+      createSessionRecord(transaction, input, now()));
+    return json(result.body, result.status);
   }
 
   if (request.method === "GET" && segments.length === 1) {
@@ -155,42 +157,130 @@ export async function pendingGenerationCommands(storage, generation) {
   return pending.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
-async function createSession(storage, input, now) {
-  const required = ["sessionId", "generation", "controllerGrantId", "executor", "workingDirectory"];
+export async function startGenerationQueuedTurns(
+  storage,
+  generation,
+  { now = () => new Date() } = {},
+) {
+  const sessions = await listAll(storage, SESSION_META_PREFIX);
+  let started = 0;
+  for (const session of sessions.values()) {
+    if (
+      session.generation !== String(generation) ||
+      session.phase !== "idle" ||
+      session.queuedTurns.length === 0
+    ) continue;
+    const response = await storage.transaction(async (transaction) =>
+      applyAction(transaction, session.sessionId, {
+        type: "accept_command",
+        generation: session.generation,
+        grantId: session.controllerGrantId,
+        commandId: `command_${crypto.randomUUID()}`,
+        kind: "start_queued",
+      }, now));
+    if (response.ok) started += 1;
+  }
+  return started;
+}
+
+export async function createSessionRecord(storage, input, timestamp = new Date()) {
+  const required = [
+    "sessionId",
+    "generation",
+    "controllerGrantId",
+    "executor",
+    "workingDirectory",
+  ];
   if (required.some((field) => !validText(input[field]))) {
-    return json({ error: "invalid session" }, 400);
+    return failure("invalid session", 400);
   }
   if (!validId(input.sessionId) || !validId(input.generation) || !validId(input.controllerGrantId)) {
-    return json({ error: "invalid session identity" }, 400);
+    return failure("invalid session identity", 400);
+  }
+  if (!boundedControllerName(input.controllerClientName)) {
+    return failure("invalid Session controller", 400);
   }
   if (!new Set(["codex", "grok"]).has(input.executor)) {
-    return json({ error: "invalid executor" }, 400);
+    return failure("invalid executor", 400);
   }
   if (!input.workingDirectory.startsWith("/")) {
-    return json({ error: "working directory must be absolute" }, 400);
+    return failure("working directory must be absolute", 400);
   }
   const key = metaKey(input.sessionId);
-  if (await storage.get(key)) return json({ error: "session already exists" }, 409);
-  const timestamp = now().toISOString();
+  if (await storage.get(key)) return failure("session already exists", 409);
+  const initial = initialDriverCommand(input, timestamp);
+  if (initial?.error) return failure(initial.error, 400);
+  const initialCommand = initial?.command;
+  if (initial && !initialCommand) return failure("invalid driver start command", 400);
   const session = {
     sessionId: input.sessionId,
     generation: input.generation,
     executor: input.executor,
     phase: "preparing",
     controllerGrantId: input.controllerGrantId,
+    controllerClientName: input.controllerClientName.slice(0, 256),
     workingDirectory: input.workingDirectory,
     queuedTurns: [],
     activeTurnId: undefined,
     pendingRequests: [],
-    driverStartAccepted: false,
+    driverStartAccepted: Boolean(initial),
     processedCommandCount: 0,
     nextCursor: 1,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    createdAt: timestamp.toISOString(),
+    updatedAt: timestamp.toISOString(),
   };
-  await appendEvent(storage, session, { type: "status", data: { phase: "preparing" } }, now());
-  await storage.put(key, session);
-  return json({ session: publicSession(session) }, 201);
+  await appendEvent(storage, session, { type: "status", data: { phase: "preparing" } }, timestamp);
+  const writes = /** @type {Record<string, any>} */ ({ [key]: session });
+  if (initialCommand) {
+    writes[commandKey(session.sessionId, initialCommand.commandId)] = initialCommand;
+    if (initial.turn) writes[turnKey(session.sessionId, initial.turn.turnId)] = initial.turn;
+    if (initial.turn) {
+      await appendEvent(storage, session, {
+        type: "user_message",
+        data: { text: initial.turn.text, turnId: initial.turn.turnId, delivery: "steer" },
+      }, timestamp);
+    }
+  }
+  writes[key] = session;
+  await storage.put(writes);
+  return { status: 201, body: { session: publicSession(session) } };
+}
+
+function failure(error, status) {
+  return { status, body: { error } };
+}
+
+function initialDriverCommand(input, timestamp) {
+  const fields = [input.startCommandId, input.initialTurnId, input.initialPrompt];
+  if (fields.every((value) => value === undefined)) return undefined;
+  if (!validId(input.startCommandId)) return { error: "invalid driver start command" };
+  const hasPrompt = input.initialTurnId !== undefined || input.initialPrompt !== undefined;
+  if (hasPrompt && (!validId(input.initialTurnId) || !validText(input.initialPrompt))) {
+    return { error: "invalid initial turn" };
+  }
+  const action = {
+    generation: input.generation,
+    grantId: input.controllerGrantId,
+    kind: "start",
+    ...(hasPrompt ? { turnId: input.initialTurnId, text: input.initialPrompt } : {}),
+  };
+  return {
+    command: {
+      commandId: input.startCommandId,
+      generation: input.generation,
+      kind: "start",
+      payload: {
+        initial: true,
+        ...(hasPrompt ? { turnId: input.initialTurnId, text: input.initialPrompt } : {}),
+      },
+      fingerprint: commandFingerprint(action),
+      processed: false,
+      createdAt: timestamp.toISOString(),
+    },
+    turn: hasPrompt
+      ? { turnId: input.initialTurnId, text: input.initialPrompt, createdAt: timestamp.toISOString() }
+      : undefined,
+  };
 }
 
 async function readSession(storage, sessionId, searchParams) {
@@ -236,6 +326,8 @@ async function applyAction(storage, sessionId, action, now) {
       return queueTurn(storage, key, session, action, now);
     case "cancel_queued_turn":
       return cancelQueuedTurn(storage, key, session, action, now);
+    case "stop_before_admission":
+      return stopBeforeAdmission(storage, key, session, action, now);
     case "accept_command":
       return acceptCommand(storage, key, session, action, now);
     case "process_command":
@@ -275,11 +367,20 @@ async function beginTurn(storage, key, session, action, now) {
 }
 
 async function takeOver(storage, key, session, action, now) {
-  if (!CONTROLLER_PHASES.has(session.phase) || !validId(action.grantId)) {
+  if (!CONTROLLER_PHASES.has(session.phase) || !validId(action.grantId) ||
+      !boundedControllerName(action.clientName)) {
     return json({ error: "session cannot change controller" }, 409);
   }
   if (action.grantId === session.controllerGrantId) return sessionResponse(session, { duplicate: true });
-  const next = update(session, { controllerGrantId: action.grantId }, now());
+  const timestamp = now();
+  const next = update(session, {
+    controllerGrantId: action.grantId,
+    controllerClientName: action.clientName,
+  }, timestamp);
+  await appendEvent(storage, next, {
+    type: "status",
+    data: { controllerName: action.clientName },
+  }, timestamp);
   await storage.put(key, next);
   return sessionResponse(next);
 }
@@ -297,6 +398,14 @@ async function queueTurn(storage, key, session, action, now) {
   const next = update(session, {
     queuedTurns: [...session.queuedTurns, { turnId: turn.turnId, createdAt: turn.createdAt }],
   }, timestamp);
+  await appendEvent(storage, next, {
+    type: "user_message",
+    data: { text: action.text, turnId: action.turnId, delivery: "queue" },
+  }, timestamp);
+  await appendEvent(storage, next, {
+    type: "turn",
+    data: { turnId: action.turnId, status: "queued" },
+  }, timestamp);
   await storage.put({ [key]: next, [turnKey(session.sessionId, action.turnId)]: turn });
   return sessionResponse(next);
 }
@@ -309,10 +418,22 @@ async function cancelQueuedTurn(storage, key, session, action, now) {
   if (index < 0) return json({ error: "queued turn not found" }, 409);
   const queuedTurns = session.queuedTurns.slice();
   queuedTurns.splice(index, 1);
-  const next = update(session, { queuedTurns }, now());
+  const timestamp = now();
+  const next = update(session, { queuedTurns }, timestamp);
+  await appendEvent(storage, next, {
+    type: "turn",
+    data: { turnId: action.turnId, status: "cancelled" },
+  }, timestamp);
   await storage.put(key, next);
   await storage.delete(turnKey(session.sessionId, action.turnId));
   return sessionResponse(next);
+}
+
+async function stopBeforeAdmission(storage, key, session, action, now) {
+  if (session.phase !== "preparing" || !controllerMatches(session, action)) {
+    return json({ error: "Session cannot stop before admission" }, 409);
+  }
+  return terminateOne(storage, key, session, { reason: "stopped" }, now);
 }
 
 async function acceptCommand(storage, key, session, action, now) {
@@ -344,7 +465,7 @@ async function acceptCommand(storage, key, session, action, now) {
   if (transition.turn) {
     await storage.put(turnKey(session.sessionId, transition.turn.turnId), transition.turn);
   }
-  if (transition.event) await appendEvent(storage, next, transition.event, timestamp);
+  for (const event of transition.events ?? []) await appendEvent(storage, next, event, timestamp);
   await storage.put(key, next);
   return sessionResponse(next);
 }
@@ -370,6 +491,12 @@ async function commandTransition(storage, session, action, now) {
             initial: true,
             ...(hasPrompt ? { turnId: action.turnId, text: action.text } : {}),
           },
+          events: hasPrompt
+            ? [{
+                type: "user_message",
+                data: { text: action.text, turnId: action.turnId, delivery: "steer" },
+              }]
+            : [],
         };
       }
       if (session.phase !== "idle" || !validId(action.turnId) || !validText(action.text)) {
@@ -380,7 +507,13 @@ async function commandTransition(storage, session, action, now) {
         changes: { phase: "running", activeTurnId: action.turnId },
         turn: { turnId: action.turnId, text: action.text, createdAt: now.toISOString() },
         payload: { turnId: action.turnId, text: action.text },
-        event: { type: "turn", data: { turnId: action.turnId, status: "started" } },
+        events: [
+          {
+            type: "user_message",
+            data: { text: action.text, turnId: action.turnId, delivery: "steer" },
+          },
+          { type: "turn", data: { turnId: action.turnId, status: "started" } },
+        ],
       };
     }
     case "start_queued": {
@@ -393,12 +526,19 @@ async function commandTransition(storage, session, action, now) {
       return {
         changes: { phase: "running", activeTurnId: head.turnId, queuedTurns },
         payload: { turnId: head.turnId, text: turn.text },
-        event: { type: "turn", data: { turnId: head.turnId, status: "started" } },
+        events: [{ type: "turn", data: { turnId: head.turnId, status: "started" } }],
       };
     }
     case "steer":
       return session.phase === "running" && session.activeTurnId === action.turnId && validText(action.text)
-        ? { changes: {}, payload: { turnId: action.turnId, text: action.text } }
+        ? {
+            changes: {},
+            payload: { turnId: action.turnId, text: action.text },
+            events: [{
+              type: "user_message",
+              data: { text: action.text, turnId: action.turnId, delivery: "steer" },
+            }],
+          }
         : { error: "steer command requires the exact running turn" };
     case "interrupt":
       return session.phase === "running" && session.activeTurnId === action.turnId
@@ -406,17 +546,29 @@ async function commandTransition(storage, session, action, now) {
         : { error: "interrupt command requires the exact running turn" };
     case "response": {
       const pending = session.pendingRequests.find(({ requestId }) => requestId === action.requestId);
-      const response = commandResponse(action);
+      const response = commandResponse(action, pending);
       return session.phase === "waiting_for_user" && pending && response
         ? {
             changes: { phase: "running", pendingRequests: [] },
             payload: { requestId: action.requestId, ...response },
+            events: [{
+              type: "request",
+              data: {
+                requestId: action.requestId,
+                state: "resolved",
+                kind: pending.kind,
+                title: "Request resolved",
+              },
+            }],
           }
         : { error: "response command requires the exact pending request" };
     }
     case "stop":
       return MUTABLE_PHASES.has(session.phase)
-        ? { changes: { phase: "stopping" } }
+        ? {
+            changes: { phase: "stopping" },
+            events: [{ type: "status", data: { phase: "stopping" } }],
+          }
         : { error: "session cannot stop" };
     default:
       return { error: "invalid command kind", status: 400 };
@@ -442,8 +594,37 @@ async function completeTurn(storage, key, session, action, now) {
       session.activeTurnId !== String(action.turnId) || !status) {
     return json({ error: "active turn mismatch" }, 409);
   }
-  const next = update(session, { phase: "idle", activeTurnId: undefined, pendingRequests: [] }, now());
-  await appendEvent(storage, next, { type: "turn", data: { turnId: action.turnId, status } }, now());
+  const timestamp = now();
+  const next = update(session, { phase: "idle", activeTurnId: undefined, pendingRequests: [] }, timestamp);
+  await appendEvent(storage, next, { type: "turn", data: { turnId: action.turnId, status } }, timestamp);
+  if (next.queuedTurns.length > 0) {
+    const [head, ...queuedTurns] = next.queuedTurns;
+    const turn = await storage.get(turnKey(session.sessionId, head.turnId));
+    if (!turn) throw new Error("queued turn payload is missing");
+    next.phase = "running";
+    next.activeTurnId = head.turnId;
+    next.queuedTurns = queuedTurns;
+    const commandId = `command_${crypto.randomUUID()}`;
+    const command = {
+      commandId,
+      generation: session.generation,
+      kind: "start_queued",
+      payload: { turnId: head.turnId, text: turn.text },
+      fingerprint: commandFingerprint({
+        generation: session.generation,
+        grantId: session.controllerGrantId,
+        kind: "start_queued",
+        turnId: head.turnId,
+      }),
+      processed: false,
+      createdAt: timestamp.toISOString(),
+    };
+    await appendEvent(storage, next, {
+      type: "turn",
+      data: { turnId: head.turnId, status: "started" },
+    }, timestamp);
+    await storage.put(commandKey(session.sessionId, commandId), command);
+  }
   await storage.put(key, next);
   return sessionResponse(next);
 }
@@ -455,7 +636,12 @@ async function waitForUser(storage, key, session, action, now) {
   }
   const event = validateEvent({ type: "request", data: action.request });
   if (!event) return json({ error: "invalid request event" }, 400);
-  const pendingRequests = [{ requestId: action.request.requestId, kind: action.request.kind }];
+  const pendingRequests = [{
+    requestId: action.request.requestId,
+    kind: action.request.kind,
+    choiceIds: action.request.choices?.map(({ choiceId }) => choiceId),
+    inputSchema: action.request.inputSchema,
+  }];
   const next = update(session, { phase: "waiting_for_user", pendingRequests }, now());
   await appendEvent(storage, next, event, now());
   await storage.put(key, next);
@@ -517,12 +703,12 @@ function validEventData(type, data) {
   const optionalText = (value) => value === undefined || boundedText(value);
   switch (type) {
     case "status": {
-      const hasStatus = [data.phase, data.channelState, data.controllerGrantId, data.terminalReason]
+      const hasStatus = [data.phase, data.channelState, data.controllerName, data.terminalReason]
         .some((value) => value !== undefined);
       return hasStatus &&
         (data.phase === undefined || SESSION_PHASES.has(data.phase)) &&
         (data.channelState === undefined || new Set(["connected", "disconnected"]).has(data.channelState)) &&
-        optionalId(data.controllerGrantId) &&
+        optionalText(data.controllerName) &&
         (data.terminalReason === undefined || TERMINAL_REASONS.has(data.terminalReason));
     }
     case "user_message":
@@ -590,9 +776,10 @@ function publicSession(session) {
     executor: session.executor,
     phase: session.phase,
     controllerGrantId: session.controllerGrantId,
+    controllerClientName: session.controllerClientName,
     workingDirectory: session.workingDirectory,
     queuedTurns: session.queuedTurns,
-    pendingRequests: session.pendingRequests,
+    pendingRequests: session.pendingRequests.map(({ requestId, kind }) => ({ requestId, kind })),
     latestCursor: session.nextCursor - 1,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
@@ -648,15 +835,25 @@ function commandFingerprint(action) {
   });
 }
 
-function commandResponse(action) {
-  if (validId(action.choiceId)) return { choiceId: action.choiceId };
+function commandResponse(action, pending) {
+  if (!pending) return undefined;
+  if (validId(action.choiceId)) {
+    return pending.choiceIds?.includes(action.choiceId)
+      ? { choiceId: action.choiceId }
+      : undefined;
+  }
   if (!action.answers || typeof action.answers !== "object" || Array.isArray(action.answers) ||
-      Object.keys(action.answers).length > 20) return undefined;
+      Object.keys(action.answers).length > 20 || !pending.inputSchema) return undefined;
   const answers = {};
   for (const [name, values] of Object.entries(action.answers)) {
-    if (!validId(name) || !Array.isArray(values) || values.length > 20 ||
+    const field = pending.inputSchema.properties[name];
+    if (!field || !validId(name) || !Array.isArray(values) || values.length > 20 ||
         !values.every((value) => typeof value === "string" && value.length <= 16_384)) return undefined;
+    if (field.enum && values.some((value) => !field.enum.includes(value))) return undefined;
     answers[name] = [...values];
+  }
+  if ((pending.inputSchema.required ?? []).some((name) => !Object.hasOwn(answers, name))) {
+    return undefined;
   }
   return { answers };
 }
@@ -730,6 +927,10 @@ function validId(value) {
 
 function validText(value) {
   return typeof value === "string" && value.length > 0 && value.length <= 65_536;
+}
+
+function boundedControllerName(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 256;
 }
 
 function parseNonNegativeInteger(value, fallback) {

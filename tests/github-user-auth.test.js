@@ -106,7 +106,11 @@ test("GitHub callback stores base and scoped authority in one Principal grant", 
       code: "github-code",
       callback: "https://runner.example.com/github/callback",
       codeVerifier: "verifier-123",
-      payload: { authRequest },
+      payload: {
+        authRequest,
+        controllerGrantId: "grant_12345678-1234-1234-1234-123456789abc",
+        clientName: "VS Code",
+      },
     },
     async (url) => {
       if (url === "https://github.com/login/oauth/access_token") {
@@ -136,6 +140,11 @@ test("GitHub callback stores base and scoped authority in one Principal grant", 
   assert.equal(completedAuthorization.props.environmentGithubAccessTokenExpiresAt, 1_893_456_000);
   assert.equal(completedAuthorization.props.githubAuthorizationKind, "github_app_scoped");
   assert.deepEqual(completedAuthorization.props.oauthScopes, ["environments:manage"]);
+  assert.equal(
+    completedAuthorization.props.mcpControllerGrantId,
+    "grant_12345678-1234-1234-1234-123456789abc",
+  );
+  assert.equal(completedAuthorization.props.mcpClientName, "VS Code");
 });
 
 test("token properties retain GitHub App refresh metadata", () => {

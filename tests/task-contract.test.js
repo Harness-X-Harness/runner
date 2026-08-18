@@ -4,12 +4,21 @@ import test from "node:test";
 import { applyTaskEvent, EXECUTORS, publicTask, validateSubmitInput } from "../apps/chatgpt-app/src/task.js";
 import { TOOL_CONTRACT } from "../apps/chatgpt-app/src/tool-contract.js";
 
-test("tool contract separates task reads from writes", () => {
+test("tool contract separates reads, mutations, and destructive controls", () => {
   assert.deepEqual(TOOL_CONTRACT, [
     { name: "submit_task", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
     { name: "get_task", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     { name: "cancel_task", readOnlyHint: false, openWorldHint: false, destructiveHint: true },
     { name: "get_task_result", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    { name: "start_session", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+    { name: "list_sessions", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    { name: "read_session", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    { name: "send_turn", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+    { name: "cancel_queued_turn", readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+    { name: "interrupt_turn", readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+    { name: "respond_to_session", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+    { name: "take_over_session", readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    { name: "stop_session", readOnlyHint: false, openWorldHint: false, destructiveHint: true },
     { name: "open_environment", readOnlyHint: false, openWorldHint: true, destructiveHint: false },
     { name: "close_environment", readOnlyHint: false, openWorldHint: true, destructiveHint: true },
   ]);
