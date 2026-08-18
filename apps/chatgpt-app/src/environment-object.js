@@ -1,11 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
 
+import {
+  expireSessions,
+  handleSessionRequest,
+  terminateGenerationSessions,
+} from "./session-state.js";
+
 const STORAGE_KEY = "environment";
 const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
 
 export class EnvironmentObject extends DurableObject {
   async fetch(request) {
     const path = new URL(request.url).pathname;
+
+    if (path === "/sessions" || path.startsWith("/sessions/")) {
+      return handleSessionRequest(this.ctx.storage, request);
+    }
 
     if (request.method === "GET" && path === "/environment") {
       const environment = await this.ctx.storage.get(STORAGE_KEY);
@@ -134,6 +144,11 @@ export class EnvironmentObject extends DurableObject {
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
+        await terminateGenerationSessions(
+          storage,
+          current.generation,
+          "startup_failed",
+        );
         return environment;
       });
       return result
@@ -182,6 +197,11 @@ export class EnvironmentObject extends DurableObject {
             updatedAt: new Date().toISOString(),
           };
           await storage.put(STORAGE_KEY, environment);
+          await terminateGenerationSessions(
+            storage,
+            current.generation,
+            "stopped",
+          );
           return { environment, cancel: false };
         }
         if (current.status === "closing") {
@@ -251,6 +271,11 @@ export class EnvironmentObject extends DurableObject {
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);
+        await terminateGenerationSessions(
+          storage,
+          current.generation,
+          current.closeRequested ? "stopped" : "environment_ended",
+        );
         return environment;
       });
       return result
@@ -259,5 +284,9 @@ export class EnvironmentObject extends DurableObject {
     }
 
     return Response.json({ error: "not found" }, { status: 404 });
+  }
+
+  async alarm() {
+    await expireSessions(this.ctx.storage);
   }
 }
