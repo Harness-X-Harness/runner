@@ -55,6 +55,19 @@ test("EnvironmentObject Session store creates, lists, and reads private ordered 
   assert.equal(body.hasMore, false);
 });
 
+test("Session creation requires an absolute bounded working directory", async () => {
+  for (const workingDirectory of ["workspace", `/${"x".repeat(65_536)}`]) {
+    const response = await sessionRequest(fakeStorage(), "POST", "/sessions", {
+      sessionId: "session-1",
+      generation: "generation-1",
+      controllerGrantId: "grant-a",
+      executor: "codex",
+      workingDirectory,
+    });
+    assert.equal(response.status, 400);
+  }
+});
+
 test("Session controller takeover atomically rejects the old Grant", async () => {
   const storage = await admittedSession();
   assert.equal((await sessionAction(storage, {
@@ -193,6 +206,103 @@ test("duplicate command delivery records one native effect", async () => {
     [],
   );
   assert.deepEqual(await pendingGenerationCommands(storage, "generation-1"), []);
+});
+
+test("runner admission refines preparing into one exact native turn", async () => {
+  const storage = fakeStorage();
+  await sessionRequest(storage, "POST", "/sessions", {
+    sessionId: "session-1",
+    generation: "generation-1",
+    controllerGrantId: "grant-a",
+    executor: "grok",
+    workingDirectory: "/home/runner",
+  });
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-start",
+    kind: "start",
+    turnId: "turn-1",
+    text: "initial prompt",
+  })).status, 200);
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "another-start",
+    kind: "start",
+  })).status, 409);
+
+  const [pending] = await pendingGenerationCommands(storage, "generation-1");
+  assert.deepEqual(pending, {
+    sessionId: "session-1",
+    executor: "grok",
+    workingDirectory: "/home/runner",
+    commandId: "command-start",
+    generation: "generation-1",
+    kind: "start",
+    payload: { initial: true, turnId: "turn-1", text: "initial prompt" },
+    createdAt: CREATED_AT,
+  });
+
+  assert.equal((await sessionAction(storage, {
+    type: "admit",
+    generation: "generation-1",
+  })).status, 200);
+  const begun = await sessionAction(storage, {
+    type: "begin_turn",
+    generation: "generation-1",
+    turnId: "turn-1",
+  });
+  assert.equal((await begun.json()).session.activeTurnId, "turn-1");
+
+  const waiting = await sessionAction(storage, {
+    type: "wait_for_user",
+    generation: "generation-1",
+    turnId: "turn-1",
+    request: {
+      requestId: "request-1",
+      state: "open",
+      kind: "permission",
+      title: "Allow command",
+      choices: [{ choiceId: "allow-once", label: "Allow once" }],
+    },
+  });
+  assert.equal((await waiting.json()).session.phase, "waiting_for_user");
+
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-response",
+    kind: "response",
+    requestId: "request-stale",
+    choiceId: "allow-once",
+  })).status, 409);
+  const response = await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-response",
+    kind: "response",
+    requestId: "request-1",
+    choiceId: "allow-once",
+  });
+  assert.equal((await response.json()).session.phase, "running");
+
+  const completed = await sessionAction(storage, {
+    type: "complete_turn",
+    generation: "generation-1",
+    turnId: "turn-1",
+    status: "failed",
+  });
+  assert.equal((await completed.json()).session.phase, "idle");
+  const read = await sessionRequest(storage, "GET", "/sessions/session-1?after=0&limit=100");
+  assert.deepEqual((await read.json()).events.filter(({ type }) => type === "turn").map(({ data }) => data), [
+    { turnId: "turn-1", status: "started" },
+    { turnId: "turn-1", status: "failed" },
+  ]);
 });
 
 test("generation gates and terminal monotonicity reject stale Session mutations", async () => {

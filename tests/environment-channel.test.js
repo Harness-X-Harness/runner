@@ -123,11 +123,25 @@ test("channel accepts only generation-bound acknowledgements and bounded event e
     sessionId: "session-1",
     event: { type: "agent_message_chunk", data: { text: "visible" } },
   }), attachment).event.data, { text: "visible" });
+  assert.deepEqual(parseEnvironmentChannelMessage(JSON.stringify({
+    type: "transition",
+    generation: "generation-1",
+    sessionId: "session-1",
+    action: { type: "complete_turn", turnId: "turn-1", status: "failed" },
+  }), attachment).action, {
+    type: "complete_turn", turnId: "turn-1", status: "failed",
+  });
   for (const message of [
     new Uint8Array([1, 2]).buffer,
     "not json",
     JSON.stringify({ type: "ack", generation: "generation-old", sessionId: "session-1", commandId: "command-1" }),
     JSON.stringify({ type: "native", generation: "generation-1", payload: { reasoning: "private" } }),
+    JSON.stringify({
+      type: "transition",
+      generation: "generation-1",
+      sessionId: "session-1",
+      action: { type: "accept_command", commandId: "command-1" },
+    }),
   ]) {
     assert.equal(parseEnvironmentChannelMessage(message, attachment), undefined);
   }

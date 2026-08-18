@@ -1,5 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { DriverRegistry } = require("./drivers.js");
 
 const ENVIRONMENT_CHANNEL_PROTOCOL = "harness.environment.v1";
 
@@ -9,10 +10,31 @@ class SessionRuntime {
     this.send = send;
     this.execute = execute;
     this.receipts = new Set();
+    this.outbox = [];
   }
 
   setSend(send) {
     this.send = send;
+    const pending = this.outbox;
+    this.outbox = [];
+    for (const message of pending) this.deliver(message);
+  }
+
+  disconnect() {
+    this.send = undefined;
+  }
+
+  deliver(message) {
+    if (!this.send) {
+      this.outbox.push(message);
+      return;
+    }
+    try {
+      this.send(message);
+    } catch {
+      this.send = undefined;
+      this.outbox.push(message);
+    }
   }
 
   async receive(raw) {
@@ -42,7 +64,7 @@ class SessionRuntime {
       try {
         await this.execute(sessionId, command);
       } catch {
-        this.send({
+        this.deliver({
           type: "event",
           generation: this.generation,
           sessionId,
@@ -57,12 +79,20 @@ class SessionRuntime {
         });
       }
     }
-    this.send({
+    this.deliver({
       type: "ack",
       generation: this.generation,
       sessionId,
       commandId: command.commandId,
     });
+  }
+
+  event(sessionId, event) {
+    this.deliver({ type: "event", generation: this.generation, sessionId, event });
+  }
+
+  transition(sessionId, action) {
+    this.deliver({ type: "transition", generation: this.generation, sessionId, action });
   }
 }
 
@@ -77,15 +107,21 @@ async function main() {
   const descriptor = await privateDescriptor();
   let socket;
   let stopping = false;
-  const runtime = new SessionRuntime({
+  let runtime;
+  const drivers = new DriverRegistry({
+    emit: (sessionId, event) => runtime.event(sessionId, event),
+    transition: (sessionId, action) => runtime.transition(sessionId, action),
+  });
+  runtime = new SessionRuntime({
     generation: environmentId,
     send: () => {},
-    execute: async () => { throw new Error("Session driver is not installed"); },
+    execute: (sessionId, command) => drivers.execute(sessionId, command),
   });
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.once(signal, () => {
       stopping = true;
+      drivers.stopAll();
       socket?.close(1000, "runner stopping");
     });
   }
@@ -102,6 +138,7 @@ async function main() {
     });
     await opened(socket);
     await closed;
+    runtime.disconnect();
     if (!stopping) await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 }
