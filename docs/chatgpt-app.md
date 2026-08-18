@@ -76,6 +76,13 @@ without the card. The card has no storage, polling, or direct backend request;
 the Worker and `EnvironmentObject` remain lifecycle authority. Pairing URLs,
 T3 tokens, and Tailscale details are not sent to the card.
 
+The card completes the MCP Apps `ui/initialize` handshake before accepting the
+tool-result notification. Until that snapshot arrives, it shows Loading and
+no actions. Environment and GitHub links use the host's standard
+`ui/open-link` request. The versioned `ui://` resource URI changes whenever
+the card protocol changes, so a refreshed ChatGPT connection cannot reuse an
+incompatible cached resource.
+
 The browser entry verifies GitHub identity independently. While the runner
 starts, it displays Preparing. Immediately after checkout, the workflow uses
 GitHub Actions OIDC to claim its repository, workflow, run, signed generation,
