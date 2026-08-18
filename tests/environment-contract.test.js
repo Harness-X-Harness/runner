@@ -647,6 +647,66 @@ test("open reconciles one terminal closing run before dispatching its replacemen
   assert.equal(environments.get("github-42").generation, "generation-two");
 });
 
+test("concurrent open after terminal evidence dispatches one replacement generation", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }), () => "generation-one");
+  await closeEnvironment(env, "42", async () => {});
+
+  let observationCount = 0;
+  let releaseObservations;
+  const observationsComplete = new Promise((resolve) => {
+    releaseObservations = resolve;
+  });
+  const observe = async (_env, runId) => {
+    assert.equal(runId, "123456");
+    observationCount += 1;
+    if (observationCount === 2) releaseObservations();
+    await observationsComplete;
+    return { status: "completed", conclusion: "cancelled" };
+  };
+  const dispatches = [];
+  const dispatch = async (_env, request) => {
+    dispatches.push(request.environmentId);
+    return {
+      runId: "654321",
+      runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/654321",
+    };
+  };
+
+  const results = await Promise.all([
+    openEnvironment(
+      env,
+      "42",
+      dispatch,
+      () => "generation-two-a",
+      async () => { throw new Error("must not cancel the terminal run again"); },
+      observe,
+    ),
+    openEnvironment(
+      env,
+      "42",
+      dispatch,
+      () => "generation-two-b",
+      async () => { throw new Error("must not cancel the terminal run again"); },
+      observe,
+    ),
+  ]);
+
+  assert.equal(observationCount, 2);
+  assert.equal(dispatches.length, 1);
+  assert.equal(results[0].status, "starting");
+  assert.equal(results[1].status, "starting");
+  assert.equal(environments.get("github-42").generation, dispatches[0]);
+  assert.equal(environments.get("github-42").runId, "654321");
+});
+
 test("open keeps Closing when the exact terminal state cannot be confirmed", async () => {
   const environments = fakeEnvironments();
   const env = {
