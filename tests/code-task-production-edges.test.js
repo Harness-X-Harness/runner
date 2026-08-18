@@ -332,6 +332,12 @@ test("Codex executor uses the native CLI driver", async () => {
   );
 
   assert.match(workflow, /https:\/\/chatgpt\.com\/codex\/install\.sh/);
+  assert.match(workflow, /sudo sysctl -w kernel\.unprivileged_userns_clone=1/);
+  assert.match(workflow, /sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0/);
+  assert.ok(
+    workflow.indexOf("kernel.apparmor_restrict_unprivileged_userns=0") <
+      workflow.indexOf("uses: ./.github/actions/task-driver"),
+  );
   assert.match(workflow, /secrets\.MINI_CODEX_BASE_URL/);
   assert.match(workflow, /env_key = "MINI_END_USER_KEY"/);
   assert.match(workflow, /uses: \.\/\.github\/actions\/task-driver/);

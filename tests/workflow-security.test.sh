@@ -173,6 +173,10 @@ grep -Fq '[model.mini-grok-4-6]' "$TASK_WORKFLOW" || \
   fail 'Grok native config must select the Mini Grok model'
 grep -Fq 'https://chatgpt.com/codex/install.sh' "$TASK_WORKFLOW" || \
   fail 'task workflow must use the official Codex CLI installer'
+grep -Fq 'sudo sysctl -w kernel.unprivileged_userns_clone=1' "$TASK_WORKFLOW" || \
+  fail 'Codex runner must enable unprivileged user namespaces for bubblewrap'
+grep -Fq 'sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0' "$TASK_WORKFLOW" || \
+  fail 'Codex runner must clear the Ubuntu AppArmor user namespace gate'
 grep -Fq 'uses: ./.github/actions/task-driver' "$TASK_WORKFLOW" || \
   fail 'Codex and Grok must use the private streaming task driver'
 grep -Fq '"--json"' "$ROOT_DIR/.github/actions/task-driver/index.js" || \
