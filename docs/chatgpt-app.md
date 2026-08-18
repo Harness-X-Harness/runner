@@ -114,9 +114,12 @@ ChatGPT can render this result as one inline MCP Apps control card. The card
 shows Starting, Ready, Closing, or Offline and offers only the actions valid
 for that state: open the stable Environment entry, view the GitHub run, close
 the Environment, or start a new one. The existing tools remain complete
-without the card. The card has no storage, polling, or direct backend request;
-the Worker and `EnvironmentObject` remain lifecycle authority. Pairing URLs,
-T3 tokens, and Tailscale details are not sent to the card.
+without the card. When an Open result is Closing, the card repeats that
+already-requested `open_environment` intent every ten seconds until the exact
+run is terminal and a replacement starts. An explicit Close never schedules a
+replacement. The card does not store state or call a backend directly;
+the tools, GitHub, and `EnvironmentObject` remain lifecycle authority. Pairing
+URLs, T3 tokens, and Tailscale details are not sent to the card.
 
 The card completes the MCP Apps `ui/initialize` handshake before accepting the
 tool-result notification. Until that snapshot arrives, it shows Loading and

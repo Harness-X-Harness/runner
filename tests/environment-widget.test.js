@@ -37,6 +37,8 @@ test("Environment Widget connects before receiving results and opens both safe l
   );
   const outbound = [];
   const messageListeners = [];
+  const timers = [];
+  let openCalls = 0;
   const parent = {
     postMessage(message) {
       outbound.push(message);
@@ -68,6 +70,36 @@ test("Environment Widget connects before receiving results and opens both safe l
           }),
         );
       }
+      if (message.method === "tools/call") {
+        if (message.params.name === "open_environment") openCalls += 1;
+        queueMicrotask(() =>
+          deliver({
+            jsonrpc: "2.0",
+            id: message.id,
+            ...(message.params.name === "close_environment"
+              ? {
+                  result: {
+                    structuredContent: {
+                      status: "closing",
+                      environmentUrl: "https://runner.example/environment",
+                      runUrl: "https://github.com/example/runner/actions/runs/456",
+                    },
+                  },
+                }
+              : openCalls === 1
+              ? { error: { code: -32603, message: "temporary failure" } }
+              : {
+                  result: {
+                    structuredContent: {
+                      status: "starting",
+                      environmentUrl: "https://runner.example/environment",
+                      runUrl: "https://github.com/example/runner/actions/runs/456",
+                    },
+                  },
+                }),
+          }),
+        );
+      }
     },
   };
   const deliver = (data) => {
@@ -93,6 +125,14 @@ test("Environment Widget connects before receiving results and opens both safe l
     queueMicrotask,
     URL,
     window,
+    setTimeout(callback, delay) {
+      const timer = { callback, delay, cancelled: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) {
+      timer.cancelled = true;
+    },
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -112,4 +152,42 @@ test("Environment Widget connects before receiving results and opens both safe l
       "https://github.com/example/runner/actions/runs/123",
     ],
   );
+
+  deliver({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: {
+      structuredContent: {
+        status: "closing",
+        environmentUrl: "https://runner.example/environment",
+        runUrl: "https://github.com/example/runner/actions/runs/123",
+      },
+    },
+  });
+  assert.equal(elements.get("status").textContent, "Closing");
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 10_000);
+
+  timers[0].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    outbound.filter(({ method }) => method === "tools/call").at(-1)?.params?.name,
+    "open_environment",
+  );
+  assert.equal(elements.get("status").textContent, "Closing");
+  assert.equal(elements.get("message").textContent, "Still closing. Retrying…");
+  assert.equal(timers.length, 2);
+
+  timers[1].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("status").textContent, "Starting");
+  assert.equal(elements.get("run").dataset.href, "https://github.com/example/runner/actions/runs/456");
+
+  elements.get("stop").click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("status").textContent, "Closing");
+  assert.equal(timers.length, 2, "an explicit Close must not schedule a replacement Open");
 });
