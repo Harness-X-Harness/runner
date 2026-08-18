@@ -2,7 +2,13 @@ import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { cancelWorkflow, dispatchWorkflow } from "./github.js";
+import {
+  cancelEnvironmentWorkflow,
+  cancelWorkflow,
+  dispatchEnvironmentWorkflow,
+  dispatchWorkflow,
+  getEnvironmentWorkflowRun,
+} from "./github.js";
 import { closeEnvironment, openEnvironment } from "./environment.js";
 import {
   ENVIRONMENT_WIDGET_MIME_TYPE,
@@ -309,9 +315,17 @@ export function createServer(env, props) {
     async () => {
       const requestProps = currentProps(props);
       requireScopes(requestProps, SECURITY_SCHEMES.open_environment[0].scopes);
+      const githubAccessToken = requiredGitHubAccessToken(requestProps);
       const environment = await openEnvironment(
         env,
         requiredGitHubUserId(requestProps),
+        (workerEnv, request) =>
+          dispatchEnvironmentWorkflow(workerEnv, githubAccessToken, request),
+        undefined,
+        (workerEnv, runId) =>
+          cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
+        (workerEnv, runId) =>
+          getEnvironmentWorkflowRun(workerEnv, githubAccessToken, runId),
       );
       return result(environment, `Environment is ${environment.status}.`);
     },
@@ -339,9 +353,12 @@ export function createServer(env, props) {
     async () => {
       const requestProps = currentProps(props);
       requireScopes(requestProps, SECURITY_SCHEMES.close_environment[0].scopes);
+      const githubAccessToken = requiredGitHubAccessToken(requestProps);
       const environment = await closeEnvironment(
         env,
         requiredGitHubUserId(requestProps),
+        (workerEnv, runId) =>
+          cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
       );
       return result(environment, `Environment is ${environment.status}.`);
     },
@@ -473,4 +490,15 @@ function requiredGitHubUserId(props) {
     throw new Error("GitHub authorization is required");
   }
   return String(props.githubUserId);
+}
+
+function requiredGitHubAccessToken(props) {
+  if (
+    props?.githubAuthorizationKind !== "github_app_scoped" ||
+    typeof props?.environmentGithubAccessToken !== "string" ||
+    props.environmentGithubAccessToken.length === 0
+  ) {
+    throw new Error("GitHub OAuth authorization is required");
+  }
+  return props.environmentGithubAccessToken;
 }

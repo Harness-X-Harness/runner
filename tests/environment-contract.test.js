@@ -55,6 +55,7 @@ test("Environment identity reports the failing GitHub stage without upstream det
   const env = {
     GITHUB_APP_CLIENT_ID: "Iv1.example",
     GITHUB_APP_CLIENT_SECRET: "client-secret",
+    GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
   };
   const tokenFailure = await completeEnvironmentAuthorization(
     env,
@@ -70,12 +71,18 @@ test("Environment identity reports the failing GitHub stage without upstream det
   const profileFailure = await completeEnvironmentAuthorization(
     env,
     authorization,
-    async (url) => url === "https://github.com/login/oauth/access_token"
-      ? Response.json({ access_token: "ghu_access" })
-      : Response.json(
+    async (url) => {
+      if (url === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "ghu_access" });
+      }
+      if (url.endsWith("/token/scoped")) {
+        return Response.json({ token: "ghu_scoped" });
+      }
+      return Response.json(
         { message: "private upstream detail" },
         { status: 403 },
-      ),
+      );
+    },
     { error() {} },
   );
   assert.equal(await profileFailure.text(), "GitHub profile lookup failed");
@@ -178,7 +185,7 @@ test("Starting open and close do not preflight an active GitHub run", async () =
     runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
   };
   await openEnvironment(env, "42", async () => run, () => "generation-one");
-  Object.defineProperty(env, "GITHUB_APP_ID", {
+  Object.defineProperty(env, "GITHUB_APP_CLIENT_ID", {
     get() {
       throw new Error("GitHub Environment workflow lookup failed with 520");
     },
@@ -386,6 +393,7 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
     AUTHORIZATION_STATES: states.binding,
     GITHUB_APP_CLIENT_ID: "Iv1.example",
     GITHUB_APP_CLIENT_SECRET: "client-secret",
+    GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
     ENVIRONMENT_SESSION_SECRET: "environment-session-secret",
     TASK_CONTROL_PLANE_URL: "https://runner.example",
   };
@@ -401,6 +409,7 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
   const github = new URL(login.headers.get("location"));
   assert.equal(github.origin, "https://github.com");
   assert.equal(github.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(github.searchParams.has("scope"), false);
   const state = github.searchParams.get("state");
   assert.equal(states.get(`github:oauth:${state}`).payload.kind, "environment");
 
@@ -415,6 +424,9 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
       if (url === "https://github.com/login/oauth/access_token") {
         return Response.json({ access_token: "ghu_access" });
       }
+      if (url.endsWith("/token/scoped")) {
+        return Response.json({ token: "ghu_scoped" });
+      }
       if (url === "https://api.github.com/user") {
         return Response.json({ id: 42, login: "owner" });
       }
@@ -427,13 +439,18 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
     callback,
     "__Host-RUNNER_ENVIRONMENT",
   );
+  assert.doesNotMatch(environmentCookie, /ghu_access|ghu_scoped/);
 
+  let observedAuthority;
   const preparing = await environmentEntry(
     new Request("https://runner.example/environment", {
       headers: { cookie: `__Host-RUNNER_ENVIRONMENT=${environmentCookie}` },
     }),
     env,
-    async () => ({ status: "in_progress" }),
+    async (_workerEnv, accessToken, runId) => {
+      observedAuthority = { accessToken, runId };
+      return { status: "in_progress" };
+    },
   );
   assert.equal(preparing.status, 200);
   assert.equal(preparing.headers.get("cache-control"), "no-store");
@@ -444,6 +461,10 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
   assert.match(body, /http-equiv="refresh" content="10"/);
   assert.match(body, /actions\/runs\/123456/);
   assert.doesNotMatch(body, /trycloudflare|pairing|secret/i);
+  assert.deepEqual(observedAuthority, {
+    accessToken: "ghu_scoped",
+    runId: "123456",
+  });
 
   const generation = environments.get("github-42").generation;
   const ready = await publishEnvironmentReady(env, generation, "123456", {
@@ -478,9 +499,15 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
       callback: "https://runner.example/github/callback",
       codeVerifier: "other-user-verifier",
     },
-    async (url) => url === "https://github.com/login/oauth/access_token"
-      ? Response.json({ access_token: "ghu_other" })
-      : Response.json({ id: 43, login: "other" }),
+    async (url) => {
+      if (url === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "ghu_other" });
+      }
+      if (url.endsWith("/token/scoped")) {
+        return Response.json({ token: "ghu_other_scoped" });
+      }
+      return Response.json({ id: 43, login: "other" });
+    },
   );
   const otherCookie = cookieFromResponse(otherAuthorization, "__Host-RUNNER_ENVIRONMENT");
   const otherEntry = await environmentEntry(

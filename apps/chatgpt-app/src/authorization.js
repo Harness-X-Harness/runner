@@ -58,10 +58,10 @@ export async function authorizePage(request, env) {
   return html(
     "Authorize Harness X Harness Task Runner",
     `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests permission to use Harness X Harness Task Runner.</p>
-     <p class="note">These permissions control what ChatGPT can ask Harness to do. They do not install the GitHub App or grant access to every repository.</p>
+     <p class="note">These permissions control what ChatGPT can ask Harness to do. GitHub separately verifies the user and the Execution Repository operation.</p>
      <h2>Requested permissions</h2>
      ${scopeList}
-     <p class="note">GitHub verifies your identity next. If a task later needs a repository that the GitHub App cannot access, GitHub asks you to install or update the App for that target repository.</p>
+     <p class="note">GitHub verifies your identity next. Harness derives an Environment credential limited to the runner repository and Actions workflow control.</p>
      <form method="post" action="/authorize/consent">
        <input type="hidden" name="csrf" value="${escapeHtml(csrf)}" />
        <div class="actions">

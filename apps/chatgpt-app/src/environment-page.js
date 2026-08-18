@@ -4,10 +4,13 @@ import { startGitHubAuthorization } from "./github-oauth-state.js";
 import {
   exchangeGitHubUserCode,
   requestGitHubUserProfile,
+  scopeGitHubUserToken,
 } from "./github-user-auth.js";
 
 const SESSION_COOKIE = "__Host-RUNNER_ENVIRONMENT";
 const SESSION_TTL = 6 * 60 * 60;
+const SESSION_VERSION = "v1";
+const SESSION_CONTEXT = new TextEncoder().encode("harness-environment-session-v1");
 
 export async function environmentEntry(
   request,
@@ -34,7 +37,8 @@ export async function environmentEntry(
       env,
       session.githubUserId,
       environment,
-      observeRun,
+      (workerEnv, runId) =>
+        observeRun(workerEnv, session.githubAccessToken, runId),
     );
   }
   if (!environment || environment.status === "offline") {
@@ -67,12 +71,18 @@ export async function completeEnvironmentAuthorization(
   logger = console,
 ) {
   let token;
+  let scopedToken;
   try {
     token = await exchangeGitHubUserCode(
       env,
       authorization.code,
       authorization.callback,
       authorization.codeVerifier,
+      fetchImpl,
+    );
+    scopedToken = await scopeGitHubUserToken(
+      env,
+      token.access_token,
       fetchImpl,
     );
   } catch {
@@ -89,9 +99,10 @@ export async function completeEnvironmentAuthorization(
   }
 
   const origin = new URL(authorization.callback).origin;
-  const session = await signSession(
+  const session = await sealSession(
     {
       githubUserId: String(profile.id),
+      githubAccessToken: scopedToken.token,
       expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL,
     },
     env.ENVIRONMENT_SESSION_SECRET,
@@ -139,30 +150,48 @@ function secureHeaders(headers) {
   headers.set("x-frame-options", "DENY");
 }
 
-async function signSession(payload, secret) {
+async function sealSession(payload, secret) {
   if (!secret) throw new Error("Environment session secret is not configured");
-  const encoded = base64Url(new TextEncoder().encode(JSON.stringify(payload)));
-  const signature = await hmac("sign", secret, `session:${encoded}`);
-  return `${encoded}.${base64Url(new Uint8Array(/** @type {ArrayBuffer} */ (signature)))}`;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await sessionKey(secret, ["encrypt"]);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: SESSION_CONTEXT },
+    key,
+    new TextEncoder().encode(JSON.stringify(payload)),
+  );
+  return `${SESSION_VERSION}.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`;
 }
 
 async function readSession(value, secret) {
   if (!value || !secret) return undefined;
-  const [encoded, signature, extra] = value.split(".");
-  if (!encoded || !signature || extra !== undefined) return undefined;
-  let valid;
+  const [version, encodedIv, encodedCiphertext, extra] = value.split(".");
+  if (
+    version !== SESSION_VERSION ||
+    !encodedIv ||
+    !encodedCiphertext ||
+    extra !== undefined
+  ) return undefined;
+  let plaintext;
   try {
-    valid = await hmac("verify", secret, `session:${encoded}`, fromBase64Url(signature));
+    const key = await sessionKey(secret, ["decrypt"]);
+    plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: fromBase64Url(encodedIv),
+        additionalData: SESSION_CONTEXT,
+      },
+      key,
+      fromBase64Url(encodedCiphertext),
+    );
   } catch {
     return undefined;
   }
-  if (!valid) return undefined;
   try {
-    const payload = JSON.parse(
-      new TextDecoder().decode(fromBase64Url(encoded)),
-    );
+    const payload = JSON.parse(new TextDecoder().decode(plaintext));
     if (
       typeof payload.githubUserId !== "string" ||
+      typeof payload.githubAccessToken !== "string" ||
+      payload.githubAccessToken.length === 0 ||
       !Number.isInteger(payload.expiresAt) ||
       payload.expiresAt <= Math.floor(Date.now() / 1000)
     ) return undefined;
@@ -172,22 +201,17 @@ async function readSession(value, secret) {
   }
 }
 
-async function hmac(operation, secret, value, signature) {
-  const key = await crypto.subtle.importKey(
-    "raw",
+async function sessionKey(secret, usages) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
     new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    [operation],
   );
-  if (operation === "sign") {
-    return crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  }
-  return crypto.subtle.verify(
-    "HMAC",
-    key,
-    signature,
-    new TextEncoder().encode(value),
+  return crypto.subtle.importKey(
+    "raw",
+    digest,
+    { name: "AES-GCM" },
+    false,
+    usages,
   );
 }
 

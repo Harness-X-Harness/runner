@@ -1,8 +1,5 @@
 import {
-  cancelEnvironmentWorkflow,
-  dispatchEnvironmentWorkflow,
   EnvironmentDispatchError,
-  getEnvironmentWorkflowRun,
 } from "./github.js";
 import { issueEnvironmentIdentity } from "./environment-identity.js";
 
@@ -11,11 +8,12 @@ const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"])
 export async function openEnvironment(
   env,
   ownerId,
-  dispatch = dispatchEnvironmentWorkflow,
+  dispatch,
   newGeneration = () => issueEnvironmentIdentity(ownerId, env.ENVIRONMENT_SESSION_SECRET),
-  cancel = cancelEnvironmentWorkflow,
-  observe = getEnvironmentWorkflowRun,
+  cancel = missingWorkflowAuthority,
+  observe = missingWorkflowAuthority,
 ) {
+  if (typeof dispatch !== "function") throw new TypeError("Environment dispatch authority is required");
   let current = await readEnvironment(env, ownerId);
   if (current?.status === "closing" && current.runId) {
     try {
@@ -85,7 +83,7 @@ export async function openEnvironment(
 export async function closeEnvironment(
   env,
   ownerId,
-  cancel = cancelEnvironmentWorkflow,
+  cancel = missingWorkflowAuthority,
 ) {
   const closing = await environmentRequest(env, ownerId, "/environment/close", {
     method: "POST",
@@ -124,7 +122,7 @@ export async function reconcileEnvironment(
   env,
   ownerId,
   environment,
-  observe = getEnvironmentWorkflowRun,
+  observe = missingWorkflowAuthority,
 ) {
   const run = await observe(env, environment.runId);
   if (run.status !== "completed") return environment;
@@ -132,6 +130,11 @@ export async function reconcileEnvironment(
     method: "POST",
     body: JSON.stringify({ runId: environment.runId }),
   });
+}
+
+/** @returns {Promise<any>} */
+async function missingWorkflowAuthority(_env, _value) {
+  throw new Error("GitHub OAuth workflow authority is required");
 }
 
 async function cancelRecordedEnvironment(env, ownerId, environment, cancel) {

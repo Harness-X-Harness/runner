@@ -21,9 +21,9 @@ ChatGPT code-task app 另有一个固定在
 Durable Object 中，并只向 GitHub Actions workflow 传递 task ID、仓库、ref、
 executor 和 mode。workflow 使用 GitHub Actions OIDC 访问一次性 callback
 接口；MCP 返回值只允许包含任务的非敏感元数据（任务 ID、仓库、ref、executor、mode、状态、时间和 run ID）、结果摘要、commit 和 PR URL。Worker
-的 GitHub App 私钥、GitHub App client secret、目标仓库授权 token、prompt 和
-OIDC token 不得进入 workflow inputs、MCP structured content、日志、summary
-或 artifact。`TASK_CONTROL_PLANE_URL` 必须同时配置在 Worker 和 runner
+的 GitHub App client secret、GitHub App 私钥、目标仓库授权 token、prompt 和
+OIDC token 不得进入 workflow inputs、MCP structured content、
+日志、summary 或 artifact。`TASK_CONTROL_PLANE_URL` 必须同时配置在 Worker 和 runner
 repository variables 中，并作为 OIDC audience 精确匹配。
 
 Worker 自己的 MCP consent 页与 GitHub 托管的 App 授权页是两个不同的授权
@@ -59,12 +59,13 @@ GitHub Environment。它只接收控制面签发的不透明 `environment_id`，
 | --- | --- | --- |
 | `HEADSCALE_AUTHKEY` | `session--none` Environment secret | tagged ephemeral auth key |
 | `HEADSCALE_URL` | Repository secret | Headscale control server URL |
-| `GITHUB_APP_ID` | Worker secret | 调度 workflow 的 GitHub App |
-| `GITHUB_APP_PRIVATE_KEY` | Worker secret | 调度 workflow 的 GitHub App 私钥 |
+| `GITHUB_APP_CLIENT_ID` | Worker variable | GitHub App user authorization；可公开，固定在 `wrangler.jsonc` |
+| `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user token exchange、refresh 与 scoped-token 派生 |
+| `GITHUB_APP_ID` | Worker secret | Code Task workflow dispatch 与 target installation 验证；Environment 不使用 |
+| `GITHUB_APP_PRIVATE_KEY` | Worker secret | Code Task GitHub App 私钥；Environment 不使用 |
 | `RUNNER_GITHUB_APP_ID` | Runner repository secret | 目标仓库授权使用的同一个 GitHub App；避开 GitHub 保留的 `GITHUB_` secret 前缀 |
 | `RUNNER_GITHUB_APP_PRIVATE_KEY` | Runner repository secret | 目标仓库授权使用的 GitHub App 私钥；只注入 token 创建 Action |
-| `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
-| `ENVIRONMENT_SESSION_SECRET` | Worker secret | 签名 Environment 浏览器会话与 opaque generation |
+| `ENVIRONMENT_SESSION_SECRET` | Worker secret | 加密 Environment 浏览器 OAuth 会话并签名 opaque generation |
 | `MINI_END_USER_KEY` | Runner repository secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
 | `MINI_CODEX_BASE_URL` | Runner repository secret | Codex provider base URL；不得写入仓库、日志或 artifact |
 | `MINI_GROK_BASE_URL` | Runner repository secret | Grok provider base URL；不得写入仓库、日志或 artifact |
