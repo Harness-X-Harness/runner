@@ -57,10 +57,12 @@ jobs:
             "$MINI_GROK_BASE_URL" > "$HOME/.grok/config.toml"
           chmod 600 "$HOME/.codex/config.toml" "$HOME/.grok/config.toml"
 
-      - uses: ./.github/actions/private-network
+      - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
-          headscale-url: ${{ secrets.HEADSCALE_URL }}
-          auth-key: ${{ secrets.HEADSCALE_AUTHKEY }}
+          authkey: ${{ secrets.HEADSCALE_AUTHKEY }}
+          hostname: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          args: --login-server=${{ secrets.HEADSCALE_URL }} --accept-dns=false --ssh
+          version: latest
 
       - uses: ./.github/actions/t3-session
 

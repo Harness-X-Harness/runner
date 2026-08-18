@@ -11,7 +11,6 @@ TASK_WORKFLOW="$ROOT_DIR/.github/workflows/execute-task.yml"
 CODEX_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/codex-auth.yml"
 GROK_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/grok-auth.yml"
 TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
-NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
 ENVIRONMENT_ACTION="$ROOT_DIR/.github/actions/environment-control/action.yml"
@@ -28,7 +27,7 @@ fail() {
 [[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
 [[ -f "$CODEX_AUTH_WORKFLOW" ]] || fail "missing workflow: $CODEX_AUTH_WORKFLOW"
 [[ -f "$GROK_AUTH_WORKFLOW" ]] || fail "missing workflow: $GROK_AUTH_WORKFLOW"
-for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$CONTROL_ACTION"; do
+for action in "$TOOLS_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$CONTROL_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
@@ -46,8 +45,21 @@ grep -Fq 'cancel-in-progress: true' "$WORKFLOW" || \
   fail 'a newer owner generation must supersede an older workflow run'
 grep -Fq 'environment: session--none' "$WORKFLOW" || \
   fail 'private environment must use the fixed session--none profile'
-grep -Fq 'uses: ./.github/actions/private-network' "$WORKFLOW" || \
-  fail 'private environment must always join the private network'
+grep -Fq 'uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' "$WORKFLOW" || \
+  fail 'private environment must join the private network through the SHA-pinned official action'
+grep -Fq 'authkey: ${{ secrets.HEADSCALE_AUTHKEY }}' "$WORKFLOW" || \
+  fail 'private environment must authenticate to Headscale with its environment secret'
+grep -Fq -- '--login-server=${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
+  fail 'private environment must select the configured Headscale control server'
+grep -Fq -- '--accept-dns=false --ssh' "$WORKFLOW" || \
+  fail 'private environment must keep host DNS and enable Tailscale SSH'
+grep -Fq 'version: latest' "$WORKFLOW" || \
+  fail 'private environment must use the latest stable Tailscale release'
+[[ ! -e "$ROOT_DIR/.github/actions/private-network/action.yml" ]] || \
+  fail 'the official Tailscale action must not be hidden behind a local wrapper'
+if rg -q 'tailscale[.]com/install[.]sh|apt-get update' "$WORKFLOW" "$T3_ACTION"; then
+  fail 'private network setup must not refresh unrelated system package sources'
+fi
 grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must always start T3'
 [[ "$(grep -Fc 'uses: ./.github/actions/environment-control' "$WORKFLOW")" == 2 ]] || \
@@ -58,7 +70,7 @@ grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must publish the ready descriptor once'
 claim_line="$(grep -nF 'phase: claim' "$WORKFLOW" | cut -d: -f1)"
 secret_line="$(grep -nF 'MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}' "$WORKFLOW" | cut -d: -f1)"
-network_line="$(grep -nF 'uses: ./.github/actions/private-network' "$WORKFLOW" | cut -d: -f1)"
+network_line="$(grep -nF 'uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' "$WORKFLOW" | cut -d: -f1)"
 t3_line="$(grep -nF 'uses: ./.github/actions/t3-session' "$WORKFLOW" | cut -d: -f1)"
 (( claim_line < secret_line && claim_line < network_line && claim_line < t3_line )) || \
   fail 'runner claim must precede credentials, private network, and T3 setup'
@@ -240,13 +252,8 @@ grep -Fq 'npx --yes t3@latest serve' "$T3_ACTION" || \
   fail 'missing latest T3 Code entrypoint'
 grep -Fq -- '--ttl 6h' "$T3_ACTION" || \
   fail 'T3 pairing credential must remain valid for the GitHub-hosted session lifetime'
-grep -Fq 'https://pkg.cloudflare.com/cloudflared noble main' "$T3_ACTION" || \
-  fail 'missing official cloudflared package repository'
-grep -Fq 'apt-get install -y -qq cloudflared' "$T3_ACTION" || \
-  fail 'missing cloudflared package install'
-grep -Fq -- '--ssh' "$NETWORK_ACTION" || \
-  fail 'private network must enable Tailscale SSH'
-
+grep -Fq 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64' "$T3_ACTION" || \
+  fail 'T3 session must download the latest official cloudflared binary'
 if rg -q 'openssh-server|sshd_config|ssh-public-key|ssh_public_key' \
   "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'OpenSSH fallback must not return'
