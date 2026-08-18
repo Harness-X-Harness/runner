@@ -57,8 +57,8 @@ grep -Fq 'version: latest' "$WORKFLOW" || \
   fail 'private environment must use the latest stable Tailscale release'
 [[ ! -e "$ROOT_DIR/.github/actions/private-network/action.yml" ]] || \
   fail 'the official Tailscale action must not be hidden behind a local wrapper'
-if rg -q 'tailscale[.]com/install[.]sh|apt-get update' "$WORKFLOW" "$T3_ACTION"; then
-  fail 'private network setup must not refresh unrelated system package sources'
+if rg -q 'apt-get update' "$ROOT_DIR/.github/actions" "$ROOT_DIR/.github/workflows"; then
+  fail 'GitHub-hosted workflows must not refresh unrelated system package sources'
 fi
 grep -Fq 'uses: ./.github/actions/t3-session' "$WORKFLOW" || \
   fail 'private environment must always start T3'
