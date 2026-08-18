@@ -41,6 +41,10 @@ The user calls `open_environment` without arguments. Confirm that it returns:
 - the exact non-sensitive GitHub run link;
 - no T3 origin, pairing URL, token, private address, or provider endpoint.
 
+If ChatGPT renders the inline card, confirm that it leaves Loading after the
+tool result arrives and that both the stable Environment action and the GitHub
+run action are enabled. The card is a snapshot and does not poll for Ready.
+
 Call it again and confirm that it returns the same active run instead of
 dispatching another one.
 

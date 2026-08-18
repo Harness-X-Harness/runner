@@ -1,4 +1,4 @@
-export const ENVIRONMENT_WIDGET_URI = "ui://environment/v1.html";
+export const ENVIRONMENT_WIDGET_URI = "ui://environment/v2.html";
 export const ENVIRONMENT_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 export function environmentWidgetHtml(controlPlaneUrl) {
@@ -42,10 +42,10 @@ export function environmentWidgetHtml(controlPlaneUrl) {
         <p class="eyebrow">HARNESS X HARNESS</p>
         <h1>Private Development Environment</h1>
       </div>
-      <span id="badge" class="badge" data-status="starting"><span class="dot"></span><span id="status">Starting</span></span>
+      <span id="badge" class="badge" data-status="starting"><span class="dot"></span><span id="status">Loading</span></span>
     </header>
-    <p id="description" class="description">Your temporary runner and development tools are starting.</p>
-    <div class="actions">
+    <p id="description" class="description">Loading the current environment state.</p>
+    <div id="actions" class="actions" hidden>
       <button id="primary" class="primary" type="button">Open environment</button>
       <button id="run" class="secondary" type="button" hidden>View GitHub run</button>
       <button id="stop" class="danger" type="button">Stop environment</button>
@@ -57,13 +57,14 @@ export function environmentWidgetHtml(controlPlaneUrl) {
     const badge = document.getElementById("badge");
     const statusLabel = document.getElementById("status");
     const description = document.getElementById("description");
+    const actions = document.getElementById("actions");
     const primary = document.getElementById("primary");
     const run = document.getElementById("run");
     const stop = document.getElementById("stop");
     const message = document.getElementById("message");
     const pendingRequests = new Map();
     let nextRequestId = 1;
-    let current = window.openai?.toolOutput;
+    let current;
 
     function safeUrl(value, kind) {
       try {
@@ -91,6 +92,7 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       description.textContent = states[state][1];
       const environmentUrl = safeUrl(current.environmentUrl, "environment");
       const runUrl = safeUrl(current.runUrl, "run");
+      actions.hidden = false;
       primary.hidden = state === "closing";
       primary.textContent = state === "offline" ? "Start new environment" : state === "ready" ? "Open T3" : "Open environment";
       primary.dataset.href = environmentUrl || "";
@@ -106,6 +108,10 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       return new Promise((resolve, reject) => pendingRequests.set(id, { resolve, reject }));
     }
 
+    function notify(method) {
+      window.parent.postMessage({ jsonrpc: "2.0", method }, "*");
+    }
+
     async function callTool(name) {
       setBusy(true);
       const result = await request("tools/call", { name, arguments: {} });
@@ -113,13 +119,9 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       setBusy(false);
     }
 
-    async function openExternal(href) {
+    async function openLink(href) {
       if (!href) return;
-      if (window.openai?.openExternal) {
-        await window.openai.openExternal({ href, redirectUrl: false });
-        return;
-      }
-      window.open(href, "_blank", "noopener,noreferrer");
+      await request("ui/open-link", { url: href });
     }
 
     function setBusy(busy) {
@@ -147,12 +149,21 @@ export function environmentWidgetHtml(controlPlaneUrl) {
 
     primary.addEventListener("click", () => {
       if (current?.status === "offline") callTool("open_environment");
-      else openExternal(primary.dataset.href);
+      else openLink(primary.dataset.href);
     });
-    run.addEventListener("click", () => openExternal(run.dataset.href));
+    run.addEventListener("click", () => openLink(run.dataset.href));
     stop.addEventListener("click", () => callTool("close_environment"));
 
-    if (current) render(current);
+    async function connect() {
+      await request("ui/initialize", {
+        appCapabilities: {},
+        appInfo: { name: "Harness X Harness Environment", version: "1.0.0" },
+        protocolVersion: "2026-01-26",
+      });
+      notify("ui/notifications/initialized");
+    }
+
+    connect();
   </script>
 </body>
 </html>`;
