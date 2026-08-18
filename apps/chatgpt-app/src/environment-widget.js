@@ -1,4 +1,4 @@
-export const ENVIRONMENT_WIDGET_URI = "ui://environment/v3.html";
+export const ENVIRONMENT_WIDGET_URI = "ui://environment/v4.html";
 export const ENVIRONMENT_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 export function environmentWidgetHtml(controlPlaneUrl) {
@@ -65,8 +65,8 @@ export function environmentWidgetHtml(controlPlaneUrl) {
     const pendingRequests = new Map();
     let nextRequestId = 1;
     let current;
-    let closingRefresh;
-    let reopenRequested = true;
+    let openRefresh;
+    let openRequested = true;
 
     function safeUrl(value, kind) {
       try {
@@ -85,13 +85,15 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       const states = {
         starting: ["Starting", "Your temporary runner and development tools are starting."],
         ready: ["Ready", "Your private environment is ready. Open it to continue in T3."],
-        closing: ["Closing", "The runner is stopping. A replacement will start automatically."],
+        closing: ["Closing", "The runner is stopping."],
         offline: ["Offline", "The temporary environment is closed."],
       };
       const state = states[current.status] ? current.status : "starting";
       badge.dataset.status = state;
       statusLabel.textContent = states[state][0];
-      description.textContent = states[state][1];
+      description.textContent = state === "closing" && openRequested
+        ? "The runner is stopping. A replacement will start automatically."
+        : states[state][1];
       const environmentUrl = safeUrl(current.environmentUrl, "environment");
       const runUrl = safeUrl(current.runUrl, "run");
       actions.hidden = false;
@@ -102,15 +104,15 @@ export function environmentWidgetHtml(controlPlaneUrl) {
       run.dataset.href = runUrl || "";
       stop.hidden = state === "closing" || state === "offline";
       message.textContent = "";
-      scheduleClosingRefresh(state);
+      scheduleOpenRefresh(state);
     }
 
-    function scheduleClosingRefresh(state) {
-      if (closingRefresh !== undefined) clearTimeout(closingRefresh);
-      closingRefresh = undefined;
-      if (state !== "closing" || !reopenRequested) return;
-      closingRefresh = setTimeout(() => {
-        closingRefresh = undefined;
+    function scheduleOpenRefresh(state) {
+      if (openRefresh !== undefined) clearTimeout(openRefresh);
+      openRefresh = undefined;
+      if (!openRequested || (state !== "closing" && state !== "starting")) return;
+      openRefresh = setTimeout(() => {
+        openRefresh = undefined;
         callTool("open_environment");
       }, 10_000);
     }
@@ -126,19 +128,24 @@ export function environmentWidgetHtml(controlPlaneUrl) {
     }
 
     async function callTool(name) {
-      reopenRequested = name === "open_environment";
+      openRequested = name === "open_environment";
       setBusy(true);
       let failed = false;
+      let rendered = false;
       try {
         const result = await request("tools/call", { name, arguments: {} });
-        if (result?.structuredContent) render(result.structuredContent);
+        if (result?.structuredContent) {
+          render(result.structuredContent);
+          rendered = true;
+        }
       } catch {
         failed = true;
       } finally {
         setBusy(false);
       }
-      if (failed) message.textContent = current?.status === "closing" ? "Still closing. Retrying…" : "Could not update the environment.";
-      if (name === "open_environment" && current?.status === "closing") scheduleClosingRefresh("closing");
+      const openPending = openRequested && (current?.status === "closing" || current?.status === "starting");
+      if (failed) message.textContent = openPending ? "Still waiting. Retrying…" : "Could not update the environment.";
+      if (!rendered && openPending) scheduleOpenRefresh(current.status);
     }
 
     async function openLink(href) {

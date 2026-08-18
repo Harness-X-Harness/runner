@@ -28,7 +28,7 @@ function widgetScript(html) {
   return match[1];
 }
 
-test("Environment Widget connects before receiving results and opens both safe links", async () => {
+test("Environment Widget converges an Open intent to Ready and explicit Close stops it", async () => {
   const elements = new Map(
     ["badge", "status", "description", "actions", "primary", "run", "stop", "message"].map((id) => [
       id,
@@ -62,7 +62,7 @@ test("Environment Widget connects before receiving results and opens both safe l
             method: "ui/notifications/tool-result",
             params: {
               structuredContent: {
-                status: "starting",
+                status: "ready",
                 environmentUrl: "https://runner.example/environment",
                 runUrl: "https://github.com/example/runner/actions/runs/123",
               },
@@ -87,11 +87,11 @@ test("Environment Widget connects before receiving results and opens both safe l
                   },
                 }
               : openCalls === 1
-              ? { error: { code: -32603, message: "temporary failure" } }
-              : {
+                ? { error: { code: -32603, message: "temporary failure" } }
+                : {
                   result: {
                     structuredContent: {
-                      status: "starting",
+                      status: openCalls === 2 ? "starting" : "ready",
                       environmentUrl: "https://runner.example/environment",
                       runUrl: "https://github.com/example/runner/actions/runs/456",
                     },
@@ -165,6 +165,10 @@ test("Environment Widget connects before receiving results and opens both safe l
     },
   });
   assert.equal(elements.get("status").textContent, "Closing");
+  assert.equal(
+    elements.get("description").textContent,
+    "The runner is stopping. A replacement will start automatically.",
+  );
   assert.equal(timers.length, 1);
   assert.equal(timers[0].delay, 10_000);
 
@@ -176,7 +180,7 @@ test("Environment Widget connects before receiving results and opens both safe l
     "open_environment",
   );
   assert.equal(elements.get("status").textContent, "Closing");
-  assert.equal(elements.get("message").textContent, "Still closing. Retrying…");
+  assert.equal(elements.get("message").textContent, "Still waiting. Retrying…");
   assert.equal(timers.length, 2);
 
   timers[1].callback();
@@ -184,10 +188,17 @@ test("Environment Widget connects before receiving results and opens both safe l
 
   assert.equal(elements.get("status").textContent, "Starting");
   assert.equal(elements.get("run").dataset.href, "https://github.com/example/runner/actions/runs/456");
+  assert.equal(timers.length, 3, "Starting must continue observing until the Environment is Ready");
+
+  timers[2].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements.get("status").textContent, "Ready");
 
   elements.get("stop").click();
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("status").textContent, "Closing");
-  assert.equal(timers.length, 2, "an explicit Close must not schedule a replacement Open");
+  assert.equal(elements.get("description").textContent, "The runner is stopping.");
+  assert.equal(timers.length, 3, "an explicit Close must not schedule a replacement Open");
 });
