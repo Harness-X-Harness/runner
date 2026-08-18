@@ -316,6 +316,19 @@ The exhaustive finite configuration uses two Grants, two Turns, two Commands, an
 
 TLA+ Tools 1.7.4 with TLC 2.19 generated 672,071 states, found 197,116 distinct states, reached depth 18, and found no invariant violation. Two negative configurations demonstrate adequacy: [`AgentSessionsDuplicateFaulty.cfg`](../../formal/AgentSessionsDuplicateFaulty.cfg) repeats a processed command and violates `CommandEffectsAtMostOnce` at depth 4; [`AgentSessionsAuthorityFaulty.cfg`](../../formal/AgentSessionsAuthorityFaulty.cfg) accepts an old-controller write and violates `AcceptedCommandsWereAuthorized` at depth 3. The positive configuration is [`AgentSessions.cfg`](../../formal/AgentSessions.cfg).
 
+The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-app/src/session-state.js), reached only through the owner-scoped `EnvironmentObject`:
+
+| Model identity or transition | Implementation evidence |
+| --- | --- |
+| `sessionGeneration` and `envGeneration` | Every mutation carries the exact stored `generation`; `terminateGenerationSessions` changes only matching non-terminal Sessions. |
+| `controller` and `TakeOver` | `controllerGrantId` is replaced in the same Durable Object transaction; later controller writes compare against the committed value. |
+| `queue`, `QueueTurn`, and `CancelQueuedTurn` | `queuedTurns` is a durable ordered list; `start_queued` removes only its head and cancellation accepts only an ID still in that list. |
+| `accepted`, `processed`, and `effectCount` | Stable command IDs index a durable command journal; same-ID same-payload delivery is idempotent, conflicting payloads fail, and processed commands leave the pending command view exactly once. |
+| `eventCount` and `lastEventGeneration` | Per-Session event keys use a strictly increasing durable cursor and every append passes the Session generation gate. |
+| `EnvironmentTerminates` and `TerminalIsSticky` | Exact Environment terminal and confirmed startup-failure paths make matching Sessions terminal; all later mutations fail until seven-day cleanup deletes the immutable record. |
+
+The implementation adds `preparing` before the model's admitted `idle` initial state. This phase contains no native command effect. The `admit` transition is the refinement mapping from a generation-bound stored Session into the model state. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
+
 ## Primary references
 
 - [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
