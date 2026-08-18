@@ -169,6 +169,34 @@ test("token properties retain GitHub App refresh metadata", () => {
   );
 });
 
+test("token exchange removes a retained legacy base access token", async () => {
+  const result = await githubGrantTokenExchange(
+    appEnv(),
+    {
+      grantType: "authorization_code",
+      props: {
+        githubUserId: 123,
+        githubAccessToken: "ghu_legacy",
+        githubAccessTokenExpiresAt: 2_000,
+        githubRefreshToken: "ghr_current",
+        githubRefreshTokenExpiresAt: 3_000,
+        environmentGithubAccessToken: "ghu_scoped",
+        environmentGithubAccessTokenExpiresAt: 2_000,
+        githubAuthorizationKind: "github_app_scoped",
+      },
+    },
+    async () => {
+      throw new Error("refresh must not run");
+    },
+    () => 1_000,
+  );
+
+  assert.equal(result.accessTokenTTL, 1_000);
+  assert.equal(result.newProps.githubAccessToken, undefined);
+  assert.equal(result.newProps.githubAccessTokenExpiresAt, undefined);
+  assert.equal(result.newProps.environmentGithubAccessToken, "ghu_scoped");
+});
+
 test("MCP refresh derives a new scoped token without retaining the base token", async () => {
   const requests = [];
   const result = await githubGrantTokenExchange(
