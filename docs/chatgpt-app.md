@@ -171,6 +171,19 @@ exit of an invalid generation. Separate faulty configurations preserve
 counterexamples for stale descriptor publication, stale-run admission, and
 premature loss of cancel responsibility.
 
+`formal/EnvironmentReopen.tla` is a focused obligation model for concurrent
+Open requests while an Environment is Closing. It keeps GitHub run reality,
+the per-request observation (`terminal`, `live`, or `unknown`), committed
+terminal evidence, and replacement dispatch ownership distinct. Its positive
+configuration checks that only committed terminal evidence authorizes a
+replacement and that two concurrent Open requests dispatch at most one new
+generation. Two faulty configurations preserve counterexamples for treating a
+live or unknown observation as terminal and for issuing a second replacement
+dispatch. The controlled trace
+`concurrent open after terminal evidence dispatches one replacement generation`
+holds both GitHub observations at the same cut point, then proves the owner
+Durable Object permits only one replacement dispatch.
+
 | Model transition | Implementation seam |
 | --- | --- |
 | `Open` | `EnvironmentObject /environment/open` commits owner slot and generation before dispatch |
