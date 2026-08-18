@@ -679,6 +679,40 @@ test("open reconciles one terminal closing run before dispatching its replacemen
   assert.equal(environments.get("github-42").generation, "generation-two");
 });
 
+test("closing preserves a Session-reserved replacement generation through terminal reconciliation", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  const dispatches = [];
+  const dispatch = async (_env, request) => {
+    dispatches.push(request);
+    const runId = String(dispatches.length);
+    return {
+      runId,
+      runUrl: `https://github.com/example/actions/runs/${runId}`,
+    };
+  };
+  await openEnvironment(env, "42", dispatch, async () => "generation-old");
+  await closeEnvironment(env, "42", async () => {});
+  environments.get("github-42").replacementGeneration = "generation-reserved";
+
+  const replacement = await openEnvironment(
+    env,
+    "42",
+    dispatch,
+    async () => "generation-unused",
+    async () => {},
+    async () => ({ status: "completed" }),
+  );
+  assert.equal(replacement.status, "starting");
+  assert.deepEqual(dispatches.map(({ environmentId }) => environmentId), [
+    "generation-old",
+    "generation-reserved",
+  ]);
+});
+
 test("open reconciles one terminal ready run before dispatching its replacement", async () => {
   const environments = fakeEnvironments();
   const env = {
@@ -877,7 +911,7 @@ function fakeEnvironments() {
             }
             const environment = {
               ownerId: body.ownerId,
-              generation: body.generation,
+              generation: current?.replacementGeneration ?? body.generation,
               slot: current?.slot ?? `slot-${ownerId}`,
               status: "dispatching",
               dispatchOutcome: "unconfirmed",
@@ -1062,6 +1096,7 @@ function fakeEnvironments() {
               status: "offline",
               cancelPending: false,
               closeRequested: current.closeRequested,
+              replacementGeneration: current.replacementGeneration,
             };
             records.set(ownerId, environment);
             return Response.json(environment);

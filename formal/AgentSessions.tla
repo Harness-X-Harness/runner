@@ -216,11 +216,12 @@ StartQueued(c) ==
   /\ activeTurn' = Head(queue)
   /\ queue' = Tail(queue)
   /\ queuedStartedHistory' = Append(queuedStartedHistory, Head(queue))
+  /\ eventCount' = eventCount + 1
+  /\ lastEventGeneration' = envGeneration
   /\ lastMutationAuthorized' = TRUE
   /\ UNCHANGED << envPhase, envGeneration, channelState, channelGeneration,
                   sessionGeneration, controller, knownTurns, cancelledTurns,
-                  enqueueHistory, eventCount, lastEventGeneration,
-                  everTerminal >>
+                  enqueueHistory, everTerminal >>
 
 AcceptInterrupt(c, g) ==
   /\ envPhase = "ready"
@@ -321,6 +322,7 @@ CompleteTurn(gen) ==
   /\ channelState = "connected"
   /\ channelGeneration = gen
   /\ sessionPhase = "running"
+  /\ Len(queue) = 0
   /\ sessionPhase' = "idle"
   /\ activeTurn' = NoTurn
   /\ eventCount' = eventCount + 1
@@ -331,6 +333,27 @@ CompleteTurn(gen) ==
                   accepted, processed, commandKind, commandGrant, commandTurn,
                   commandGeneration, commandAuthorized, deliveryCount,
                   effectCount, everTerminal, lastMutationAuthorized >>
+
+CompleteAndStartQueued(gen, c) ==
+  /\ gen = envGeneration
+  /\ gen = sessionGeneration
+  /\ envPhase = "ready"
+  /\ channelState = "connected"
+  /\ channelGeneration = gen
+  /\ sessionPhase = "running"
+  /\ Len(queue) > 0
+  /\ c \in Commands \ accepted
+  /\ RecordCommand(c, controller, "start_queued", Head(queue))
+  /\ sessionPhase' = "running"
+  /\ activeTurn' = Head(queue)
+  /\ queue' = Tail(queue)
+  /\ queuedStartedHistory' = Append(queuedStartedHistory, Head(queue))
+  /\ eventCount' = eventCount + 2
+  /\ lastEventGeneration' = gen
+  /\ lastMutationAuthorized' = TRUE
+  /\ UNCHANGED << envPhase, envGeneration, channelState, channelGeneration,
+                  sessionGeneration, controller, knownTurns, cancelledTurns,
+                  enqueueHistory, everTerminal >>
 
 RequestInput(gen) ==
   /\ gen = envGeneration
@@ -420,6 +443,7 @@ Next ==
   \/ \E c \in Commands: ProcessCommand(c)
   \/ \E c \in Commands: Redeliver(c)
   \/ \E gen \in Generations: CompleteTurn(gen)
+  \/ \E gen \in Generations, c \in Commands: CompleteAndStartQueued(gen, c)
   \/ \E gen \in Generations: RequestInput(gen)
   \/ Disconnect
   \/ \E gen \in Generations: Connect(gen)

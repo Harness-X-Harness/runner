@@ -116,7 +116,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   );
   assert.equal(modernResponse.status, 200);
   const modernTools = (await modernResponse.json()).result.tools;
-  assert.equal(modernTools.length, 6);
+  assert.equal(modernTools.length, 15);
   assert.deepEqual(
     modernTools.find(({ name }) => name === "submit_task").inputSchema.properties.executor.enum,
     ["codex", "grok"],
@@ -173,7 +173,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const eventData = (await legacyResponse.text()).match(/^data: (.+)$/m)?.[1];
   assert.ok(eventData);
   const legacyTools = JSON.parse(eventData).result.tools;
-  assert.equal(legacyTools.length, 6);
+  assert.equal(legacyTools.length, 15);
   assert.deepEqual(legacyTools.find(({ name }) => name === "get_task").annotations, {
     readOnlyHint: true,
     destructiveHint: false,

@@ -9,7 +9,7 @@ import {
   dispatchWorkflow,
   getEnvironmentWorkflowRun,
 } from "./github.js";
-import { closeEnvironment, openEnvironment } from "./environment.js";
+import { closeEnvironment, openEnvironment, readEnvironment } from "./environment.js";
 import {
   ENVIRONMENT_WIDGET_MIME_TYPE,
   ENVIRONMENT_WIDGET_URI,
@@ -34,12 +34,32 @@ import {
 } from "./task-store.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
 import { requiredSubmitScopes } from "./oauth-scopes.js";
+import {
+  cancelAgentQueuedTurn,
+  interruptAgentTurn,
+  listAgentSessions,
+  readAgentSession,
+  respondToAgentSession,
+  sendAgentTurn,
+  startAgentSession,
+  stopAgentSession,
+  takeOverAgentSession,
+} from "./session.js";
 
 const SECURITY_SCHEMES = Object.freeze({
   submit_task: Object.freeze([{ type: "oauth2", scopes: requiredSubmitScopes("pull_request") }]),
   get_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
   cancel_task: Object.freeze([{ type: "oauth2", scopes: ["tasks:cancel"] }]),
   get_task_result: Object.freeze([{ type: "oauth2", scopes: ["tasks:read"] }]),
+  start_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  list_sessions: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  read_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  send_turn: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  cancel_queued_turn: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  interrupt_turn: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  respond_to_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  take_over_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
+  stop_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
   open_environment: Object.freeze([{ type: "oauth2", scopes: ["environments:manage"] }]),
   close_environment: Object.freeze([{ type: "oauth2", scopes: ["environments:manage"] }]),
 });
@@ -60,13 +80,55 @@ const taskOutputSchema = z.object({
   requiredPermissions: z.array(z.string()).optional(),
   result: z.record(z.string(), z.unknown()).optional(),
 });
+const sessionPhaseSchema = z.enum([
+  "preparing",
+  "idle",
+  "running",
+  "waiting_for_user",
+  "stopping",
+  "terminal",
+]);
+const sessionSnapshotSchema = z.object({
+  sessionId: z.string(),
+  executor: z.enum(["codex", "grok"]),
+  phase: sessionPhaseSchema,
+  terminalReason: z.enum(["stopped", "environment_ended", "startup_failed", "driver_failed"]).optional(),
+  channelState: z.enum(["connected", "disconnected"]),
+  controller: z.object({ clientName: z.string(), currentGrant: z.boolean() }),
+  workingDirectory: z.string(),
+  activeTurnId: z.string().optional(),
+  queuedTurns: z.array(z.object({ turnId: z.string(), createdAt: z.string() })),
+  pendingRequests: z.array(z.object({ requestId: z.string(), kind: z.string() })),
+  latestCursor: z.number(),
+  environment: z.object({
+    status: z.enum(["offline", "starting", "ready", "closing"]),
+    entryUrl: z.string(),
+    runUrl: z.string().optional(),
+  }),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const sessionEventSchema = z.object({
+  cursor: z.number(),
+  sessionId: z.string(),
+  type: z.enum(["status", "user_message", "agent_message_chunk", "activity", "request", "turn", "error"]),
+  createdAt: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
+const sessionReadSchema = z.object({
+  session: sessionSnapshotSchema,
+  events: z.array(sessionEventSchema),
+  nextCursor: z.number(),
+  hasMore: z.boolean(),
+});
 
 export function createServer(env, props) {
   const server = new McpServer(
     { name: "harness-x-harness-task-runner", version: "1.0.0" },
     {
       instructions:
-        "Use submit_task to start a task, then get_task to follow progress. Use get_task_result only after completion.",
+        "Use Agent Sessions for interactive coding: start_session, then read_session and send_turn. " +
+        "Code Task tools remain available only during the migration window.",
     },
   );
   const controlPlaneOrigin = new URL(env.TASK_CONTROL_PLANE_URL).origin;
@@ -293,6 +355,201 @@ export function createServer(env, props) {
 
   registerAppTool(
     server,
+    "start_session",
+    {
+      title: "Start coding session",
+      description: "Start one private long-lived Codex or Grok Session in the user's temporary Environment.",
+      inputSchema: z.object({
+        executor: z.enum(["codex", "grok"]),
+        workingDirectory: z.string().max(65_536).refine((value) => value.startsWith("/"), {
+          message: "workingDirectory must be absolute",
+        }).optional(),
+        initialPrompt: z.string().min(1).max(65_536).optional(),
+      }),
+      outputSchema: sessionSnapshotSchema,
+      securitySchemes: SECURITY_SCHEMES.start_session,
+      annotations: annotations("start_session"),
+    },
+    async (input) => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.start_session[0].scopes);
+      const session = await startAgentSession(
+        env,
+        requiredGitHubUserId(requestProps),
+        requiredSessionController(requestProps),
+        input,
+        (workerEnv, request) => dispatchEnvironmentWorkflow(
+          workerEnv,
+          requiredGitHubAccessToken(requestProps),
+          request,
+        ),
+        (workerEnv, runId) => cancelEnvironmentWorkflow(
+          workerEnv,
+          requiredGitHubAccessToken(requestProps),
+          runId,
+        ),
+      );
+      return result(session, `Session ${session.sessionId} is ${session.phase}.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "list_sessions",
+    {
+      title: "List coding sessions",
+      description: "List the caller's private Session metadata without transcript events.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ sessions: z.array(sessionSnapshotSchema) }),
+      securitySchemes: SECURITY_SCHEMES.list_sessions,
+      annotations: annotations("list_sessions"),
+    },
+    async () => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.list_sessions[0].scopes);
+      const sessions = await listAgentSessions(
+        env,
+        requiredGitHubUserId(requestProps),
+        requiredSessionController(requestProps),
+      );
+      return result({ sessions }, `${sessions.length} Sessions found.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "read_session",
+    {
+      title: "Read coding session",
+      description: "Read one current Session snapshot and ordered events after a cursor.",
+      inputSchema: z.object({
+        sessionId: z.string(),
+        afterCursor: z.number().int().nonnegative().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+      outputSchema: sessionReadSchema,
+      securitySchemes: SECURITY_SCHEMES.read_session,
+      annotations: annotations("read_session"),
+    },
+    async ({ sessionId, afterCursor, limit }) => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.read_session[0].scopes);
+      await progressPendingSessionEnvironment(env, requestProps);
+      const read = await readAgentSession(
+        env,
+        requiredGitHubUserId(requestProps),
+        requiredSessionController(requestProps),
+        sessionId,
+        { afterCursor, limit },
+      );
+      return result(read, `Session ${sessionId} is ${read.session.phase}.`);
+    },
+  );
+
+  registerAppTool(
+    server,
+    "send_turn",
+    {
+      title: "Send Session turn",
+      description: "Send exact user text now, or explicitly queue it after the active turn.",
+      inputSchema: z.object({
+        sessionId: z.string(),
+        text: z.string().min(1).max(65_536),
+        delivery: z.enum(["steer", "queue"]).optional(),
+      }),
+      outputSchema: z.object({
+        turnId: z.string(),
+        delivery: z.enum(["steer", "queue"]),
+        session: sessionSnapshotSchema,
+      }),
+      securitySchemes: SECURITY_SCHEMES.send_turn,
+      annotations: annotations("send_turn"),
+    },
+    async ({ sessionId, text, delivery = "steer" }) => {
+      const requestProps = currentProps(props);
+      requireScopes(requestProps, SECURITY_SCHEMES.send_turn[0].scopes);
+      const sent = await sendAgentTurn(
+        env,
+        requiredGitHubUserId(requestProps),
+        requiredSessionController(requestProps),
+        sessionId,
+        text,
+        delivery,
+      );
+      return result(sent, `${delivery === "queue" ? "Queued" : "Sent"} turn ${sent.turnId}.`);
+    },
+  );
+
+  registerSessionMutationTool(server, "cancel_queued_turn", {
+    title: "Cancel queued Session turn",
+    description: "Cancel one exact queued turn before it starts.",
+    inputSchema: z.object({ sessionId: z.string(), turnId: z.string() }),
+  }, async (input, requestProps) => cancelAgentQueuedTurn(
+    env,
+    requiredGitHubUserId(requestProps),
+    requiredSessionController(requestProps),
+    input.sessionId,
+    input.turnId,
+  ));
+
+  registerSessionMutationTool(server, "interrupt_turn", {
+    title: "Interrupt active Session turn",
+    description: "Interrupt one exact active turn without stopping the native Session.",
+    inputSchema: z.object({ sessionId: z.string(), activeTurnId: z.string() }),
+  }, async (input, requestProps) => interruptAgentTurn(
+    env,
+    requiredGitHubUserId(requestProps),
+    requiredSessionController(requestProps),
+    input.sessionId,
+    input.activeTurnId,
+  ));
+
+  registerSessionMutationTool(server, "respond_to_session", {
+    title: "Respond to Session request",
+    description: "Answer one exact pending approval, question, or authorization request.",
+    inputSchema: z.object({
+      sessionId: z.string(),
+      requestId: z.string(),
+      choiceId: z.string().optional(),
+      values: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
+    }),
+  }, async (input, requestProps) => {
+    if ((input.choiceId === undefined) === (input.values === undefined)) {
+      throw new Error("Exactly one Session response form is required");
+    }
+    return respondToAgentSession(
+      env,
+      requiredGitHubUserId(requestProps),
+      requiredSessionController(requestProps),
+      input.sessionId,
+      input,
+    );
+  });
+
+  registerSessionMutationTool(server, "take_over_session", {
+    title: "Take control of coding session",
+    description: "Atomically make this MCP Grant the controller for future Session writes.",
+    inputSchema: z.object({ sessionId: z.string() }),
+  }, async (input, requestProps) => takeOverAgentSession(
+    env,
+    requiredGitHubUserId(requestProps),
+    requiredSessionController(requestProps),
+    input.sessionId,
+  ));
+
+  registerSessionMutationTool(server, "stop_session", {
+    title: "Stop coding session",
+    description: "Stop one native Session without closing the shared private Environment.",
+    inputSchema: z.object({ sessionId: z.string() }),
+  }, async (input, requestProps) => stopAgentSession(
+    env,
+    requiredGitHubUserId(requestProps),
+    requiredSessionController(requestProps),
+    input.sessionId,
+  ));
+
+  registerAppTool(
+    server,
     "open_environment",
     {
       title: "Open private development environment",
@@ -315,18 +572,7 @@ export function createServer(env, props) {
     async () => {
       const requestProps = currentProps(props);
       requireScopes(requestProps, SECURITY_SCHEMES.open_environment[0].scopes);
-      const githubAccessToken = requiredGitHubAccessToken(requestProps);
-      const environment = await openEnvironment(
-        env,
-        requiredGitHubUserId(requestProps),
-        (workerEnv, request) =>
-          dispatchEnvironmentWorkflow(workerEnv, githubAccessToken, request),
-        undefined,
-        (workerEnv, runId) =>
-          cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
-        (workerEnv, runId) =>
-          getEnvironmentWorkflowRun(workerEnv, githubAccessToken, runId),
-      );
+      const environment = await openAuthorizedEnvironment(env, requestProps);
       return result(environment, `Environment is ${environment.status}.`);
     },
   );
@@ -389,6 +635,20 @@ function registerAppTool(server, name, config, handler) {
     ...serverConfig,
     _meta: { ..._meta, securitySchemes },
   }, handler);
+}
+
+function registerSessionMutationTool(server, name, config, mutate) {
+  registerAppTool(server, name, {
+    ...config,
+    outputSchema: sessionSnapshotSchema,
+    securitySchemes: SECURITY_SCHEMES[name],
+    annotations: annotations(name),
+  }, async (input) => {
+    const requestProps = currentProps();
+    requireScopes(requestProps, SECURITY_SCHEMES[name][0].scopes);
+    const session = await mutate(input, requestProps);
+    return result(session, `Session ${session.sessionId} is ${session.phase}.`);
+  });
 }
 
 async function isToolsListRequest(request) {
@@ -501,4 +761,43 @@ function requiredGitHubAccessToken(props) {
     throw new Error("GitHub OAuth authorization is required");
   }
   return props.environmentGithubAccessToken;
+}
+
+function requiredSessionController(props) {
+  if (
+    typeof props?.mcpControllerGrantId !== "string" ||
+    typeof props?.mcpClientName !== "string"
+  ) {
+    throw new Error("Reconnect to authorize Agent Sessions");
+  }
+  return {
+    grantId: props.mcpControllerGrantId,
+    clientName: props.mcpClientName,
+  };
+}
+
+function openAuthorizedEnvironment(env, props) {
+  const githubAccessToken = requiredGitHubAccessToken(props);
+  return openEnvironment(
+    env,
+    requiredGitHubUserId(props),
+    (workerEnv, request) =>
+      dispatchEnvironmentWorkflow(workerEnv, githubAccessToken, request),
+    undefined,
+    (workerEnv, runId) =>
+      cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
+    (workerEnv, runId) =>
+      getEnvironmentWorkflowRun(workerEnv, githubAccessToken, runId),
+  );
+}
+
+async function progressPendingSessionEnvironment(env, props) {
+  const environment = await readEnvironment(
+    env,
+    requiredGitHubUserId(props),
+  );
+  if (
+    environment?.replacementGeneration &&
+    new Set(["closing", "offline"]).has(environment.status)
+  ) await openAuthorizedEnvironment(env, props);
 }

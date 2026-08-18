@@ -1,9 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 
 import {
+  createSessionRecord,
   expireSessions,
   handleSessionRequest,
   pendingGenerationCommands,
+  startGenerationQueuedTurns,
   terminateGenerationSessions,
 } from "./session-state.js";
 import {
@@ -17,6 +19,13 @@ import {
 const STORAGE_KEY = "environment";
 const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
 
+class SessionCreationError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export class EnvironmentObject extends DurableObject {
   async fetch(request) {
     const path = new URL(request.url).pathname;
@@ -26,14 +35,101 @@ export class EnvironmentObject extends DurableObject {
         ? await request.clone().json().catch(() => undefined)
         : undefined;
       const environment = /** @type {any} */ (await this.ctx.storage.get(STORAGE_KEY));
+      if (request.method === "POST" && path === "/sessions" &&
+          (!environment || !ACTIVE_STATUSES.has(environment.status) ||
+            String(action?.generation) !== environment.generation)) {
+        return Response.json({ error: "Environment generation is not active" }, { status: 409 });
+      }
       if (!channelAllowsSessionAction(environment, action)) {
         return Response.json({ error: "Environment channel is disconnected" }, { status: 409 });
       }
-      const response = await handleSessionRequest(this.ctx.storage, request);
+      let response = await handleSessionRequest(this.ctx.storage, request);
       if (request.method === "POST" && response.ok && action?.generation) {
+        if (action.type === "queue_turn" && environment?.channelState === "connected") {
+          const started = await startGenerationQueuedTurns(
+            this.ctx.storage,
+            String(action.generation),
+          );
+          if (started > 0) {
+            response = await handleSessionRequest(
+              this.ctx.storage,
+              new Request(request.url, { method: "GET" }),
+            );
+          }
+        }
         await this.sendPendingCommands(String(action.generation));
       }
       return response;
+    }
+
+    if (request.method === "POST" && path === "/environment/start-session") {
+      const requestBody = await request.json();
+      if (
+        typeof requestBody.ownerId !== "string" || requestBody.ownerId.length === 0 ||
+        typeof requestBody.newGeneration !== "string" || requestBody.newGeneration.length === 0 ||
+        !requestBody.session || typeof requestBody.session !== "object"
+      ) return Response.json({ error: "invalid Session start" }, { status: 400 });
+      let result;
+      try {
+        result = await this.ctx.storage.transaction(async (storage) => {
+          const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
+          const now = new Date();
+          let environment;
+          let dispatch = false;
+          if (current && ACTIVE_STATUSES.has(current.status) && current.status !== "closing") {
+            environment = current;
+          } else if (current?.status === "closing") {
+            const replacementGeneration = current.replacementGeneration ??
+              String(requestBody.newGeneration);
+            environment = current.replacementGeneration
+              ? current
+              : {
+                  ...current,
+                  replacementGeneration,
+                  updatedAt: now.toISOString(),
+                };
+            if (environment !== current) await storage.put(STORAGE_KEY, environment);
+          } else {
+            const generation = current?.replacementGeneration ?? String(requestBody.newGeneration);
+            environment = {
+              ownerId: String(requestBody.ownerId),
+              generation,
+              slot: current?.slot ?? crypto.randomUUID(),
+              status: "dispatching",
+              dispatchOutcome: "unconfirmed",
+              cancelPending: false,
+              closeRequested: false,
+              createdAt: now.toISOString(),
+            };
+            await storage.put(STORAGE_KEY, environment);
+            dispatch = true;
+          }
+          const generation = environment.status === "closing"
+            ? environment.replacementGeneration
+            : environment.generation;
+          const created = await createSessionRecord(
+            storage,
+            { ...requestBody.session, generation },
+            now,
+          );
+          if (created.status !== 201) {
+            throw new SessionCreationError(created.body.error, created.status);
+          }
+          return { environment, dispatch, ...created.body };
+        });
+      } catch (error) {
+        if (error instanceof SessionCreationError) {
+          return Response.json({ error: error.message }, { status: error.status });
+        }
+        throw error;
+      }
+      const generation = result.environment.status === "closing"
+        ? result.environment.replacementGeneration
+        : result.environment.generation;
+      if (result.environment.channelState === "connected") {
+        await this.sendPendingCommands(generation);
+      }
+      return Response.json(result, { status: 201 });
     }
 
     if (request.method === "GET" && path === "/environment") {
@@ -52,7 +148,7 @@ export class EnvironmentObject extends DurableObject {
         }
         const environment = {
           ownerId: String(requestBody.ownerId),
-          generation: String(requestBody.generation),
+          generation: current?.replacementGeneration ?? String(requestBody.generation),
           slot: current?.slot ?? crypto.randomUUID(),
           status: "dispatching",
           dispatchOutcome: "unconfirmed",
@@ -251,6 +347,7 @@ export class EnvironmentObject extends DurableObject {
       for (const socket of this.ctx.getWebSockets("environment-channel")) {
         if (socket !== server) socket.close(1000, "Environment channel replaced");
       }
+      await startGenerationQueuedTurns(this.ctx.storage, environment.generation);
       await this.sendPendingCommands(environment.generation, server);
       return new Response(null, {
         status: 101,
@@ -351,6 +448,7 @@ export class EnvironmentObject extends DurableObject {
           status: "offline",
           cancelPending: false,
           closeRequested: current.closeRequested,
+          replacementGeneration: current.replacementGeneration,
           updatedAt: new Date().toISOString(),
         };
         await storage.put(STORAGE_KEY, environment);

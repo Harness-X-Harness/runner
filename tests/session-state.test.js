@@ -6,6 +6,7 @@ import {
   expireSessions,
   handleSessionRequest,
   pendingGenerationCommands,
+  startGenerationQueuedTurns,
   terminateGenerationSessions,
 } from "../apps/chatgpt-app/src/session-state.js";
 
@@ -17,6 +18,7 @@ test("EnvironmentObject Session store creates, lists, and reads private ordered 
     sessionId: "session-1",
     generation: "generation-1",
     controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
     executor: "codex",
     workingDirectory: "/home/runner",
   });
@@ -27,6 +29,7 @@ test("EnvironmentObject Session store creates, lists, and reads private ordered 
     executor: "codex",
     phase: "preparing",
     controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
     workingDirectory: "/home/runner",
     queuedTurns: [],
     pendingRequests: [],
@@ -61,6 +64,7 @@ test("Session creation requires an absolute bounded working directory", async ()
       sessionId: "session-1",
       generation: "generation-1",
       controllerGrantId: "grant-a",
+      controllerClientName: "Client A",
       executor: "codex",
       workingDirectory,
     });
@@ -74,6 +78,7 @@ test("Session controller takeover atomically rejects the old Grant", async () =>
     type: "take_over",
     generation: "generation-1",
     grantId: "grant-b",
+    clientName: "Client B",
   })).status, 200);
 
   const rejected = await sessionAction(storage, {
@@ -106,6 +111,7 @@ test("owner-scoped stores isolate Sessions while one owner can list several", as
       sessionId,
       generation: "generation-1",
       controllerGrantId: "grant-a",
+      controllerClientName: "Client A",
       executor: "codex",
       workingDirectory: "/home/runner",
     })).status, 201);
@@ -114,6 +120,7 @@ test("owner-scoped stores isolate Sessions while one owner can list several", as
     sessionId: "session-b1",
     generation: "generation-1",
     controllerGrantId: "grant-b",
+    controllerClientName: "Client B",
     executor: "grok",
     workingDirectory: "/home/runner",
   })).status, 201);
@@ -214,18 +221,13 @@ test("runner admission refines preparing into one exact native turn", async () =
     sessionId: "session-1",
     generation: "generation-1",
     controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
     executor: "grok",
     workingDirectory: "/home/runner",
+    startCommandId: "command-start",
+    initialTurnId: "turn-1",
+    initialPrompt: "initial prompt",
   });
-  assert.equal((await sessionAction(storage, {
-    type: "accept_command",
-    generation: "generation-1",
-    grantId: "grant-a",
-    commandId: "command-start",
-    kind: "start",
-    turnId: "turn-1",
-    text: "initial prompt",
-  })).status, 200);
   assert.equal((await sessionAction(storage, {
     type: "accept_command",
     generation: "generation-1",
@@ -280,6 +282,15 @@ test("runner admission refines preparing into one exact native turn", async () =
     requestId: "request-stale",
     choiceId: "allow-once",
   })).status, 409);
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-undeclared-choice",
+    kind: "response",
+    requestId: "request-1",
+    choiceId: "allow-always",
+  })).status, 409);
   const response = await sessionAction(storage, {
     type: "accept_command",
     generation: "generation-1",
@@ -303,6 +314,78 @@ test("runner admission refines preparing into one exact native turn", async () =
     { turnId: "turn-1", status: "started" },
     { turnId: "turn-1", status: "failed" },
   ]);
+});
+
+test("a completed turn atomically starts the FIFO head without another client command", async () => {
+  const storage = await admittedSession();
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-running",
+    kind: "start",
+    turnId: "turn-running",
+    text: "first",
+  })).status, 200);
+  assert.equal((await sessionAction(storage, {
+    type: "queue_turn",
+    generation: "generation-1",
+    grantId: "grant-a",
+    turnId: "turn-queued",
+    text: "second",
+  })).status, 200);
+
+  const completed = await sessionAction(storage, {
+    type: "complete_turn",
+    generation: "generation-1",
+    turnId: "turn-running",
+    status: "completed",
+  });
+  const body = await completed.json();
+  assert.equal(body.session.phase, "running");
+  assert.equal(body.session.activeTurnId, "turn-queued");
+  assert.deepEqual(body.session.queuedTurns, []);
+  const pending = await pendingGenerationCommands(storage, "generation-1");
+  const queued = pending.find(({ kind }) => kind === "start_queued");
+  assert.ok(queued);
+  assert.deepEqual(queued.payload, { turnId: "turn-queued", text: "second" });
+});
+
+test("a connected generation starts an explicitly queued idle turn exactly once", async () => {
+  const storage = fakeStorage();
+  const sessionId = "session-idle-queue";
+  await sessionRequest(storage, "POST", "/sessions", {
+    sessionId,
+    generation: "generation-1",
+    controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
+    executor: "codex",
+    workingDirectory: "/home/runner",
+  });
+  await sessionRequest(storage, "POST", `/sessions/${sessionId}`, {
+    type: "admit",
+    generation: "generation-1",
+  });
+  await sessionRequest(storage, "POST", `/sessions/${sessionId}`, {
+    type: "queue_turn",
+    generation: "generation-1",
+    grantId: "grant-a",
+    turnId: "turn-idle",
+    text: "Run when connected",
+  });
+
+  assert.equal(await startGenerationQueuedTurns(storage, "generation-1"), 1);
+  assert.equal(await startGenerationQueuedTurns(storage, "generation-1"), 0);
+  const current = await (await sessionRequest(
+    storage,
+    "GET",
+    `/sessions/${sessionId}`,
+  )).json();
+  assert.equal(current.session.phase, "running");
+  assert.equal(current.session.activeTurnId, "turn-idle");
+  assert.deepEqual(current.session.queuedTurns, []);
+  assert.equal((await pendingGenerationCommands(storage, "generation-1"))
+    .filter(({ kind }) => kind === "start_queued").length, 1);
 });
 
 test("generation gates and terminal monotonicity reject stale Session mutations", async () => {
@@ -393,6 +476,7 @@ test("terminal Sessions expire after seven days and not before", async () => {
     sessionId: "session-2",
     generation: "generation-1",
     controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
     executor: "grok",
     workingDirectory: "/home/runner",
   }, () => now);
@@ -421,6 +505,7 @@ test("Environment termination affects only Sessions from the exact generation", 
       sessionId,
       generation,
       controllerGrantId: "grant-a",
+      controllerClientName: "Client A",
       executor: "codex",
       workingDirectory: "/home/runner",
     });
@@ -445,6 +530,7 @@ async function admittedSession(now = () => new Date(CREATED_AT)) {
     sessionId: "session-1",
     generation: "generation-1",
     controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
     executor: "codex",
     workingDirectory: "/home/runner",
   }, now);
