@@ -15,9 +15,11 @@ import {
   disconnectEnvironmentChannel,
   parseEnvironmentChannelMessage,
 } from "./environment-channel.js";
+import { publicSessionSnapshot } from "./session-public.js";
 
 const STORAGE_KEY = "environment";
 const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
+const encoder = new TextEncoder();
 
 class SessionCreationError extends Error {
   constructor(message, status) {
@@ -27,8 +29,23 @@ class SessionCreationError extends Error {
 }
 
 export class EnvironmentObject extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.env = env;
+    this.sessionSubscribers = new Set();
+  }
+
   async fetch(request) {
     const path = new URL(request.url).pathname;
+
+    const streamMatch = path.match(/^\/sessions\/([^/]+)\/stream$/);
+    if (request.method === "GET" && streamMatch) {
+      return this.openSessionStream(
+        decodeURIComponent(streamMatch[1]),
+        request.headers.get("x-session-grant-id") ?? "",
+        Number(new URL(request.url).searchParams.get("after") ?? 0),
+      );
+    }
 
     if (path === "/sessions" || path.startsWith("/sessions/")) {
       const action = request.method === "POST"
@@ -58,6 +75,7 @@ export class EnvironmentObject extends DurableObject {
           }
         }
         await this.sendPendingCommands(String(action.generation));
+        await this.broadcastSession(path.split("/")[2]);
       }
       return response;
     }
@@ -349,6 +367,7 @@ export class EnvironmentObject extends DurableObject {
       }
       await startGenerationQueuedTurns(this.ctx.storage, environment.generation);
       await this.sendPendingCommands(environment.generation, server);
+      await this.broadcastAllSessions();
       return new Response(null, {
         status: 101,
         headers: { "sec-websocket-protocol": ENVIRONMENT_CHANNEL_PROTOCOL },
@@ -405,6 +424,7 @@ export class EnvironmentObject extends DurableObject {
       });
       if (result?.environment?.status === "closing" || result?.environment?.status === "offline") {
         this.closeChannels();
+        await this.broadcastAllSessions();
       }
       return result
         ? Response.json(result)
@@ -460,6 +480,7 @@ export class EnvironmentObject extends DurableObject {
         return environment;
       });
       if (result) this.closeChannels();
+      if (result) await this.broadcastAllSessions();
       return result
         ? Response.json(result)
         : Response.json({ error: "environment run mismatch" }, { status: 409 });
@@ -501,6 +522,12 @@ export class EnvironmentObject extends DurableObject {
       }),
     );
     if (!response.ok) socket.close(1008, "rejected Environment channel message");
+    else {
+      if (incoming.type === "transition" && incoming.action.type === "complete_turn") {
+        await this.sendPendingCommands(incoming.generation, socket);
+      }
+      await this.broadcastSession(incoming.sessionId);
+    }
   }
 
   async webSocketClose(socket) {
@@ -512,11 +539,16 @@ export class EnvironmentObject extends DurableObject {
   }
 
   async disconnectChannel(attachment) {
+    let changed = false;
     await this.ctx.storage.transaction(async (storage) => {
       const current = await storage.get(STORAGE_KEY);
       const next = disconnectEnvironmentChannel(current, attachment);
-      if (next !== current) await storage.put(STORAGE_KEY, next);
+      if (next !== current) {
+        await storage.put(STORAGE_KEY, next);
+        changed = true;
+      }
     });
+    if (changed) await this.broadcastAllSessions();
   }
 
   async sendPendingCommands(generation, onlySocket) {
@@ -540,4 +572,106 @@ export class EnvironmentObject extends DurableObject {
       socket.close(1000, "Environment ended");
     }
   }
+
+  async openSessionStream(sessionId, grantId, after) {
+    if (!validStreamId(sessionId) || !validStreamId(grantId)) {
+      return Response.json({ error: "Session stream authorization required" }, { status: 401 });
+    }
+    const read = await this.readSessionStreamPage(sessionId, grantId, after);
+    if (!read) return Response.json({ error: "Session not found" }, { status: 404 });
+    let subscriber;
+    const body = new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(streamLine({ type: "snapshot", ...read }));
+        if (read.session.phase === "terminal" || read.hasMore) {
+          controller.close();
+          return;
+        }
+        subscriber = {
+          sessionId,
+          grantId,
+          cursor: read.nextCursor,
+          controller,
+        };
+        this.sessionSubscribers.add(subscriber);
+      },
+      cancel: () => {
+        if (subscriber) this.sessionSubscribers.delete(subscriber);
+      },
+    });
+    return new Response(body, {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/x-ndjson; charset=utf-8",
+      },
+    });
+  }
+
+  async broadcastSession(sessionId) {
+    if (!sessionId) return;
+    for (const subscriber of [...this.sessionSubscribers]) {
+      if (subscriber.sessionId !== sessionId) continue;
+      try {
+        const read = await this.readSessionStreamPage(
+          sessionId,
+          subscriber.grantId,
+          subscriber.cursor,
+        );
+        if (!read) throw new Error("Session not found");
+        subscriber.controller.enqueue(streamLine({ type: "update", ...read }));
+        subscriber.cursor = read.nextCursor;
+        if (read.session.phase === "terminal" || read.hasMore) {
+          subscriber.controller.close();
+          this.sessionSubscribers.delete(subscriber);
+        }
+      } catch (error) {
+        try {
+          subscriber.controller.error(error);
+        } catch {
+          // The browser already closed the stream.
+        }
+        this.sessionSubscribers.delete(subscriber);
+      }
+    }
+  }
+
+  async broadcastAllSessions() {
+    const sessionIds = new Set([...this.sessionSubscribers].map(({ sessionId }) => sessionId));
+    for (const sessionId of sessionIds) await this.broadcastSession(sessionId);
+  }
+
+  async readSessionStreamPage(sessionId, grantId, after) {
+    const response = await handleSessionRequest(
+      this.ctx.storage,
+      new Request(
+        `https://environment/sessions/${encodeURIComponent(sessionId)}?after=${safeCursor(after)}&limit=100`,
+      ),
+    );
+    if (!response.ok) return undefined;
+    const read = await response.json();
+    const environment = /** @type {any} */ (await this.ctx.storage.get(STORAGE_KEY));
+    return {
+      session: publicSessionSnapshot(
+        read.session,
+        environment,
+        grantId,
+        this.env.TASK_CONTROL_PLANE_URL,
+      ),
+      events: read.events,
+      nextCursor: read.nextCursor,
+      hasMore: read.hasMore,
+    };
+  }
+}
+
+function streamLine(value) {
+  return encoder.encode(`${JSON.stringify(value)}\n`);
+}
+
+function safeCursor(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function validStreamId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }

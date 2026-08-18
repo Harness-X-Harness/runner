@@ -31,6 +31,7 @@ import {
   prepareEnvironmentChannel,
 } from "./environment-callback.js";
 import { trustedRunnerClaims, webSocketRunnerToken } from "./runner-identity.js";
+import { sessionStreamFetch } from "./session-stream.js";
 
 export { AuthorizationStateObject, EnvironmentObject, TaskObject };
 
@@ -97,9 +98,16 @@ async function defaultFetch(request, env) {
 
   if (url.pathname.startsWith("/task-stream/")) {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: taskStreamCorsHeaders() });
+      return new Response(null, { status: 204, headers: privateStreamCorsHeaders() });
     }
     if (request.method === "GET") return taskStreamFetch(request, env, url);
+  }
+
+  if (url.pathname.startsWith("/session-stream/")) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: privateStreamCorsHeaders() });
+    }
+    if (request.method === "GET") return sessionStreamFetch(request, env, url);
   }
 
   if (url.pathname === "/environment" && request.method === "GET") {
@@ -237,7 +245,7 @@ async function taskStreamFetch(request, env, url) {
     headers: { authorization: request.headers.get("authorization") ?? "" },
   });
   const headers = new Headers(response.headers);
-  for (const [name, value] of taskStreamCorsHeaders()) headers.set(name, value);
+  for (const [name, value] of privateStreamCorsHeaders()) headers.set(name, value);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -245,7 +253,7 @@ async function taskStreamFetch(request, env, url) {
   });
 }
 
-function taskStreamCorsHeaders() {
+function privateStreamCorsHeaders() {
   return new Headers({
     "access-control-allow-headers": "authorization",
     "access-control-allow-methods": "GET, OPTIONS",

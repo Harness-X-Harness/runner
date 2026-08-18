@@ -181,7 +181,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   });
 });
 
-test("MCP v2 serves credential-free Environment and Task widget resources", async () => {
+test("MCP v2 serves credential-free Environment, Task, and Session widget resources", async () => {
   const props = {
     githubUserId: "test-user",
     oauthScopes: ["environments:manage"],
@@ -227,6 +227,7 @@ test("MCP v2 serves credential-free Environment and Task widget resources", asyn
     [
       { uri: "ui://environment/v4.html", mimeType: "text/html;profile=mcp-app" },
       { uri: "ui://task/v1.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://session/v1.html", mimeType: "text/html;profile=mcp-app" },
     ],
   );
 
@@ -265,4 +266,16 @@ test("MCP v2 serves credential-free Environment and Task widget resources", asyn
   assert.match(taskResource.text, /task-stream/);
   assert.match(taskResource.text, /authorization: "Bearer " \+ token/);
   assert.doesNotMatch(taskResource.text, /private-stream-token|MINI_END_USER_KEY/);
+
+  const sessionRead = await request(4, "resources/read", { uri: "ui://session/v1.html" });
+  const sessionResource = sessionRead.result.contents[0];
+  assert.deepEqual(sessionResource._meta.ui.csp, {
+    connectDomains: ["https://runner.example"],
+    resourceDomains: [],
+  });
+  assert.match(sessionResource.text, /Harness X Harness · Agent Session/i);
+  assert.match(sessionResource.text, /session-stream/);
+  assert.match(sessionResource.text, /send_turn/);
+  assert.match(sessionResource.text, /take_over_session/);
+  assert.doesNotMatch(sessionResource.text, /MINI_END_USER_KEY|pairingUrl|tailscaleHost/);
 });

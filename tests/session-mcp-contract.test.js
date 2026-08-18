@@ -8,6 +8,7 @@ import {
   pendingGenerationCommands,
 } from "../apps/chatgpt-app/src/session-state.js";
 import { startAgentSession } from "../apps/chatgpt-app/src/session.js";
+import { verifySessionStreamCapability } from "../apps/chatgpt-app/src/session-stream.js";
 
 const OWNER = "42";
 const GENERATION = "generation-1";
@@ -32,6 +33,11 @@ test("nine Session tools expose one executor-neutral OAuth contract", async () =
     assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["sessions:manage"] }]);
     assert.doesNotMatch(JSON.stringify(tool), /tasks:|repos:|pull_requests:|app-server|ACP|WebSocket/);
   }
+  for (const name of names.filter((name) => name !== "list_sessions")) {
+    const tool = tools.find((candidate) => candidate.name === name);
+    assert.equal(tool._meta.ui.resourceUri, "ui://session/v1.html");
+    assert.equal(tool._meta["openai/outputTemplate"], "ui://session/v1.html");
+  }
   assert.equal(tools.find(({ name }) => name === "send_turn")
     .inputSchema.properties.delivery.default, undefined);
   assert.deepEqual(tools.find(({ name }) => name === "start_session")
@@ -42,10 +48,11 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   const harness = fakeHarness();
   const grantA = grant("grant-a", "ChatGPT");
   const grantB = grant("grant-b", "VS Code");
-  const started = structured(await callTool(harness.env, grantA, "start_session", {
+  const startResponse = await callTool(harness.env, grantA, "start_session", {
     executor: "codex",
     workingDirectory: "/home/runner/workspace",
-  }));
+  });
+  const started = structured(startResponse);
   const sessionId = started.sessionId;
   assert.equal(started.phase, "preparing");
   assert.equal(started.controller.clientName, "ChatGPT");
@@ -53,6 +60,20 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   assert.equal(started.channelState, "connected");
   assert.equal(started.environment.status, "ready");
   assert.doesNotMatch(JSON.stringify(started), /generation-1|grant-a|ghu_|pairing|tailscale|token/i);
+  const streamMeta = startResponse.result._meta.sessionStream;
+  assert.match(streamMeta.url, new RegExp(`/session-stream/${sessionId}$`));
+  assert.equal(typeof streamMeta.token, "string");
+  assert.equal(JSON.stringify(startResponse.result.structuredContent).includes(streamMeta.token), false);
+  assert.deepEqual(await verifySessionStreamCapability(
+    streamMeta.token,
+    sessionId,
+    harness.env.ENVIRONMENT_SESSION_SECRET,
+  ), {
+    ownerId: OWNER,
+    sessionId,
+    grantId: "grant-a",
+    expiresAt: Math.floor(new Date(streamMeta.expiresAt).getTime() / 1_000),
+  });
 
   const pending = await pendingGenerationCommands(harness.storage(OWNER), GENERATION);
   assert.equal(pending.length, 1);
@@ -66,8 +87,10 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   assert.equal(listedByB.sessions[0].controller.currentGrant, false);
   assert.equal(Object.hasOwn(listedByB.sessions[0], "events"), false);
 
-  const taken = structured(await callTool(harness.env, grantB, "take_over_session", { sessionId }));
+  const takeoverResponse = await callTool(harness.env, grantB, "take_over_session", { sessionId });
+  const taken = structured(takeoverResponse);
   assert.deepEqual(taken.controller, { clientName: "VS Code", currentGrant: true });
+  assert.notEqual(takeoverResponse.result._meta.sessionStream.token, streamMeta.token);
   assert.equal((await callTool(harness.env, grantA, "send_turn", {
     sessionId,
     text: "old controller must fail",
