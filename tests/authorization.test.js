@@ -97,8 +97,7 @@ test("initial consent displays and preserves every requested capability", async 
     body,
     /These permissions control what ChatGPT can ask Harness to do/,
   );
-  assert.match(body, /GitHub verifies your identity next/);
-  assert.match(body, /for that target repository/);
+  assert.match(body, /Harness derives an Environment credential limited to the runner repository and Actions workflow control/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.deepEqual(stored.authRequest.scope, [
@@ -253,6 +252,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   const env = {
     GITHUB_APP_CLIENT_ID: "Iv1.example",
     GITHUB_APP_CLIENT_SECRET: "client-secret",
+    GITHUB_RUNNER_REPOSITORY: "Harness-X-Harness/runner",
     AUTHORIZATION_STATES: states.binding,
     OAUTH_PROVIDER: {
       completeAuthorization: async () => ({
@@ -264,6 +264,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   const github = new URL(start.headers.get("location"));
   const state = github.searchParams.get("state");
   assert.equal(github.origin, "https://github.com");
+  assert.equal(github.searchParams.has("scope"), false);
   assert.equal(github.searchParams.get("code_challenge_method"), "S256");
   assert.match(github.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
   assert.match(start.headers.get("set-cookie"), /__Host-RUNNER_GITHUB_STATE=/);
@@ -295,6 +296,12 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
       if (url === "https://github.com/login/oauth/access_token") {
         tokenParameters = Object.fromEntries(new URLSearchParams(init.body));
         return Response.json({ access_token: "ghu_access" });
+      }
+      if (url.endsWith("/token/scoped")) {
+        return Response.json({
+          token: "ghu_scoped",
+          expires_at: "2030-01-01T00:00:00Z",
+        });
       }
       if (url === "https://api.github.com/user") {
         return Response.json({ id: 42, login: "owner" });

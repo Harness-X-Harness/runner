@@ -5,9 +5,7 @@ import {
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-import {
-  githubGrantTokenExchange,
-} from "./github-user-auth.js";
+import { githubGrantTokenExchange } from "./github-user-auth.js";
 import {
   authorizePage,
   completeAuthorizationCallback,

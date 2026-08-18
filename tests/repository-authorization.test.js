@@ -165,6 +165,7 @@ test("installation return starts original-user verification before dispatch", as
   const oauthState = location.searchParams.get("state");
   assert.equal(location.origin, "https://github.com");
   assert.equal(location.pathname, "/login/oauth/authorize");
+  assert.equal(location.searchParams.has("scope"), false);
   assert.match(oauthState, /^install_oauth_/);
   assert.equal(location.searchParams.get("code_challenge_method"), "S256");
   assert.match(location.searchParams.get("code_challenge"), /^[A-Za-z0-9_-]{43}$/);
@@ -238,6 +239,9 @@ test("verified installation callback dispatches once and duplicate callback cann
     const value = String(url);
     if (value === "https://github.com/login/oauth/access_token") {
       return Response.json({ access_token: "user-token" });
+    }
+    if (value.endsWith("/token/scoped")) {
+      return Response.json({ token: "environment-token" });
     }
     if (value === "https://api.github.com/user") {
       return Response.json({ id: 42, login: "owner" });

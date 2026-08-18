@@ -1,9 +1,12 @@
 import { githubHeaders } from "./github.js";
 import { OAUTH_SCOPES } from "./oauth-scopes.js";
 
+const API = "https://api.github.com";
+const API_VERSION = "2026-03-10";
 const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const MINIMUM_TOKEN_TTL = 60;
+const AUTHORIZATION_KIND = "github_app_scoped";
 
 export function githubUserAuthorizationUrl(env, callback, state, codeChallenge) {
   const url = new URL(AUTHORIZE_URL);
@@ -34,6 +37,41 @@ export async function exchangeGitHubUserCode(
   );
 }
 
+export async function scopeGitHubUserToken(
+  env,
+  accessToken,
+  fetchImpl = fetch,
+) {
+  const [owner, repository] = runnerRepository(env);
+  const credentials = btoa(
+    `${env.GITHUB_APP_CLIENT_ID}:${env.GITHUB_APP_CLIENT_SECRET}`,
+  );
+  const response = await fetchImpl(
+    `${API}/applications/${encodeURIComponent(env.GITHUB_APP_CLIENT_ID)}/token/scoped`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Basic ${credentials}`,
+        "content-type": "application/json",
+        "user-agent": "HarnessXHarnessTaskRunner",
+        "x-github-api-version": API_VERSION,
+      },
+      body: JSON.stringify({
+        access_token: accessToken,
+        target: owner,
+        repositories: [repository],
+        permissions: { actions: "write" },
+      }),
+    },
+  );
+  const scoped = await response.json().catch(() => undefined);
+  if (!response.ok || typeof scoped?.token !== "string") {
+    throw new Error("GitHub user token scoping failed");
+  }
+  return scoped;
+}
+
 export async function completeGitHubUserAuthorization(
   env,
   githubAuthorization,
@@ -42,6 +80,7 @@ export async function completeGitHubUserAuthorization(
 ) {
   const { authRequest } = githubAuthorization.payload;
   let token;
+  let scopedToken;
   try {
     token = await exchangeGitHubUserCode(
       env,
@@ -50,6 +89,7 @@ export async function completeGitHubUserAuthorization(
       githubAuthorization.codeVerifier,
       fetchImpl,
     );
+    scopedToken = await scopeGitHubUserToken(env, token.access_token, fetchImpl);
   } catch {
     return new Response("GitHub token exchange failed", { status: 502 });
   }
@@ -74,7 +114,7 @@ export async function completeGitHubUserAuthorization(
         githubUserId: profile.id,
         githubLogin: profile.login,
         oauthScopes: grantedScopes,
-        ...githubUserTokenProps(token),
+        ...githubUserTokenProps(token, scopedToken),
       },
     });
   } catch (error) {
@@ -106,16 +146,17 @@ export async function githubGrantTokenExchange(
   fetchImpl = fetch,
   now = currentUnixTime,
 ) {
+  requireScopedAuthority(options.props);
   const currentTime = now();
   if (options.grantType === "authorization_code") {
-    const accessTokenTTL = remainingLifetime(
-      options.props.githubAccessTokenExpiresAt,
-      currentTime,
-    );
-    if (
-      options.props.githubAccessTokenExpiresAt !== undefined &&
-      (accessTokenTTL ?? 0) < MINIMUM_TOKEN_TTL
-    ) {
+    const accessTokenTTL = minimumLifetime([
+      remainingLifetime(options.props.githubAccessTokenExpiresAt, currentTime),
+      remainingLifetime(
+        options.props.environmentGithubAccessTokenExpiresAt,
+        currentTime,
+      ),
+    ]);
+    if (accessTokenTTL !== undefined && accessTokenTTL < MINIMUM_TOKEN_TTL) {
       return rotateGitHubUserToken(env, options.props, fetchImpl, currentTime, true);
     }
     return compact({
@@ -155,15 +196,25 @@ async function rotateGitHubUserToken(
     props.githubRefreshToken,
     fetchImpl,
   );
+  const scopedToken = await scopeGitHubUserToken(
+    env,
+    token.access_token,
+    fetchImpl,
+  );
   const newProps = {
     ...props,
-    ...githubUserTokenProps(token, currentTime),
+    ...githubUserTokenProps(token, scopedToken, currentTime),
   };
+  const accessTokenTTL = minimumLifetime([
+    positiveInteger(token.expires_in) ? token.expires_in : undefined,
+    remainingLifetime(
+      newProps.environmentGithubAccessTokenExpiresAt,
+      currentTime,
+    ),
+  ]);
   return {
     newProps,
-    ...(positiveInteger(token.expires_in)
-      ? { accessTokenTTL: token.expires_in }
-      : {}),
+    ...compact({ accessTokenTTL }),
     ...(includeRefreshTokenTTL
       ? compact({
           refreshTokenTTL: remainingLifetime(
@@ -175,7 +226,11 @@ async function rotateGitHubUserToken(
   };
 }
 
-export function githubUserTokenProps(token, issuedAt = currentUnixTime()) {
+export function githubUserTokenProps(
+  token,
+  scopedToken,
+  issuedAt = currentUnixTime(),
+) {
   return compact({
     githubAccessToken: token.access_token,
     githubRefreshToken: token.refresh_token,
@@ -184,6 +239,11 @@ export function githubUserTokenProps(token, issuedAt = currentUnixTime()) {
       issuedAt,
       token.refresh_token_expires_in,
     ),
+    environmentGithubAccessToken: scopedToken.token,
+    environmentGithubAccessTokenExpiresAt: absoluteExpiration(
+      scopedToken.expires_at,
+    ),
+    githubAuthorizationKind: AUTHORIZATION_KIND,
   });
 }
 
@@ -218,6 +278,24 @@ export async function requestGitHubUserProfile(accessToken, fetchImpl = fetch) {
   return profile;
 }
 
+function requireScopedAuthority(props) {
+  if (
+    props?.githubAuthorizationKind !== AUTHORIZATION_KIND ||
+    typeof props.environmentGithubAccessToken !== "string" ||
+    props.environmentGithubAccessToken.length === 0
+  ) {
+    throw new Error("GitHub user authorization must be reconnected");
+  }
+}
+
+function runnerRepository(env) {
+  const parts = env.GITHUB_RUNNER_REPOSITORY.split("/");
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
+    throw new Error("GitHub runner repository is invalid");
+  }
+  return parts;
+}
+
 function compact(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
@@ -232,9 +310,22 @@ function expirationTime(issuedAt, lifetime) {
   return positiveInteger(lifetime) ? issuedAt + lifetime : undefined;
 }
 
+function absoluteExpiration(value) {
+  if (typeof value !== "string") return undefined;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds)
+    ? Math.floor(milliseconds / 1000)
+    : undefined;
+}
+
 function remainingLifetime(expiresAt, currentTime) {
   if (!positiveInteger(expiresAt)) return undefined;
   return Math.max(0, expiresAt - currentTime);
+}
+
+function minimumLifetime(values) {
+  const defined = values.filter((value) => value !== undefined);
+  return defined.length > 0 ? Math.min(...defined) : undefined;
 }
 
 function currentUnixTime() {

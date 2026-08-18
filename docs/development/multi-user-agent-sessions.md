@@ -1,0 +1,331 @@
+# Multi-user Agent Sessions
+
+Status: proposed implementation contract. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
+
+## Goal
+
+Harness lets several people use ChatGPT, VS Code, or another MCP Client to control temporary, user-owned development environments. GitHub is the only human identity provider. Each person can run several concurrent Codex or Grok Agent Sessions in one Environment and delegate GitHub work to those Agents.
+
+Harness provides identity, Environment lifecycle, Agent transport, and private event delivery. It does not model issue, branch, commit, push, or pull-request workflows as Harness domain stages.
+
+## Confirmed domain decisions
+
+1. A stable GitHub numeric user ID defines one Harness Principal. Different MCP Clients authorized by the same GitHub account share that Principal.
+2. Each MCP Client has its own revocable MCP Grant and scope set. Client identity never owns a Task, Session, or Environment.
+3. `Harness-X-Harness/runner` is the Execution Repository. Access to another repository does not grant permission to consume its Actions runners.
+4. GitHub must see the Harness Principal as the actor that controls an Execution Repository workflow. The control plane uses a GitHub App user token scoped to the runner repository and `Actions: write` to dispatch, observe, and cancel the exact run.
+5. The former one-shot Code Task becomes a user-delegated, multi-turn Agent Session. GitHub work is performed through native Agent tools instead of fixed Harness commit and pull-request stages.
+6. Agent Sessions run inside the Principal's existing Remote Development Environment. MCP, T3, and Tailscale are interfaces to the same temporary machine.
+7. One Environment may run several Codex or Grok Agent Sessions concurrently.
+8. Harness does not isolate Session filesystems. Each Session has native conversation state, but users and Agents choose working directories and accept the same filesystem conflicts as on a personal development machine.
+9. A user authorizes the Harness GitHub App during MCP authorization. Harness derives an Environment token limited to the fixed Execution Repository and `Actions: write`; both tokens remain in the control plane.
+10. The user authorizes `gh`, Git, or GitHub MCP independently inside each admitted Environment. Harness transports interactive login prompts and responses but does not issue, store, refresh, or inject the resulting Agent GitHub credential.
+11. GitHub App authorization requests no traditional OAuth repository scope. GitHub's scoped user-token exchange enforces `Harness-X-Harness/runner` plus `Actions: write`; Target Repository access remains outside this Environment authorization boundary.
+12. `start_session` expresses one user intent. If the Environment is offline, the control plane starts it and creates the Session after admission without requiring a separate user step.
+13. Harness sets no application-level Session quota or resource scheduler. The user may run several Sessions concurrently and the runner or native CLI reports resource failure naturally.
+14. Native Agent approvals and questions become ordered Session events. The Session waits for one valid response instead of auto-approving or requiring T3.
+15. All MCP Grants for a Principal can list that Principal's Sessions. Each Session has one controlling Grant; another Grant can take control only through an explicit, atomic takeover.
+16. A Durable Object retains private, ordered Session Events with monotonic cursors. Standard tool reads are the authority; Widget streaming is an optional live view.
+17. Reconnect resumes event reading only while the same Environment run remains alive. Environment termination ends native Sessions; a new runner never restores JSONL, workspace, or processes.
+18. Terminal Session metadata and events remain read-only for seven days, then are deleted.
+19. Loss of Execution Authorization prevents future dispatch, observation, and cancellation through Harness but does not evict an admitted Environment. The current run may continue until the user cancels it in GitHub, it exits, or the six-hour platform limit terminates it. Harness has no installation-token fallback.
+20. Ordinary users do not receive Tailscale SSH in the first multi-user release. The current tagged-node access remains a platform-administrator operations interface.
+21. Harness drives each Agent through its supported long-lived integration protocol. Codex uses `codex app-server` over local stdio; Grok uses `grok agent stdio` through ACP. The Session transport does not parse TUI output or emulate continuity with repeated one-shot commands.
+22. MCP exposes one executor-neutral Agent Session interface. Thin runner-side drivers translate that interface to Codex App Server or Grok ACP; MCP Clients never need to implement either native protocol.
+23. The product event stream excludes raw reasoning or thought content. It includes user-visible Agent messages, tool progress, approval and input requests, lifecycle changes, and errors.
+24. Reconnect restores coalesced partial Agent output as well as completed semantic events. Runner-side drivers combine high-frequency native deltas into bounded text chunks before appending Durable Object events; Harness does not persist one event per token.
+25. The MCP surface has nine Session tools: `start_session`, `list_sessions`, `read_session`, `send_turn`, `cancel_queued_turn`, `interrupt_turn`, `respond_to_session`, `take_over_session`, and `stop_session`. The existing `open_environment` and `close_environment` remain for direct T3 use. Harness does not replace these with a generic action-dispatch tool.
+26. `start_session` atomically creates and returns a stable Session ID in `preparing` state before Environment startup completes. Environment allocation, admission, and native driver startup advance that same Session through ordered events; the MCP request does not wait for runner readiness.
+27. Session lifecycle uses the small phase set `preparing`, `idle`, `running`, `waiting_for_user`, `stopping`, and `terminal`. A separate `terminalReason` records explicit stop, Environment termination, startup failure, driver failure, or retention expiry instead of multiplying terminal phases.
+28. `send_turn` supports `delivery: steer | queue`. `steer` adds input to the current native turn; `queue` persists a later turn in the EnvironmentObject and starts it after the current turn completes. Harness is queue authority for both executors; it does not delegate product ordering to Grok's optional native queue extension.
+29. `send_turn` defaults to `steer`: it starts a new turn when the Session is idle and steers the exact active turn when it is running. Queueing occurs only when the caller explicitly selects `delivery: queue`.
+30. MCP OAuth exposes only `sessions:manage` and `environments:manage`. Harness does not duplicate GitHub repository capabilities as `repos:*`, `issues:*`, or pull-request scopes; GitHub user authorization remains authority for those actions.
+31. Agent Session deployment removes the complete legacy Code Task product surface: Task MCP tools, `execute-task` workflow, TaskObject, Task Widget, fixed checkout/commit/push/pull-request stages, and Task documentation. There is no fallback or read-only historical Task endpoint. Deployment is blocked only while a legacy Task is still running.
+32. The existing owner-scoped EnvironmentObject is the single authority for the Principal's Environment, Agent Sessions, queued turns, ordered events, controllers, and one multiplexed runner WebSocket. The design does not add one Durable Object per Session.
+33. A temporary Environment Control Channel disconnect does not terminate Sessions while the authoritative GitHub run remains non-terminal. The EnvironmentObject exposes separate `channelState`, accepts explicit queued turns, and rejects an immediate steer while disconnected. Only the same generation may reconnect.
+34. Every Environment Control Channel command has a stable command ID. The runner records processed command IDs and returns acknowledgements so reconnect can redeliver without repeating a native effect.
+35. If `start_session` arrives while the Environment is closing, its Session remains `preparing`. After the EnvironmentObject confirms that the exact old GitHub run is terminal, it dispatches one replacement generation and continues that Session without requiring another user request.
+36. `read_session` is the single read authority. It returns a current Session snapshot plus a page of ordered events after an optional cursor, with `nextCursor` and `hasMore`. Final Agent output remains in the event stream; there is no separate result tool.
+37. The Session Widget is both a live view and a direct interaction surface. It includes a composer with `Steer now` and `Queue`, pending request controls, stop, and explicit takeover. Natural-language MCP Client interaction remains available through the same tools.
+38. Durable Session Events retain bounded, user-visible tool summaries and status changes, not complete command stdout, stderr, or tool result bodies. Detailed terminal output remains on the temporary Environment and its direct interfaces.
+39. Explicit queued turns form a FIFO. `send_turn` returns a stable turn ID, and `cancel_queued_turn` may cancel that exact turn only before it becomes active.
+40. `interrupt_turn` interrupts one exact active turn while preserving its native Agent Session and queued turns. `stop_session` remains the whole-Session terminal operation.
+41. Agent GitHub Authorization is generation-local. Its credentials exist only inside the user's temporary Environment and are destroyed with it; users authenticate again in a replacement Environment.
+42. The first release supports only native browser URL or device-code flows for Agent GitHub Authorization. Harness does not accept PATs or GitHub tokens through a Widget, MCP tool, Session Event, or control-channel command.
+43. `start_session` accepts an optional `workingDirectory` and optional initial prompt. The default working directory is the Environment user's native home. Harness does not create a workspace or checkout a Target Repository; a Session without an initial prompt becomes `idle` after driver startup.
+44. Stopping the last Agent Session does not close the shared Environment. Only explicit `close_environment`, direct GitHub termination, or the platform run limit ends T3 and other user processes.
+45. Codex and Grok continue to use platform-managed shared Mini provider credentials. Every admitted Environment can use and potentially read those credentials; the product relies on trusted-organization membership rather than process-level secret isolation.
+46. Each Harness Agent Session owns one independent native stdio child process: `codex app-server` for Codex or `grok agent --no-leader stdio` for Grok. Processes still share the Environment user's home, credentials, and filesystem; this is lifecycle and fault separation, not a security boundary.
+47. One long-lived Node 24 `session-runtime` Action replaces the separate ready callback and `sleep infinity`. It opens the control channel, atomically publishes Environment readiness, supervises driver processes, and keeps the workflow alive. The early OIDC claim remains a separate pre-secret admission gate.
+48. Integrations prefer stable surfaces: Cloudflare's hibernatable WebSocket server API, Codex App Server's stable stdio API without experimental capability opt-in, and standard Grok ACP. Grok steering uses the required `x.ai/interject` extension; drivers discover required capabilities at initialization and fail explicitly when absent, with no semantic fallback.
+49. The first release relays structured GitHub MCP OAuth URLs through Session requests. Users complete `gh` and Git credential device login in the Environment's T3 terminal. Harness does not parse CLI login output or proxy GitHub tokens.
+50. GitHub App user authorization identifies the Harness Principal but does not separately prove `Harness-X-Harness` organization membership or preflight runner permission. The scoped-token exchange and first real `workflow_dispatch` are the Execution Authorization gates, so Harness does not request organization membership or maintain a duplicate membership decision.
+
+## Identity and authority model
+
+| Concept | Authority | Purpose |
+| --- | --- | --- |
+| MCP Client | CIMD, DCR, or preregistration | Identifies ChatGPT, VS Code, or another client application |
+| MCP Grant | Harness OAuth provider | Gives one Client a revocable scope set for one Principal |
+| Harness Principal | GitHub numeric user ID | Owns Environments and Agent Sessions across all Clients |
+| Execution Authorization | Repository- and permission-scoped GitHub App user token plus GitHub Actions policy | Decides whether the Principal may dispatch, observe, or cancel work in the Execution Repository |
+| Environment Admission | Exact GitHub run plus GitHub Actions OIDC | Binds one workflow run to the current Principal generation |
+| Agent GitHub Authorization | User-completed login inside the Environment | Lets native GitHub tools act with the user's selected GitHub credential for this generation |
+| Session Controller | One MCP Grant at a time | Serializes turns and user responses without making the Client the Session owner |
+
+Repository membership and Execution Authorization are not synonyms. GitHub App user authorization establishes identity; scoped-token exchange establishes the requested capability ceiling. The authoritative admission operation remains the scoped-user-token `workflow_dispatch`: GitHub evaluates repository access, App permission, Actions policy, and workflow protections with the real Principal as actor. A separate membership or repository preflight cannot fully predict that result and could become stale before dispatch.
+
+## Target flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as MCP Client
+    participant W as Harness Worker
+    participant G as GitHub
+    participant R as Temporary Runner
+    participant A as Codex or Grok
+    participant M as GitHub MCP
+
+    U->>C: Connect Harness
+    C->>W: OAuth authorization request
+    W->>G: GitHub App user authorization
+    G-->>W: Base user access token
+    W->>G: Scope token to runner repo + Actions write
+    G-->>W: Scoped Environment user token
+    W-->>C: MCP Grant for GitHub Principal
+    C->>W: Open Environment
+    W->>G: workflow_dispatch with user access token
+    G->>R: Start workflow as the user actor
+    R->>W: OIDC Environment admission
+    C->>W: Create or send Agent Session turn
+    W->>R: Private ordered turn
+    R->>A: Native Codex or Grok session
+    A-->>R: GitHub login request
+    R-->>W: Private ordered Session event
+    W-->>C: Login URL or device flow
+    C-->>U: Present authorization request
+    U->>G: Complete Agent GitHub authorization
+    A->>M: GitHub MCP tool call
+    M->>G: GitHub API as the user
+    A-->>W: Ordered Agent events
+    W-->>C: Private live output and requests
+```
+
+GitHub Actions does not automatically expose the triggering user's credential to a job. The job's built-in `GITHUB_TOKEN` remains a repository-scoped GitHub Actions App installation token. Harness does not forward its dispatch credential. The user establishes separate Agent GitHub Authorization inside the admitted Environment when GitHub work is required.
+
+## Runtime control channel
+
+After OIDC admission, the runner opens one outbound WebSocket to its owner's EnvironmentObject. The connection is authenticated and bound to the exact Environment generation and GitHub run. It multiplexes commands for all native Agent drivers and returns their normalized events. The runner does not accept a public inbound control connection.
+
+The long-lived `session-runtime` Node Action reads the private T3 descriptor, opens this WebSocket with a fresh GitHub Actions OIDC assertion, and makes `ready` plus `channelState: connected` one EnvironmentObject commit. It replaces both the former ready callback and `sleep infinity`. The earlier claim Action remains separate because it is the admission boundary before shared executor credentials, private networking, or T3 startup.
+
+The EnvironmentObject accepts the connection with Cloudflare's hibernatable WebSocket API. It remains the server and single serialization point while the runner is the reconnecting client. The channel carries only Harness Session commands and events; MCP bearer tokens, the Harness GitHub OAuth token, T3 pairing data, and raw Agent reasoning do not enter it.
+
+T3 and Tailscale remain independent user and administrator interfaces. Neither is required for MCP Session control.
+
+A disconnected channel is an observation about transport, not proof that the GitHub run or native Agent process ended. The EnvironmentObject keeps Session phases and reports `channelState: disconnected`. It may durably accept an explicit queued turn, but an immediate steer fails instead of silently changing delivery mode. A WebSocket from another generation cannot adopt the Sessions.
+
+Commands use stable IDs and acknowledgements. The runner keeps a generation-local receipt journal so loss of an acknowledgement cannot repeat a native start, turn, steer, approval response, or stop effect. This is an at-least-once transport with idempotent command handling, not an exactly-once network claim.
+
+## Security boundary
+
+The Remote Development Environment is the Principal's temporary machine, not a process sandbox. Repository code, Codex, Grok, T3, GitHub MCP, shells, and other user-started processes can act within the same Unix-user boundary and may reach credentials that the user creates inside the Environment. This is intentional for the user-controlled temporary-machine model and must not be described as per-Agent credential isolation.
+
+The Environment receives neither the MCP bearer nor the Harness GitHub OAuth token. Agent GitHub credentials are exchanged directly between tools in the Environment and GitHub; the control plane carries only private human-facing authorization requests, choices, and status, never the resulting GitHub credential.
+
+The platform does inject shared Codex and Grok provider credentials after Environment admission. These are organization service credentials, not user identities. Repository code and any process in the user's Environment may read or use them. Platform operators own their rotation, provider cost, and revocation.
+
+## Current-system differences
+
+The current implementation still has a separate one-shot `execute-task.yml` workflow and four task lifecycle tools. It performs checkout, commit, push, and pull-request creation as fixed workflow stages with a repository-scoped App installation token. It stores Task state independently from the Remote Development Environment.
+
+The target design removes that duplicated execution plane, including its read-only historical endpoint. It must not retain a fallback path that silently chooses between fixed Code Tasks and Agent Sessions.
+
+The current system uses one GitHub App in two explicit roles. Environment lifecycle uses a repository- and permission-scoped user token. Legacy Code Task uses the base user token for authorization checks and installation tokens for execution. Agent Session migration removes the Code Task App JWT, installation discovery, installation-token issuance, and repository-installation continuation while retaining the scoped user-token Environment authority. There is no platform-owned GitHub fallback.
+
+Traditional OAuth `repo` scope is broader than the target operations. The implementation must enforce the fixed Execution Repository at its GitHub adapter boundary and must not reuse this token for Target Repository access, Agent GitHub Authorization, or general GitHub tools.
+
+## Confirmed interaction semantics
+
+- `start_session` automatically opens an offline Environment and waits for admission before starting the native Session.
+- Several Sessions may run concurrently in one Environment. Harness does not queue or schedule them.
+- Users and Agents select working directories. Session JSONL records isolate native conversation state, not Git working trees or files.
+- Native approval, question, and authorization requests enter `waiting_for_user` and are delivered as private ordered events.
+- The Grant that creates a Session is its initial Session Controller. Only the controller may send turns or answer requests.
+- `list_sessions` returns every Session owned by the Principal, including controller display metadata, but not transcripts or credentials.
+- Another Grant for the same Principal may explicitly take over a Session. Takeover atomically invalidates the old controller for future writes; there is no controller timeout lease.
+- Session Events have monotonic cursors. Clients reconnect from their last cursor; an optional Widget stream cannot replace durable reads.
+- Agent text deltas are coalesced into bounded durable chunks. A reconnect can recover partial output without treating every model token as an event.
+- Environment termination makes all native Sessions terminal. Their events remain read-only for seven days, but no Session or workspace is restored on another runner.
+
+## Native driver boundary
+
+Harness exposes one product-level Agent Session model while each driver keeps its native protocol and identifiers.
+
+| Product operation | Codex driver | Grok driver |
+| --- | --- | --- |
+| Start native conversation | `thread/start` | `session/new` |
+| Continue conversation | `turn/start` on the same thread | `session/prompt` on the same session |
+| Steer current turn | `turn/steer` with the expected turn ID | `x.ai/interject` extension for the active session |
+| Stream work | `turn/*` and `item/*` notifications | `session/update` notifications |
+| Ask for approval or input | Server-initiated approval and user-input requests | ACP permission requests |
+| Reconnect while runner lives | `thread/resume` or the loaded thread | ACP session load or resume |
+
+Codex App Server is the supported rich-client interface for conversation history, approvals, and streamed Agent events. Its stdio transport is newline-delimited JSON and is suitable for a local runner-side adapter. The App Server WebSocket transport is experimental and is not required by this design.
+
+Grok Agent Mode is a long-lived ACP server. Its stdio transport provides sessions, repeated prompts, structured streamed replies, tool-call updates, reasoning updates, and permission prompts. Harness uses standard ACP plus only the required `x.ai/interject` steering extension. Harness keeps queue authority and does not use Grok's optional native queue extension.
+
+The common driver contract must stay semantic and small: start a native Session for a working directory, send one turn, answer one pending request, stop the Session, and emit normalized Session Events. It must not hide native event fields that are required to make a safe approval decision. Raw native reasoning and thought streams are discarded at the driver boundary.
+
+Harness owns queued-turn ordering because Codex has native steering but no equivalent product queue, while Grok exposes queueing only through optional `x.ai/*` extensions. The product does not split ordering authority across a Durable Object and one executor process. A driver accepts only the next committed turn or a steer for the exact active native turn.
+
+## MCP tool surface
+
+| Tool | Intent |
+| --- | --- |
+| `start_session` | Create one Codex or Grok Session, opening the Principal's Environment when necessary |
+| `list_sessions` | List the Principal's active and retained terminal Sessions without transcripts |
+| `read_session` | Return one Session snapshot and ordered events after an optional cursor |
+| `send_turn` | Send one user turn through the current Session Controller |
+| `cancel_queued_turn` | Cancel one exact queued turn before it becomes active |
+| `interrupt_turn` | Interrupt one exact active turn without terminating the Agent Session |
+| `respond_to_session` | Answer one pending Agent approval, question, or authorization request |
+| `take_over_session` | Atomically make the caller's MCP Grant the Session Controller |
+| `stop_session` | Stop one native Session without closing the shared Environment |
+| `open_environment` | Open or return the Principal's Environment for direct T3 use |
+| `close_environment` | Close the Environment and all Sessions inside it |
+
+Each tool represents one user intent. A generic tool with an `action` discriminator is not used because it would merge read, write, takeover, and destructive authorization semantics.
+
+## Session Widget
+
+The Session Widget renders one Session snapshot and its ordered event timeline. It receives a private, short-lived, Session-bound stream capability in MCP result metadata and reconnects from its last durable cursor. The capability and control-channel details never appear in structured content.
+
+The Widget provides:
+
+- executor, Session phase, channel state, controller, working directory, and Environment status;
+- coalesced Agent messages, tool progress, lifecycle changes, and errors;
+- direct `Steer now` and `Queue` actions with the user's unmodified composer text;
+- controls for a pending approval, question, or authorization request;
+- explicit `Take control` when another Grant is controller;
+- `Stop session`, plus links to the Environment and GitHub run when applicable.
+
+Widget actions call the same MCP tools as natural-language clients. The Widget is not state authority and cannot bypass controller, owner, generation, scope, or pending-request checks.
+
+## Session lifecycle
+
+```text
+preparing -> idle -> running -> idle
+                         \-> waiting_for_user -> running
+any non-terminal phase -> stopping -> terminal
+Environment terminal or unrecoverable startup/driver failure -> terminal
+```
+
+`terminalReason` carries the cause without changing the lifecycle phase model. Terminal Sessions are immutable except for retention cleanup.
+
+## Session read contract
+
+`read_session` returns one private snapshot and an event page:
+
+```ts
+type SessionSnapshot = {
+  sessionId: string;
+  executor: "codex" | "grok";
+  phase: "preparing" | "idle" | "running" | "waiting_for_user" | "stopping" | "terminal";
+  terminalReason?: "stopped" | "environment_ended" | "startup_failed" | "driver_failed";
+  channelState: "connected" | "disconnected";
+  controller: { clientName: string; currentGrant: boolean };
+  workingDirectory: string;
+  activeTurnId?: string;
+  queuedTurns: Array<{ turnId: string; createdAt: string }>;
+  pendingRequests: Array<{ requestId: string; kind: string }>;
+  latestCursor: number;
+  environment: { status: string; entryUrl: string; runUrl?: string };
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SessionRead = {
+  session: SessionSnapshot;
+  events: SessionEvent[];
+  nextCursor: number;
+  hasMore: boolean;
+};
+```
+
+The snapshot is a current projection, not a second history authority. Native Codex thread IDs and Grok session IDs remain only in the generation-local runner registry and are deleted when the Session becomes terminal.
+
+Every event has `{ cursor, sessionId, type, createdAt, data }`. `cursor` is strictly increasing within one Harness Session. The normalized event types are:
+
+| Type | Durable content |
+| --- | --- |
+| `status` | Session phase, channel state, controller change, or terminal reason |
+| `user_message` | Exact user text, turn ID, and `steer` or `queue` delivery |
+| `agent_message_chunk` | Coalesced user-visible Agent response text |
+| `activity` | Bounded tool label, safe target or command summary, status, and error summary |
+| `request` | Exact request ID, open or resolved state, safe description, allowed choices, and optional input schema |
+| `turn` | Queued, started, completed, interrupted, or cancelled state for one turn ID |
+| `error` | User-facing transport, Session, turn, or driver error summary |
+
+Raw reasoning, native protocol payloads, full stdout or stderr, credentials, T3 descriptors, control-channel capabilities, and GitHub authorization tokens are not Session Events. A request response must name an open `requestId` and one of that event's declared `choiceId` values; the driver translates it to the native response.
+
+Final output is the final `agent_message_chunk` sequence followed by the terminal `turn` or `status` event. There is no synthetic Task result or separate result endpoint.
+
+## Tool argument contract
+
+The public tools use Harness IDs only:
+
+```text
+start_session(executor, workingDirectory?, initialPrompt?)
+list_sessions()
+read_session(sessionId, afterCursor?, limit?)
+send_turn(sessionId, text, delivery = "steer")
+cancel_queued_turn(sessionId, turnId)
+interrupt_turn(sessionId, activeTurnId)
+respond_to_session(sessionId, requestId, choiceId, values?)
+take_over_session(sessionId)
+stop_session(sessionId)
+open_environment()
+close_environment()
+```
+
+`cancel_queued_turn` fails after its turn starts. `interrupt_turn` fails when `activeTurnId` is stale. `respond_to_session` fails after its exact request resolves. `steer` starts a new turn only when the Session is idle; it fails while the control channel is disconnected. Explicit `queue` remains durable while the channel is disconnected.
+
+`list_sessions` returns metadata only. Reading a transcript always requires `read_session`. All Session tools require `sessions:manage`; Environment tools require `environments:manage`.
+
+## Explicit exclusions
+
+- no cross-Environment native Session resume;
+- no Harness-managed repository checkout, branch, commit, push, issue, or pull-request stages;
+- no PAT input or GitHub token transport;
+- no ordinary-user Tailscale SSH;
+- no per-Session filesystem, Unix-user, or provider-credential isolation;
+- no application queue for allocating runner CPU or memory;
+- no legacy Code Task API, storage, workflow, Widget, or fallback.
+
+## Open decision
+
+- Decide whether orphaned Environment runs need a separate organization-owned scavenger. A possible admin PAT would be a platform authority, not the Principal's Execution Authorization. Before adoption, define its least possible permissions, orphan proof, exact-run targeting, audit trail, rotation, revocation, and protection against cancelling a live run still owned by a valid Principal. It is not part of the first OAuth-only command path and must not act as an inline retry or fallback.
+
+## Formal evidence
+
+[`AgentSessions.tla`](../../formal/AgentSessions.tla) is a focused requirements model for one representative Agent Session. It checks controller authority, exact Environment generation, FIFO queued turns, cancellation before start, terminal monotonicity, and at-most-once native effects over at-least-once command delivery. OAuth, GitHub dispatch, T3, Tailscale, text content, driver payloads, and eventual external progress are outside this obligation.
+
+The exhaustive finite configuration uses two Grants, two Turns, two Commands, and two Environment generations. These cardinalities preserve the identities needed for takeover, two-turn FIFO ordering, command redelivery, and a stale generation. It uses no state constraints, symmetry set, or semantic overrides. Deadlock checking is disabled because terminal and quiescent Sessions are valid product states; no liveness claim is made for GitHub responses or WebSocket reconnection.
+
+TLA+ Tools 1.7.4 with TLC 2.19 generated 672,071 states, found 197,116 distinct states, reached depth 18, and found no invariant violation. Two negative configurations demonstrate adequacy: [`AgentSessionsDuplicateFaulty.cfg`](../../formal/AgentSessionsDuplicateFaulty.cfg) repeats a processed command and violates `CommandEffectsAtMostOnce` at depth 4; [`AgentSessionsAuthorityFaulty.cfg`](../../formal/AgentSessionsAuthorityFaulty.cfg) accepts an old-controller write and violates `AcceptedCommandsWereAuthorized` at depth 3. The positive configuration is [`AgentSessions.cfg`](../../formal/AgentSessions.cfg).
+
+## Primary references
+
+- [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+- [GitHub workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
+- [GitHub workflow runs](https://docs.github.com/en/rest/actions/workflow-runs)
+- [GitHub OAuth App scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)
+- [GitHub App and OAuth App differences](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps)
+- [GitHub workflow execution protections](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/actions-policies/workflow-execution-protections)
+- [GitHub Actions `GITHUB_TOKEN`](https://docs.github.com/en/actions/concepts/security/github_token)
+- [Official GitHub MCP Server OAuth](https://github.com/github/github-mcp-server/blob/main/docs/oauth-login.md)
+- [Codex App Server](https://developers.openai.com/codex/app-server/)
+- [Grok Agent Mode and ACP](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md)
+- [Grok Build MCP configuration](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/05-configuration.md#mcp-servers)

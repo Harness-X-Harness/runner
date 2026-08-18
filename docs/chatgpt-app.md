@@ -10,8 +10,8 @@ interfaces and lifecycle state.
 ## Request flow
 
 1. ChatGPT authenticates to the Worker through OAuth 2.1 + PKCE. The Worker
-   uses the configured GitHub App for user identity and keeps the GitHub user
-   and refresh tokens plus granted tool scopes encrypted in the OAuth provider
+   uses the GitHub App for user identity and keeps the GitHub base user token,
+   the derived Environment-scoped user token, and granted tool scopes encrypted in the OAuth provider
    grant properties; every tool checks its required scopes again. The local
    consent page explains each requested scope, supports explicit denial, and
    binds the following GitHub S256 PKCE flow to the initiating browser. Its
@@ -298,7 +298,8 @@ configuration and does not use first-party login. `mode=analyze` leaves the chec
 ## Cloudflare setup
 
 From `apps/chatgpt-app`, create the OAuth KV namespace. Put the returned
-namespace ID in the `OAUTH_KV` binding, set `GITHUB_APP_CLIENT_ID`, and set
+namespace ID in the `OAUTH_KV` binding, keep `GITHUB_APP_CLIENT_ID` in
+`wrangler.jsonc`, and set the App credentials as Worker secrets:
 `TASK_CONTROL_PLANE_URL` to the deployed Worker origin:
 
 ```bash
@@ -346,13 +347,31 @@ Set the GitHub App's user authorization callback URL as:
 https://runners.trustedtunnel.app/github/callback
 ```
 
-Set its post-installation Setup URL as:
+GitHub App user authorization requests no traditional OAuth `repo` scope.
+After GitHub issues the base user token, the Worker calls GitHub's scoped-token
+endpoint and fixes the result to `Harness-X-Harness/runner` with only
+`Actions: write`. The scoped-token exchange and the first real
+`workflow_dispatch` decide whether that user may start an Environment. Harness
+does not request organization membership or run a duplicate repository
+permission preflight.
+
+The encrypted MCP grant stores both tokens because the legacy Code Task still
+uses the base token for target-repository authorization checks. Environment
+tools accept only the derived scoped token. The Environment browser entry stores
+only the scoped token inside a six-hour AES-GCM encrypted HttpOnly session so it
+can observe the exact GitHub run. Neither token enters the runner, workflow
+inputs, Widget, MCP structured output, logs, or artifacts. Grants from older
+authorization models are rejected, so this migration requires one clean MCP
+reconnection instead of a fallback.
+
+For the legacy Code Task product, set the same GitHub App's post-installation
+Setup URL as:
 
 ```text
 https://runners.trustedtunnel.app/github/install
 ```
 
-Enable **Redirect on update** so adding a selected repository returns to the
+Enable **Redirect on update** so adding a selected target repository returns to the
 same continuation. The Worker does not trust GitHub's `installation_id` query
 parameter. It uses the opaque task state only to locate the waiting task, then
 queries GitHub again with the App JWT and completes a user authorization-code
@@ -364,27 +383,31 @@ after approval; the prompt and task parameters do not need to be submitted
 again.
 
 Leave "Request user authorization (OAuth) during installation" disabled. The
-MCP consent flow starts GitHub authorization explicitly, so an installation
-must not redirect directly to the callback without the consent state. Keep
-user-to-server token expiration enabled; the Worker rotates the upstream
-GitHub token when the MCP client refreshes its grant.
+MCP consent flow starts GitHub App user authorization explicitly, so an installation
+must not redirect directly to the callback without the continuation state.
 
 Set the `TASK_CONTROL_PLANE_URL` repository variable in the runner repository
 to `https://runners.trustedtunnel.app`. The workflow uses that value as the
 OIDC audience and callback base URL.
 
 The Worker `TASK_CONTROL_PLANE_URL` value and the repository variable must be
-byte-for-byte identical. Do not put the GitHub App client secret, private key,
-task prompt, or OIDC token in `wrangler.jsonc`, workflow inputs, MCP structured
-content, logs, summaries, or artifacts.
+byte-for-byte identical. Do not put the GitHub App client secret, GitHub App
+private key, task prompt, or OIDC token in `wrangler.jsonc`, workflow
+inputs, MCP structured content, logs, summaries, or artifacts.
 
 Changing the control-plane origin also changes the OAuth issuer and canonical
 `/mcp` resource. Update the GitHub App callback and setup URLs before deploying
 the new origin, then reconnect MCP clients after deployment. Do not retain the
 old `workers.dev` endpoint as a fallback.
 
-The GitHub App needs `Actions: write` on the runner repository so the Worker
-can dispatch the workflow. The same App must be installed on target
+Environment dispatch, readback, and cancellation use only the current
+Principal's repository- and permission-scoped GitHub App user token. A missing,
+expired, revoked, or unauthorized token fails that exact GitHub operation;
+there is no base-user-token or installation-token fallback in the Environment
+command path.
+
+The legacy Code Task GitHub App still needs `Actions:
+write` on the runner repository. The same App must be installed on target
 repositories with the contents and pull-request permissions required by the
 selected task mode. The workflow also needs the App ID as
 `RUNNER_GITHUB_APP_ID` and the private key as
@@ -402,14 +425,13 @@ The Worker resolves the App installation from `GITHUB_RUNNER_REPOSITORY` before
 each dispatch, then requests an installation token limited to that repository
 and `Actions: write`. Do not configure or persist an installation ID manually.
 
-The same GitHub App also issues a user access token after MCP consent. That
-token is limited by both the user's access and the App's installation
-permissions and is used to verify access to the requested repository. A public
-`analyze` task does not require a target-repository installation. Other modes
-must pass both user authorization and current installation-permission checks.
-The App installation token remains the short-lived execution credential used
-to dispatch the runner workflow and modify an installed target repository.
-No separate GitHub OAuth App or broad `repo` OAuth scope is required.
+The base GitHub App user token is also used by the legacy task preflight to verify
+the submitting user's current access. A public `analyze` task does not require
+a target-repository installation. Other modes must pass both user OAuth
+authorization and current installation-permission checks. The App
+installation token remains the short-lived task execution credential. The
+target Agent Session architecture removes this complete Code Task installation
+boundary instead of forwarding a user token into a runner.
 
 The runner repository also needs the variable `TASK_CONTROL_PLANE_URL` with the
 same fixed origin. The Environment workflow receives only the opaque signed

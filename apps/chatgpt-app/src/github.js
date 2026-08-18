@@ -45,14 +45,14 @@ export async function dispatchWorkflow(env, task, fetchImpl = fetch) {
 
 export async function dispatchEnvironmentWorkflow(
   env,
+  accessToken,
   environment,
   fetchImpl = fetch,
 ) {
-  let token;
   let owner;
   let repository;
   try {
-    token = await installationToken(env, fetchImpl);
+    requireAccessToken(accessToken);
     [owner, repository] = runnerRepository(env);
   } catch (error) {
     throw new EnvironmentDispatchError(
@@ -66,7 +66,7 @@ export async function dispatchEnvironmentWorkflow(
   try {
     response = await githubFetch(
       `/repos/${owner}/${repository}/actions/workflows/${workflow}/dispatches`,
-      token,
+      accessToken,
       {
         method: "POST",
         body: JSON.stringify({
@@ -121,12 +121,17 @@ export async function cancelWorkflow(env, task, fetchImpl = fetch) {
   }
 }
 
-export async function cancelEnvironmentWorkflow(env, runId, fetchImpl = fetch) {
-  const token = await installationToken(env, fetchImpl);
+export async function cancelEnvironmentWorkflow(
+  env,
+  accessToken,
+  runId,
+  fetchImpl = fetch,
+) {
+  requireAccessToken(accessToken);
   const [owner, repository] = runnerRepository(env);
   const response = await githubFetch(
     `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(runId)}/cancel`,
-    token,
+    accessToken,
     { method: "POST" },
     fetchImpl,
   );
@@ -135,12 +140,17 @@ export async function cancelEnvironmentWorkflow(env, runId, fetchImpl = fetch) {
   }
 }
 
-export async function getEnvironmentWorkflowRun(env, runId, fetchImpl = fetch) {
-  const token = await installationToken(env, fetchImpl);
+export async function getEnvironmentWorkflowRun(
+  env,
+  accessToken,
+  runId,
+  fetchImpl = fetch,
+) {
+  requireAccessToken(accessToken);
   const [owner, repository] = runnerRepository(env);
   const response = await githubFetch(
     `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(runId)}`,
-    token,
+    accessToken,
     {},
     fetchImpl,
   );
@@ -197,7 +207,17 @@ async function installationToken(env, fetchImpl) {
 }
 
 function runnerRepository(env) {
-  return env.GITHUB_RUNNER_REPOSITORY.split("/");
+  const parts = env.GITHUB_RUNNER_REPOSITORY.split("/");
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
+    throw new Error("GitHub runner repository is invalid");
+  }
+  return parts;
+}
+
+function requireAccessToken(accessToken) {
+  if (typeof accessToken !== "string" || accessToken.length === 0) {
+    throw new Error("GitHub OAuth authorization is required");
+  }
 }
 
 async function githubFetch(path, token, options = {}, fetchImpl = fetch) {
