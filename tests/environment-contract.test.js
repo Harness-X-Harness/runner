@@ -36,7 +36,7 @@ test("ready OIDC accepts only the exact repository, workflow, ref, and run", () 
   );
   for (const altered of [
     { ...claims, repository: "attacker/fork" },
-    { ...claims, workflow_ref: claims.workflow_ref.replace("private-runner-session", "execute-task") },
+    { ...claims, workflow_ref: claims.workflow_ref.replace("private-runner-session", "untrusted-workflow") },
     { ...claims, workflow_ref: claims.workflow_ref.replace("main", "feature") },
     { ...claims, run_id: "" },
     { ...claims, run_attempt: "" },

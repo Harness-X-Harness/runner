@@ -54,7 +54,7 @@ export async function scopeGitHubUserToken(
         accept: "application/vnd.github+json",
         authorization: `Basic ${credentials}`,
         "content-type": "application/json",
-        "user-agent": "HarnessXHarnessTaskRunner",
+        "user-agent": "HarnessXHarness",
         "x-github-api-version": API_VERSION,
       },
       body: JSON.stringify({
@@ -167,13 +167,10 @@ export async function githubGrantTokenExchange(
   requireScopedAuthority(options.props);
   const currentTime = now();
   if (options.grantType === "authorization_code") {
-    const accessTokenTTL = minimumLifetime([
-      remainingLifetime(options.props.githubAccessTokenExpiresAt, currentTime),
-      remainingLifetime(
-        options.props.environmentGithubAccessTokenExpiresAt,
-        currentTime,
-      ),
-    ]);
+    const accessTokenTTL = remainingLifetime(
+      options.props.environmentGithubAccessTokenExpiresAt,
+      currentTime,
+    );
     if (accessTokenTTL !== undefined && accessTokenTTL < MINIMUM_TOKEN_TTL) {
       return rotateGitHubUserToken(env, options.props, fetchImpl, currentTime, true);
     }
@@ -250,9 +247,7 @@ export function githubUserTokenProps(
   issuedAt = currentUnixTime(),
 ) {
   return compact({
-    githubAccessToken: token.access_token,
     githubRefreshToken: token.refresh_token,
-    githubAccessTokenExpiresAt: expirationTime(issuedAt, token.expires_in),
     githubRefreshTokenExpiresAt: expirationTime(
       issuedAt,
       token.refresh_token_expires_in,

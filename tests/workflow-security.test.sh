@@ -7,7 +7,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
-TASK_WORKFLOW="$ROOT_DIR/.github/workflows/execute-task.yml"
 CODEX_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/codex-auth.yml"
 GROK_AUTH_WORKFLOW="$ROOT_DIR/.github/workflows/grok-auth.yml"
 TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
@@ -17,8 +16,6 @@ ENVIRONMENT_ACTION="$ROOT_DIR/.github/actions/environment-control/action.yml"
 ENVIRONMENT_SCRIPT="$ROOT_DIR/.github/actions/environment-control/index.js"
 SESSION_RUNTIME_ACTION="$ROOT_DIR/.github/actions/session-runtime/action.yml"
 SESSION_RUNTIME_SCRIPT="$ROOT_DIR/.github/actions/session-runtime/index.js"
-CONTROL_ACTION="$ROOT_DIR/.github/actions/task-control/action.yml"
-CONTROL_SCRIPT="$ROOT_DIR/.github/actions/task-control/index.js"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -26,12 +23,26 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
-[[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
 [[ -f "$CODEX_AUTH_WORKFLOW" ]] || fail "missing workflow: $CODEX_AUTH_WORKFLOW"
 [[ -f "$GROK_AUTH_WORKFLOW" ]] || fail "missing workflow: $GROK_AUTH_WORKFLOW"
-for action in "$TOOLS_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$SESSION_RUNTIME_ACTION" "$CONTROL_ACTION"; do
+for action in "$TOOLS_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$ENVIRONMENT_ACTION" "$SESSION_RUNTIME_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
+for removed in \
+  "$ROOT_DIR/.github/workflows/execute-task.yml" \
+  "$ROOT_DIR/.github/actions/task-control" \
+  "$ROOT_DIR/.github/actions/task-driver" \
+  "$ROOT_DIR/apps/chatgpt-app/src/task-object.js" \
+  "$ROOT_DIR/apps/chatgpt-app/src/task-store.js" \
+  "$ROOT_DIR/apps/chatgpt-app/src/task-stream.js" \
+  "$ROOT_DIR/apps/chatgpt-app/src/task-widget.js" \
+  "$ROOT_DIR/apps/chatgpt-app/src/repository-authorization.js"; do
+  [[ ! -e "$removed" ]] || fail "legacy Code Task surface still exists: $removed"
+done
+if rg -q 'submit_task|get_task_result|cancel_task|tasks:|repos:|pull_requests:' \
+  "$ROOT_DIR/apps/chatgpt-app/src"; then
+  fail 'MCP source still exposes legacy Code Task tools or scopes'
+fi
 
 # GitHub Actions is the complete environment lifecycle. The workflow claims
 # its run through OIDC before sensitive setup, then opens one outbound channel.
@@ -115,90 +126,16 @@ if rg -q 'LARK_APP_|LARK_CHAT_|lark-send' "$WORKFLOW" "$ROOT_DIR/.github/actions
   fail 'mandatory Lark delivery must not remain in the Environment path'
 fi
 
-# The control-plane workflow receives task metadata only. The private prompt is
-# fetched through a GitHub OIDC-authenticated callback after the runner starts.
-for input in task_id repo ref executor mode; do
-  grep -Fq "      $input:" "$TASK_WORKFLOW" || \
-    fail "task workflow missing input: $input"
-done
-if grep -Fq '      prompt:' "$TASK_WORKFLOW"; then
-  fail 'task workflow must not accept the private prompt as dispatch input'
-fi
-grep -Fq 'id-token: write' "$TASK_WORKFLOW" || \
-  fail 'task workflow must request OIDC identity for callbacks'
-grep -Fq 'uses: ./.github/actions/task-control' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use the OIDC task-control action'
-grep -Fq 'status: task.status' "$ROOT_DIR/apps/chatgpt-app/src/index.js" || \
-  fail 'runner prompt fetch must expose cancellation status'
-grep -Fq 'summary="$(< "$RUNNER_TEMP/executor.result")"' "$TASK_WORKFLOW" || \
-  fail 'task callback must publish the native driver result'
-grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$CONTROL_SCRIPT" || \
-  fail 'task-control action must obtain a GitHub OIDC token'
-grep -Fq '::add-mask::' "$CONTROL_SCRIPT" || \
-  fail 'task-control action must mask its callback token'
-if grep -Fq 'GITHUB_APP_PRIVATE_KEY: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW"; then
-  fail 'GitHub App private key must not be job-wide executor environment'
-fi
-grep -Fq 'app-id: ${{ secrets.RUNNER_GITHUB_APP_ID }}' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use a configurable GitHub App ID secret'
-grep -Fq 'private-key: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use a configurable GitHub App private-key secret'
-if rg -q 'secrets[.]GITHUB_' "$TASK_WORKFLOW"; then
-  fail 'custom Actions secrets cannot use the reserved GITHUB_ prefix'
-fi
-grep -Fq 'https://x.ai/cli/install.sh' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use the official Grok Build installer'
 grep -Fq 'https://x.ai/cli/install.sh' "$TOOLS_ACTION" || \
   fail 'private session must use the official Grok Build installer'
-grep -Fq 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use a SHA-pinned GitHub App token action'
-grep -Fq '      repository_access:' "$TASK_WORKFLOW" || \
-  fail 'task workflow must receive the verified repository access path'
-grep -Fq "inputs.repository_access == 'installation'" "$TASK_WORKFLOW" || \
-  fail 'target installation token must be conditional'
-grep -Fq 'name: Check out public target repository' "$TASK_WORKFLOW" || \
-  fail 'public analyze must have one installation-free checkout path'
-grep -Fq "inputs.repository_access == 'public_read' && inputs.mode != 'analyze'" "$TASK_WORKFLOW" || \
-  fail 'public read must never authorize a write mode'
-if grep -Fq 'continue-on-error:' "$TASK_WORKFLOW"; then
-  fail 'repository access must not fall back after a failed step'
-fi
 
 # Codex and Grok share one scoped Mini key. Provider endpoints remain GitHub
 # Secrets, and each CLI resolves that key through its native user config.
-for file in "$WORKFLOW" "$TASK_WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
+for file in "$WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
   if rg -q 'CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT|XAI_API_KEY' "$file"; then
     fail "workflow still uses a superseded executor credential: $file"
   fi
 done
-grep -Fq 'secrets.MINI_END_USER_KEY' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use the shared Mini end-user key'
-grep -Fq 'secrets.MINI_CODEX_BASE_URL' "$TASK_WORKFLOW" || \
-  fail 'Codex endpoint must come from its GitHub Secret'
-grep -Fq 'secrets.MINI_GROK_BASE_URL' "$TASK_WORKFLOW" || \
-  fail 'Grok endpoint must come from its GitHub Secret'
-grep -Fq 'env_key = "MINI_END_USER_KEY"' "$TASK_WORKFLOW" || \
-  fail 'Grok native config must resolve the shared key from the environment'
-grep -Fq '[model.mini-grok-4-6]' "$TASK_WORKFLOW" || \
-  fail 'Grok native config must select the Mini Grok model'
-grep -Fq 'https://chatgpt.com/codex/install.sh' "$TASK_WORKFLOW" || \
-  fail 'task workflow must use the official Codex CLI installer'
-grep -Fq 'sudo sysctl -w kernel.unprivileged_userns_clone=1' "$TASK_WORKFLOW" || \
-  fail 'Codex runner must enable unprivileged user namespaces for bubblewrap'
-grep -Fq 'sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0' "$TASK_WORKFLOW" || \
-  fail 'Codex runner must clear the Ubuntu AppArmor user namespace gate'
-grep -Fq 'uses: ./.github/actions/task-driver' "$TASK_WORKFLOW" || \
-  fail 'Codex and Grok must use the private streaming task driver'
-grep -Fq '"--json"' "$ROOT_DIR/.github/actions/task-driver/index.js" || \
-  fail 'Codex driver must consume native JSONL events'
-grep -Fq '"--output-format", "streaming-json"' "$ROOT_DIR/.github/actions/task-driver/index.js" || \
-  fail 'Grok driver must consume native streaming JSON events'
-if grep -Fq 'console.log' "$ROOT_DIR/.github/actions/task-driver/index.js"; then
-  fail 'task driver must not print private event payloads'
-fi
-if grep -Fq 'openai/codex-action' "$TASK_WORKFLOW"; then
-  fail 'task workflow must use the native Codex CLI, not the Codex Action'
-fi
 
 for auth_workflow in "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; do
   grep -Fq 'workflow_dispatch:' "$auth_workflow" || \
@@ -235,7 +172,7 @@ grep -Fq 'grok --no-auto-update --always-approve -m mini-grok-4-6' "$GROK_AUTH_W
   fail 'Grok auth workflow must verify the real CLI execution path'
 
 if rg -q 'experimental_bearer_token|auth[.]json|api_key\s*=' \
-  "$WORKFLOW" "$TASK_WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; then
+  "$WORKFLOW" "$CODEX_AUTH_WORKFLOW" "$GROK_AUTH_WORKFLOW"; then
   fail 'workflow must not persist executor credentials or use login-session files'
 fi
 
@@ -265,7 +202,7 @@ fi
 
 grep -Fq 'https://chatgpt.com/codex/install.sh' "$TOOLS_ACTION" || \
   fail 'missing official Codex installer'
-if rg -qi 'claude|anthropic' "$WORKFLOW" "$TASK_WORKFLOW" "$TOOLS_ACTION"; then
+if rg -qi 'claude|anthropic' "$WORKFLOW" "$TOOLS_ACTION"; then
   fail 'workflows and actions must expose only Codex and Grok executors'
 fi
 grep -Fq 'npx --yes t3@latest serve' "$T3_ACTION" || \

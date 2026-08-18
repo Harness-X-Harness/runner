@@ -1,6 +1,6 @@
 # Multi-user Agent Sessions
 
-Status: implementation in progress. Session state, the generation-bound runtime channel, native drivers, the MCP Session tools, and the Session Widget are implemented. The synchronized legacy Task cutover and production acceptance remain pending. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
+Status: implemented; production acceptance remains pending. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
 
 ## Goal
 
@@ -11,14 +11,14 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 ## Confirmed domain decisions
 
 1. A stable GitHub numeric user ID defines one Harness Principal. Different MCP Clients authorized by the same GitHub account share that Principal.
-2. Each MCP Client has its own revocable MCP Grant and scope set. Client identity never owns a Task, Session, or Environment.
+2. Each MCP Client has its own revocable MCP Grant and scope set. Client identity never owns a Session or Environment.
 3. `Harness-X-Harness/runner` is the Execution Repository. Access to another repository does not grant permission to consume its Actions runners.
 4. GitHub must see the Harness Principal as the actor that controls an Execution Repository workflow. The control plane uses a GitHub App user token scoped to the runner repository and `Actions: write` to dispatch, observe, and cancel the exact run.
 5. The former one-shot Code Task becomes a user-delegated, multi-turn Agent Session. GitHub work is performed through native Agent tools instead of fixed Harness commit and pull-request stages.
 6. Agent Sessions run inside the Principal's existing Remote Development Environment. MCP, T3, and Tailscale are interfaces to the same temporary machine.
 7. One Environment may run several Codex or Grok Agent Sessions concurrently.
 8. Harness does not isolate Session filesystems. Each Session has native conversation state, but users and Agents choose working directories and accept the same filesystem conflicts as on a personal development machine.
-9. A user authorizes the Harness GitHub App during MCP authorization. Harness derives an Environment token limited to the fixed Execution Repository and `Actions: write`; both tokens remain in the control plane.
+9. A user authorizes the Harness GitHub App during MCP authorization. Harness derives an Environment token limited to the fixed Execution Repository and `Actions: write`; the base access token is not retained.
 10. The user authorizes `gh`, Git, or GitHub MCP independently inside each admitted Environment. Harness transports interactive login prompts and responses but does not issue, store, refresh, or inject the resulting Agent GitHub credential.
 11. GitHub App authorization requests no traditional OAuth repository scope. GitHub's scoped user-token exchange enforces `Harness-X-Harness/runner` plus `Actions: write`; Target Repository access remains outside this Environment authorization boundary.
 12. `start_session` expresses one user intent. If the Environment is offline, the control plane starts it and creates the Session after admission without requiring a separate user step.
@@ -40,7 +40,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 28. `send_turn` supports `delivery: steer | queue`. `steer` adds input to the current native turn; `queue` persists a later turn in the EnvironmentObject and starts it after the current turn completes. Harness is queue authority for both executors; it does not delegate product ordering to Grok's optional native queue extension.
 29. `send_turn` defaults to `steer`: it starts a new turn when the Session is idle and steers the exact active turn when it is running. Queueing occurs only when the caller explicitly selects `delivery: queue`.
 30. MCP OAuth exposes only `sessions:manage` and `environments:manage`. Harness does not duplicate GitHub repository capabilities as `repos:*`, `issues:*`, or pull-request scopes; GitHub user authorization remains authority for those actions.
-31. Agent Session deployment removes the complete legacy Code Task product surface: Task MCP tools, `execute-task` workflow, TaskObject, Task Widget, fixed checkout/commit/push/pull-request stages, and Task documentation. There is no fallback or read-only historical Task endpoint. Deployment is blocked only while a legacy Task is still running.
+31. Agent Sessions are the only code-agent product. There is no fixed one-shot workflow, compatibility fallback, or historical result endpoint.
 32. The existing owner-scoped EnvironmentObject is the single authority for the Principal's Environment, Agent Sessions, queued turns, ordered events, controllers, and one multiplexed runner WebSocket. The design does not add one Durable Object per Session.
 33. A temporary Environment Control Channel disconnect does not terminate Sessions while the authoritative GitHub run remains non-terminal. The EnvironmentObject exposes separate `channelState`, accepts explicit queued turns, and rejects an immediate steer while disconnected. Only the same generation may reconnect.
 34. Every Environment Control Channel command has a stable command ID. The runner records processed command IDs and returns acknowledgements so reconnect can redeliver without repeating a native effect.
@@ -138,13 +138,17 @@ The Environment receives neither the MCP bearer nor the Harness GitHub OAuth tok
 
 The platform does inject shared Codex and Grok provider credentials after Environment admission. These are organization service credentials, not user identities. Repository code and any process in the user's Environment may read or use them. Platform operators own their rotation, provider cost, and revocation.
 
-## Current-system differences
+## Current implementation
 
-The current implementation still has a separate one-shot `execute-task.yml` workflow and four task lifecycle tools. It performs checkout, commit, push, and pull-request creation as fixed workflow stages with a repository-scoped App installation token. It stores Task state independently from the Remote Development Environment.
+The implementation has one Environment workflow, one owner-scoped Durable
+Object authority, one multiplexed runtime channel, and native Codex and Grok
+drivers. Agent Sessions are the only code-agent interface. Harness has no fixed
+checkout, commit, push, or pull-request pipeline and no target-repository
+installation path.
 
-The target design removes that duplicated execution plane, including its read-only historical endpoint. It must not retain a fallback path that silently chooses between fixed Code Tasks and Agent Sessions.
-
-The current system uses one GitHub App in two explicit roles. Environment lifecycle uses a repository- and permission-scoped user token. Legacy Code Task uses the base user token for authorization checks and installation tokens for execution. Agent Session migration removes the Code Task App JWT, installation discovery, installation-token issuance, and repository-installation continuation while retaining the scoped user-token Environment authority. There is no platform-owned GitHub fallback.
+One GitHub App provides user identity and a scoped user token for Environment
+workflow control. The base access token is not retained. There is no App JWT,
+installation token, PAT, or platform-owned GitHub fallback.
 
 Traditional OAuth `repo` scope is broader than the target operations. The implementation must enforce the fixed Execution Repository at its GitHub adapter boundary and must not reuse this token for Target Repository access, Agent GitHub Authorization, or general GitHub tools.
 

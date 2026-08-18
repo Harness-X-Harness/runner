@@ -8,7 +8,6 @@ import {
 } from "../apps/chatgpt-app/src/authorization.js";
 import {
   describeScopes,
-  requiredSubmitScopes,
 } from "../apps/chatgpt-app/src/oauth-scopes.js";
 import { fakeAuthorizationStates } from "./helpers/authorization-state.js";
 
@@ -16,7 +15,7 @@ const authRequest = Object.freeze({
   responseType: "code",
   clientId: "client-123",
   redirectUri: "https://client.example/callback",
-  scope: ["tasks:run", "repos:read"],
+  scope: ["sessions:manage", "environments:manage"],
   state: "client-state",
   issuer: "https://runner.example.com",
   codeChallenge: "client-challenge",
@@ -49,16 +48,19 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
-  assert.match(body, /Run code tasks/);
-  assert.match(body, /Read repositories/);
-  assert.match(body, /tasks:run/);
+  assert.match(body, /Manage coding sessions/);
+  assert.match(body, /Manage private development environments/);
+  assert.match(body, /sessions:manage/);
   assert.match(body, /name="decision" value="allow"/);
   assert.match(body, /name="decision" value="deny"/);
   assert.match(body, /&lt;script&gt;ChatGPT&lt;\/script&gt;/);
   assert.doesNotMatch(body, /<script>ChatGPT<\/script>/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
-  assert.deepEqual(stored.authRequest.scope, authRequest.scope);
+  assert.deepEqual(stored.authRequest.scope, [
+    "environments:manage",
+    "sessions:manage",
+  ]);
 });
 
 test("initial consent displays and preserves every requested capability", async () => {
@@ -70,14 +72,7 @@ test("initial consent displays and preserves every requested capability", async 
       OAUTH_PROVIDER: {
         parseAuthRequest: async () => ({
           ...authRequest,
-          scope: [
-            "tasks:cancel",
-            "tasks:run",
-            "repos:write",
-            "pull_requests:write",
-            "repos:read",
-            "tasks:read",
-          ],
+          scope: ["sessions:manage", "environments:manage"],
         }),
         lookupClient: async () => ({ clientName: "ChatGPT" }),
       },
@@ -85,14 +80,10 @@ test("initial consent displays and preserves every requested capability", async 
   );
 
   const body = await response.text();
-  assert.match(body, /Read task status and results/);
-  assert.match(body, /Cancel tasks/);
-  assert.match(body, /Run code tasks/);
-  assert.match(body, /Change repositories/);
-  assert.match(body, /Create pull requests/);
-  assert.match(body, /Read repositories/);
-  assert.match(body, /Task permissions/);
-  assert.match(body, /Repository permissions/);
+  assert.match(body, /Manage coding sessions/);
+  assert.match(body, /Manage private development environments/);
+  assert.match(body, /Session permissions/);
+  assert.match(body, /Environment permissions/);
   assert.match(
     body,
     /These permissions control what ChatGPT can ask Harness to do/,
@@ -101,12 +92,8 @@ test("initial consent displays and preserves every requested capability", async 
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.deepEqual(stored.authRequest.scope, [
-    "tasks:read",
-    "tasks:run",
-    "tasks:cancel",
-    "repos:read",
-    "repos:write",
-    "pull_requests:write",
+    "environments:manage",
+    "sessions:manage",
   ]);
 });
 
@@ -321,19 +308,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   assert.match(completed.headers.get("set-cookie"), /Max-Age=0/);
 });
 
-test("submit modes map to the minimum complete OAuth scope set", () => {
-  assert.deepEqual(requiredSubmitScopes("analyze"), ["tasks:run", "repos:read"]);
-  assert.deepEqual(requiredSubmitScopes("edit"), [
-    "tasks:run",
-    "repos:read",
-    "repos:write",
-  ]);
-  assert.deepEqual(requiredSubmitScopes("pull_request"), [
-    "tasks:run",
-    "repos:read",
-    "repos:write",
-    "pull_requests:write",
-  ]);
+test("authorization rejects scopes outside the Session and Environment product", () => {
   assert.throws(() => describeScopes(["unknown:scope"]), /Unknown OAuth scope/);
 });
 

@@ -10,7 +10,6 @@ import {
 } from "./authorization-state.js";
 import { completeGitHubUserAuthorization } from "./github-user-auth.js";
 import { consentScopes, describeScopes } from "./oauth-scopes.js";
-import { completeInstallationAuthorization } from "./repository-authorization.js";
 import { completeEnvironmentAuthorization } from "./environment-page.js";
 
 const CONSENT_TTL = 600;
@@ -57,8 +56,8 @@ export async function authorizePage(request, env) {
     ? "<p>No permissions were requested.</p>"
     : renderScopeGroups(scopeDetails);
   return html(
-    "Authorize Harness X Harness Task Runner",
-    `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests permission to use Harness X Harness Task Runner.</p>
+    "Authorize Harness X Harness",
+    `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests permission to use Harness X Harness.</p>
      <p class="note">These permissions control what ChatGPT can ask Harness to do. GitHub separately verifies the user and the Execution Repository operation.</p>
      <h2>Requested permissions</h2>
      ${scopeList}
@@ -159,13 +158,6 @@ export async function completeAuthorizationCallback(
       fetchImpl,
       logger,
     );
-  } else if (authorization.payload?.kind === "installation") {
-    const installationResponse = await completeInstallationAuthorization(
-      env,
-      authorization,
-      fetchImpl,
-    );
-    response = await completionPage(installationResponse);
   } else if (authorization.payload?.kind === "environment") {
     response = await completeEnvironmentAuthorization(
       env,
@@ -177,15 +169,6 @@ export async function completeAuthorizationCallback(
     response = html("Authorization error", "<p>Unknown GitHub authorization request.</p>", 400);
   }
   return clearGitHubAuthorizationCookie(response);
-}
-
-async function completionPage(response) {
-  const message = await response.text();
-  return html(
-    response.ok ? "Repository authorization complete" : "Authorization error",
-    `<p>${escapeHtml(message)}</p><p>You can return to ChatGPT.</p>`,
-    response.status,
-  );
 }
 
 function authorizationErrorResponse(error) {

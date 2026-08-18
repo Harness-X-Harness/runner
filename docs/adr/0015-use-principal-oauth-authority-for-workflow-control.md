@@ -1,8 +1,6 @@
 # Use Principal OAuth authority for workflow control
 
-Status: accepted for Remote Development Environments and the target Agent
-Session product. The legacy Code Task product remains a temporary migration
-exception until Agent Sessions replace it.
+Status: accepted for Remote Development Environments and Agent Sessions.
 
 Harness uses a GitHub App to identify each Harness Principal. After GitHub
 issues a user access token, Harness derives a second token limited to
@@ -15,9 +13,8 @@ OAuth completion identifies the Principal but does not separately prove organiza
 
 GitHub App user authorization does not request the traditional OAuth `repo`
 scope. Harness uses GitHub's scoped user-token exchange to enforce the exact
-repository and permission capability boundary. The base user token remains in
-the encrypted MCP grant for the legacy Code Task authorization checks; it is
-never accepted by the Environment adapter.
+repository and permission capability boundary. The base user access token is
+not retained.
 
 The Environment command path does not create or use a GitHub App installation
 token, App JWT, installation ID, repository-installation continuation, base
@@ -31,8 +28,3 @@ The dispatch credential remains encrypted in the control plane and never enters 
 This chooses one user-owned workflow authority and the shortest correct happy path. It accepts loss of automatic cleanup after user authorization is revoked instead of maintaining a second platform authority.
 
 A possible organization-owned scavenger is a separate future decision. It must not become an implicit fallback in the user command path or a reason to delay the OAuth-only workflow lifecycle.
-
-During migration, the separate Code Task product still uses its GitHub App to
-authorize Target Repository checkout and fixed commit or pull-request stages.
-That path does not authorize Environment lifecycle operations. Removing it is
-part of the accepted Agent Session replacement, not this Environment migration.

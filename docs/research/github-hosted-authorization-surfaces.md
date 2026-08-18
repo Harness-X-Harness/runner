@@ -1,5 +1,7 @@
 # GitHub 托管授权页面与 Harness consent UI
 
+> 历史研究：`tasks:*`、`repos:*` 和 `pull_requests:*` 示例属于已经删除的 Code Task consent。GitHub 提供托管授权页但不提供可嵌入 consent 组件的结论仍有效。
+
 研究日期：2026-08-16
 
 状态：研究结论。本文不改变当前实现。

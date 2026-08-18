@@ -83,10 +83,10 @@ test("MCP control plane declares the stateless SDK v2 boundary", async () => {
   assert.doesNotMatch(source, /sessionIdGenerator|enableJsonResponse|_requestHandlers/);
 });
 
-test("MCP v2 serves modern and legacy tools/list metadata", async () => {
+test("MCP v2 serves the same Session and Environment tools to modern and legacy clients", async () => {
   const props = {
     githubUserId: "test-user",
-    oauthScopes: ["tasks:read", "tasks:run", "tasks:cancel", "repos:read", "repos:write", "pull_requests:write", "environments:manage"],
+    oauthScopes: ["sessions:manage", "environments:manage"],
   };
   const modernBody = {
     jsonrpc: "2.0",
@@ -116,20 +116,22 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   );
   assert.equal(modernResponse.status, 200);
   const modernTools = (await modernResponse.json()).result.tools;
-  assert.equal(modernTools.length, 15);
+  assert.equal(modernTools.length, 11);
   assert.deepEqual(
-    modernTools.find(({ name }) => name === "submit_task").inputSchema.properties.executor.enum,
-    ["codex", "grok"],
-  );
-  assert.deepEqual(modernTools.find(({ name }) => name === "submit_task").securitySchemes, [
-    {
-      type: "oauth2",
-      scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"],
-    },
-  ]);
-  assert.deepEqual(
-    modernTools.find(({ name }) => name === "submit_task")._meta?.ui,
-    { resourceUri: "ui://task/v1.html" },
+    modernTools.map(({ name }) => name).sort(),
+    [
+      "cancel_queued_turn",
+      "close_environment",
+      "interrupt_turn",
+      "list_sessions",
+      "open_environment",
+      "read_session",
+      "respond_to_session",
+      "send_turn",
+      "start_session",
+      "stop_session",
+      "take_over_session",
+    ],
   );
   assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").securitySchemes, [
     { type: "oauth2", scopes: ["environments:manage"] },
@@ -173,15 +175,15 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   const eventData = (await legacyResponse.text()).match(/^data: (.+)$/m)?.[1];
   assert.ok(eventData);
   const legacyTools = JSON.parse(eventData).result.tools;
-  assert.equal(legacyTools.length, 15);
-  assert.deepEqual(legacyTools.find(({ name }) => name === "get_task").annotations, {
+  assert.equal(legacyTools.length, 11);
+  assert.deepEqual(legacyTools.find(({ name }) => name === "read_session").annotations, {
     readOnlyHint: true,
     destructiveHint: false,
     openWorldHint: false,
   });
 });
 
-test("MCP v2 serves credential-free Environment, Task, and Session widget resources", async () => {
+test("MCP v2 serves credential-free Environment and Session widget resources", async () => {
   const props = {
     githubUserId: "test-user",
     oauthScopes: ["environments:manage"],
@@ -226,7 +228,6 @@ test("MCP v2 serves credential-free Environment, Task, and Session widget resour
     listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
     [
       { uri: "ui://environment/v4.html", mimeType: "text/html;profile=mcp-app" },
-      { uri: "ui://task/v1.html", mimeType: "text/html;profile=mcp-app" },
       { uri: "ui://session/v1.html", mimeType: "text/html;profile=mcp-app" },
     ],
   );
@@ -256,18 +257,7 @@ test("MCP v2 serves credential-free Environment, Task, and Session widget resour
   assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
   assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
 
-  const taskRead = await request(3, "resources/read", { uri: "ui://task/v1.html" });
-  const taskResource = taskRead.result.contents[0];
-  assert.deepEqual(taskResource._meta.ui.csp, {
-    connectDomains: ["https://runner.example"],
-    resourceDomains: [],
-  });
-  assert.match(taskResource.text, /Harness X Harness · Code Task/i);
-  assert.match(taskResource.text, /task-stream/);
-  assert.match(taskResource.text, /authorization: "Bearer " \+ token/);
-  assert.doesNotMatch(taskResource.text, /private-stream-token|MINI_END_USER_KEY/);
-
-  const sessionRead = await request(4, "resources/read", { uri: "ui://session/v1.html" });
+  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v1.html" });
   const sessionResource = sessionRead.result.contents[0];
   assert.deepEqual(sessionResource._meta.ui.csp, {
     connectDomains: ["https://runner.example"],
