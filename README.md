@@ -120,6 +120,8 @@ operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 For ChatGPT-driven environments and code tasks, see the
 [ChatGPT app](docs/chatgpt-app.md). The same stable Worker exposes two separate
 interfaces: Remote Development Environments and Batch Code Tasks.
+Batch Codex and Grok tasks show private live semantic output in their ChatGPT
+card while preserving the workflow's final result as completion authority.
 Public-repository analysis runs without installing the GitHub App. Private
 repositories and write modes request repository installation only when their
 required access is missing; the original task remains waiting and resumes only

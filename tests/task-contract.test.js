@@ -35,6 +35,7 @@ test("public task data never includes prompt or callback credentials", () => {
     id: "task_123",
     prompt: "private instructions",
     callbackToken: "one-time-token",
+    streamToken: "private-stream-token",
     error: "private callback failure",
     status: "queued",
     ownerId: "github:42",
@@ -47,6 +48,18 @@ test("public task data never includes prompt or callback credentials", () => {
   });
   assert.equal(safe.ownerId, undefined);
   assert.equal(safe.error, undefined);
+  assert.equal(safe.streamToken, undefined);
+});
+
+test("public task derives the exact GitHub run link without exposing runner identity", () => {
+  const safe = publicTask({
+    id: "task_123",
+    status: "running",
+    runId: "42",
+    runnerRepository: "owner/runner",
+  });
+  assert.equal(safe.runUrl, "https://github.com/owner/runner/actions/runs/42");
+  assert.equal(safe.runnerRepository, undefined);
 });
 
 test("callback events update status and result without changing task identity", () => {

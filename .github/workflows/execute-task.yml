@@ -143,11 +143,16 @@ jobs:
 
       - name: Run Codex
         if: ${{ inputs.executor == 'codex' }}
-        shell: bash
+        uses: ./.github/actions/task-driver
+        with:
+          executor: codex
+          prompt-file: ${{ runner.temp }}/task.prompt
+          result-file: ${{ runner.temp }}/executor.result
+          working-directory: ${{ env.WORKSPACE }}
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-        working-directory: target-workspace
-        run: codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result" - < "$RUNNER_TEMP/task.prompt" > /dev/null 2>&1
 
       - name: Install Claude Code
         if: ${{ inputs.executor == 'claude' }}
@@ -180,11 +185,16 @@ jobs:
 
       - name: Run Grok Build
         if: ${{ inputs.executor == 'grok' }}
-        shell: bash
+        uses: ./.github/actions/task-driver
+        with:
+          executor: grok
+          prompt-file: ${{ runner.temp }}/task.prompt
+          result-file: ${{ runner.temp }}/executor.result
+          working-directory: ${{ env.WORKSPACE }}
+          control-plane-url: ${{ env.TASK_CONTROL_PLANE_URL }}
+          task-id: ${{ env.TASK_ID }}
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-        working-directory: target-workspace
-        run: grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format json --prompt-file "$RUNNER_TEMP/task.prompt" | jq -r .text > "$RUNNER_TEMP/executor.result"
 
       - name: Report testing
         uses: ./.github/actions/task-control

@@ -10,10 +10,16 @@ import {
   environmentWidgetHtml,
 } from "./environment-widget.js";
 import {
+  TASK_WIDGET_MIME_TYPE,
+  TASK_WIDGET_URI,
+  taskWidgetHtml,
+} from "./task-widget.js";
+import {
   createInstallationRequest,
   resolveRepositoryAccess,
 } from "./repository-authorization.js";
 import { EXECUTORS, MODES, TASK_STATUSES, publicTask, validateSubmitInput } from "./task.js";
+import { createTaskStreamToken } from "./task-stream.js";
 import {
   commitTaskDispatch,
   readTask as readTaskFromStore,
@@ -43,6 +49,7 @@ const taskOutputSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string().optional(),
   runId: z.string().optional(),
+  runUrl: z.string().optional(),
   authorizationUrl: z.string().optional(),
   requiredPermissions: z.array(z.string()).optional(),
   result: z.record(z.string(), z.unknown()).optional(),
@@ -86,6 +93,36 @@ export function createServer(env, props) {
       ],
     }),
   );
+  server.registerResource(
+    "task-widget",
+    TASK_WIDGET_URI,
+    {
+      description: "Show one Code Task and its private live output.",
+      mimeType: TASK_WIDGET_MIME_TYPE,
+    },
+    async () => ({
+      contents: [
+        {
+          uri: TASK_WIDGET_URI,
+          mimeType: TASK_WIDGET_MIME_TYPE,
+          text: taskWidgetHtml(controlPlaneOrigin),
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              domain: controlPlaneOrigin,
+              csp: { connectDomains: [controlPlaneOrigin], resourceDomains: [] },
+            },
+            "openai/widgetDescription":
+              "Shows the private live activity and authoritative final result for one Code Task.",
+            "openai/widgetCSP": {
+              redirect_domains: [controlPlaneOrigin, "https://github.com"],
+              connect_domains: [controlPlaneOrigin],
+            },
+          },
+        },
+      ],
+    }),
+  );
 
   registerAppTool(
     server,
@@ -105,12 +142,20 @@ export function createServer(env, props) {
         status: statusSchema,
         repo: z.string(),
         executor: z.enum(EXECUTORS),
+        ref: z.string(),
+        mode: z.enum(MODES),
         createdAt: z.string(),
         authorizationUrl: z.string().optional(),
         requiredPermissions: z.array(z.string()).optional(),
       }),
       securitySchemes: SECURITY_SCHEMES.submit_task,
       annotations: annotations("submit_task"),
+      _meta: {
+        ui: { resourceUri: TASK_WIDGET_URI },
+        "openai/outputTemplate": TASK_WIDGET_URI,
+        "openai/toolInvocation/invoking": "Starting code task…",
+        "openai/toolInvocation/invoked": "Code task started.",
+      },
     },
     async (input) => {
       const requestProps = currentProps(props);
@@ -121,6 +166,7 @@ export function createServer(env, props) {
         ...taskInput,
         ownerId: String(requestProps?.githubUserId ?? requestProps?.userId ?? "unknown"),
         runnerRepository: env.GITHUB_RUNNER_REPOSITORY,
+        streamToken: createTaskStreamToken(),
         createdAt: new Date().toISOString(),
       };
       const access = await resolveRepositoryAccess(env, requestProps, baseTask);
@@ -138,10 +184,12 @@ export function createServer(env, props) {
           status: task.status,
           repo: task.repo,
           executor: task.executor,
+          ref: task.ref,
+          mode: task.mode,
           createdAt: task.createdAt,
           authorizationUrl: task.authorizationUrl,
           requiredPermissions: task.requiredPermissions,
-        }, `Task ${task.id} needs repository authorization.`);
+        }, `Task ${task.id} needs repository authorization.`, taskStreamMeta(task, controlPlaneOrigin));
       }
 
       const task = {
@@ -158,8 +206,10 @@ export function createServer(env, props) {
           status: queued.status,
           repo: queued.repo,
           executor: queued.executor,
+          ref: queued.ref,
+          mode: queued.mode,
           createdAt: queued.createdAt,
-        }, `Queued ${queued.executor} task ${queued.id}.`);
+        }, `Queued ${queued.executor} task ${queued.id}.`, taskStreamMeta(queued, controlPlaneOrigin));
       } catch (error) {
         await updateTask(env, task.id, {
           status: "failed",
@@ -386,11 +436,22 @@ async function readOwnedTask(env, taskId, props) {
 /**
  * @param {Record<string, unknown>} structuredContent
  * @param {string} text
+ * @param {Record<string, unknown>=} meta
  */
-function result(structuredContent, text) {
+function result(structuredContent, text, meta = undefined) {
   return {
     structuredContent,
     content: [{ type: /** @type {const} */ ("text"), text }],
+    ...(meta ? { _meta: meta } : {}),
+  };
+}
+
+function taskStreamMeta(task, controlPlaneOrigin) {
+  return {
+    taskStream: {
+      url: `${controlPlaneOrigin}/task-stream/${encodeURIComponent(task.id)}`,
+      token: task.streamToken,
+    },
   };
 }
 

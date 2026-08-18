@@ -173,10 +173,15 @@ grep -Fq '[model.mini-grok-4-6]' "$TASK_WORKFLOW" || \
   fail 'Grok native config must select the Mini Grok model'
 grep -Fq 'https://chatgpt.com/codex/install.sh' "$TASK_WORKFLOW" || \
   fail 'task workflow must use the official Codex CLI installer'
-grep -Fq 'codex exec --ephemeral --sandbox workspace-write --output-last-message "$RUNNER_TEMP/executor.result" - < "$RUNNER_TEMP/task.prompt" > /dev/null 2>&1' "$TASK_WORKFLOW" || \
-  fail 'Codex driver must keep its native transcript out of the log'
-grep -Fq 'grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format json --prompt-file "$RUNNER_TEMP/task.prompt" | jq -r .text > "$RUNNER_TEMP/executor.result"' "$TASK_WORKFLOW" || \
-  fail 'Grok driver must extract the native final response'
+grep -Fq 'uses: ./.github/actions/task-driver' "$TASK_WORKFLOW" || \
+  fail 'Codex and Grok must use the private streaming task driver'
+grep -Fq '"--json"' "$ROOT_DIR/.github/actions/task-driver/index.js" || \
+  fail 'Codex driver must consume native JSONL events'
+grep -Fq '"--output-format", "streaming-json"' "$ROOT_DIR/.github/actions/task-driver/index.js" || \
+  fail 'Grok driver must consume native streaming JSON events'
+if grep -Fq 'console.log' "$ROOT_DIR/.github/actions/task-driver/index.js"; then
+  fail 'task driver must not print private event payloads'
+fi
 if grep -Fq 'openai/codex-action' "$TASK_WORKFLOW"; then
   fail 'task workflow must use the native Codex CLI, not the Codex Action'
 fi
