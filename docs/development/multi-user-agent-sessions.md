@@ -1,6 +1,6 @@
 # Multi-user Agent Sessions
 
-Status: proposed implementation contract. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
+Status: implementation in progress. The Session state authority and generation-bound runtime channel are implemented; native drivers, MCP Session tools, the Session Widget, and legacy Task cutover remain pending. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
 
 ## Goal
 
@@ -121,6 +121,8 @@ After OIDC admission, the runner opens one outbound WebSocket to its owner's Env
 The long-lived `session-runtime` Node Action reads the private T3 descriptor, opens this WebSocket with a fresh GitHub Actions OIDC assertion, and makes `ready` plus `channelState: connected` one EnvironmentObject commit. It replaces both the former ready callback and `sleep infinity`. The earlier claim Action remains separate because it is the admission boundary before shared executor credentials, private networking, or T3 startup.
 
 The EnvironmentObject accepts the connection with Cloudflare's hibernatable WebSocket API. It remains the server and single serialization point while the runner is the reconnecting client. The channel carries only Harness Session commands and events; MCP bearer tokens, the Harness GitHub OAuth token, T3 pairing data, and raw Agent reasoning do not enter it.
+
+The runtime sends the validated T3 descriptor through one OIDC-authenticated HTTPS preparation request. The later WebSocket handshake carries a fresh OIDC assertion in `Sec-WebSocket-Protocol`, not in the URL. `EnvironmentObject` consumes the private preparation only when that handshake proves the same owner, generation, repository, workflow, run ID, and run attempt. It publishes Ready and `channelState: connected` together only after accepting the hibernatable socket. Only the fixed non-secret application protocol is selected in the handshake response.
 
 T3 and Tailscale remain independent user and administrator interfaces. Neither is required for MCP Session control.
 
@@ -326,6 +328,8 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `accepted`, `processed`, and `effectCount` | Stable command IDs index a durable command journal; same-ID same-payload delivery is idempotent, conflicting payloads fail, and processed commands leave the pending command view exactly once. |
 | `eventCount` and `lastEventGeneration` | Per-Session event keys use a strictly increasing durable cursor and every append passes the Session generation gate. |
 | `EnvironmentTerminates` and `TerminalIsSticky` | Exact Environment terminal and confirmed startup-failure paths make matching Sessions terminal; all later mutations fail until seven-day cleanup deletes the immutable record. |
+| `channelState` and `channelGeneration` | [`environment-channel.js`](../../apps/chatgpt-app/src/environment-channel.js) admits only the current generation, run ID, and run attempt; the WebSocket attachment survives Durable Object hibernation and stale socket close events cannot disconnect a replacement. |
+| `deliveryCount`, `processed`, and `effectCount` | The server redelivers unacknowledged stable command IDs. The generation-local [`session-runtime`](../../.github/actions/session-runtime/index.js) records a receipt before one native effect and acknowledges duplicate delivery without invoking that effect again. If the runtime process ends, the Environment run ends; receipts are never resumed in another generation. |
 
 The implementation adds `preparing` before the model's admitted `idle` initial state. This phase contains no native command effect. The `admit` transition is the refinement mapping from a generation-bound stored Session into the model state. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
 
@@ -338,6 +342,8 @@ The implementation adds `preparing` before the model's admitted `idle` initial s
 - [GitHub App and OAuth App differences](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps)
 - [GitHub workflow execution protections](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/actions-policies/workflow-execution-protections)
 - [GitHub Actions `GITHUB_TOKEN`](https://docs.github.com/en/actions/concepts/security/github_token)
+- [GitHub Actions OIDC claims](https://docs.github.com/en/actions/reference/security/oidc)
+- [Cloudflare Durable Object WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 - [Official GitHub MCP Server OAuth](https://github.com/github/github-mcp-server/blob/main/docs/oauth-login.md)
 - [Codex App Server](https://developers.openai.com/codex/app-server/)
 - [Grok Agent Mode and ACP](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md)

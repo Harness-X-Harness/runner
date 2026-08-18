@@ -32,7 +32,6 @@ jobs:
 
       - uses: ./.github/actions/environment-control
         with:
-          phase: claim
           control-plane-url: ${{ vars.TASK_CONTROL_PLANE_URL }}
           environment-id: ${{ inputs.environment_id }}
 
@@ -66,12 +65,7 @@ jobs:
 
       - uses: ./.github/actions/t3-session
 
-      - uses: ./.github/actions/environment-control
+      - uses: ./.github/actions/session-runtime
         with:
-          phase: ready
           control-plane-url: ${{ vars.TASK_CONTROL_PLANE_URL }}
           environment-id: ${{ inputs.environment_id }}
-
-      - name: Keep environment running
-        shell: bash
-        run: sleep infinity

@@ -27,9 +27,10 @@ import { EnvironmentObject } from "./environment-object.js";
 import { environmentEntry } from "./environment-page.js";
 import {
   claimEnvironmentRun,
-  publishEnvironmentReady,
+  openEnvironmentChannel,
+  prepareEnvironmentChannel,
 } from "./environment-callback.js";
-import { trustedRunnerClaims } from "./runner-identity.js";
+import { trustedRunnerClaims, webSocketRunnerToken } from "./runner-identity.js";
 
 export { AuthorizationStateObject, EnvironmentObject, TaskObject };
 
@@ -126,35 +127,40 @@ async function defaultFetch(request, env) {
 
 async function internalEnvironmentFetch(request, env, url) {
   const operation = url.pathname.split("/").at(-1);
-  if (
-    request.method !== "POST" ||
-    (operation !== "claim" && operation !== "ready")
-  ) {
+  const websocket = operation === "channel" &&
+    request.method === "GET" &&
+    request.headers.get("upgrade")?.toLowerCase() === "websocket";
+  if (!websocket && (request.method !== "POST" || !["claim", "channel"].includes(operation))) {
     return json({ error: "not found" }, 404);
   }
   let claims;
   try {
+    const token = websocket ? webSocketRunnerToken(request) : undefined;
     claims = await verifyRunnerIdentity(
       request,
       env,
       env.GITHUB_ENVIRONMENT_WORKFLOW_ID ?? "private-runner-session.yml",
+      token,
     );
   } catch {
     return json({ error: "runner authorization required" }, 401);
   }
   const environmentId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+  if (websocket) return openEnvironmentChannel(env, environmentId, claims);
   if (operation === "claim") {
     return claimEnvironmentRun(
       env,
       environmentId,
       String(claims.run_id),
+      String(claims.run_attempt),
       `https://github.com/${env.GITHUB_RUNNER_REPOSITORY}/actions/runs/${claims.run_id}`,
     );
   }
-  return publishEnvironmentReady(
+  return prepareEnvironmentChannel(
     env,
     environmentId,
     String(claims.run_id),
+    String(claims.run_attempt),
     await request.json(),
   );
 }
@@ -256,8 +262,9 @@ async function verifyRunnerIdentity(
   request,
   env,
   workflowId = env.GITHUB_WORKFLOW_ID ?? "execute-task.yml",
+  suppliedToken,
 ) {
-  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const token = suppliedToken ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) throw new Error("runner identity required");
   const { payload } = await jwtVerify(token, githubOidcKeys, {
     issuer: "https://token.actions.githubusercontent.com",
