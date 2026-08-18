@@ -167,7 +167,7 @@ test("a lost Durable Object open response never causes a second dispatch", async
   });
 });
 
-test("Environment commands do not preflight an already recorded GitHub run", async () => {
+test("Starting open and close do not preflight an active GitHub run", async () => {
   const environments = fakeEnvironments();
   const env = {
     ENVIRONMENTS: environments.binding,
@@ -607,6 +607,69 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   assert.deepEqual(await closeEnvironment(env, "43", async () => {}), {
     status: "offline",
   });
+});
+
+test("open reconciles one terminal closing run before dispatching its replacement", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }), () => "generation-one");
+  await closeEnvironment(env, "42", async () => {});
+
+  const observed = [];
+  const dispatched = [];
+  const reopened = await openEnvironment(
+    env,
+    "42",
+    async (_env, request) => {
+      dispatched.push(request.environmentId);
+      return {
+        runId: "654321",
+        runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/654321",
+      };
+    },
+    () => "generation-two",
+    async () => { throw new Error("must not cancel the terminal run again"); },
+    async (_env, runId) => {
+      observed.push(runId);
+      return { status: "completed", conclusion: "cancelled" };
+    },
+  );
+
+  assert.deepEqual(observed, ["123456"]);
+  assert.deepEqual(dispatched, ["generation-two"]);
+  assert.equal(reopened.status, "starting");
+  assert.equal(environments.get("github-42").generation, "generation-two");
+});
+
+test("open keeps Closing when the exact terminal state cannot be confirmed", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }), () => "generation-one");
+  await closeEnvironment(env, "42", async () => {});
+
+  const held = await openEnvironment(
+    env,
+    "42",
+    async () => { throw new Error("must not dispatch without terminal evidence"); },
+    () => "generation-two",
+    async () => { throw new Error("must not cancel the accepted request twice"); },
+    async () => { throw new Error("GitHub workflow lookup failed with 520"); },
+  );
+
+  assert.equal(held.status, "closing");
+  assert.equal(environments.get("github-42").generation, "generation-one");
 });
 
 test("close during dispatch revokes admission and cancels a run returned afterward", async () => {

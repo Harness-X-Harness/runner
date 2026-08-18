@@ -105,10 +105,13 @@ When GitHub reports the run terminal, the Environment entry converges to
 Offline. GitHub Actions remains lifecycle authority; users can cancel the run
 directly if ChatGPT is unavailable.
 
-The open and close commands do not preflight the recorded run through GitHub.
-They use the serialized Environment record for the idempotent command path.
-The stable browser entry is the single read boundary that observes GitHub and
-converges a terminal run to Offline.
+Starting and Ready open requests, plus close requests, do not preflight the
+recorded run through GitHub. They use the serialized Environment record for
+the idempotent command path. An Open request received while Closing observes
+only the exact recorded run. Confirmed terminal state converges the old
+generation and permits one serialized replacement dispatch in the same
+request. A non-terminal or unavailable observation stays Closing. The stable
+browser entry remains the read boundary for terminal Starting and Ready runs.
 
 ### Distributed lifecycle and failure contract
 
@@ -144,6 +147,8 @@ when no run claims the generation.
 | Ready callback commits but its response is lost | Descriptor may exist briefly while the workflow fails | Entry checks GitHub before redirect | Terminal observation removes the descriptor and returns Offline |
 | Close storage response is lost | Revocation or `cancelPending` remains committed | Tool transport error | Repeated close is safe and can cancel only the same run |
 | Close cancel response is lost or GitHub is unavailable | `cancelPending` remains on the exact run | Closing | Repeated close retries only that run; terminal observation clears it |
+| Open arrives after close while the exact run is terminal | GitHub exact-run observation plus owner Durable Object | One replacement generation starts | Terminal observation and serialized open occur in one request |
+| Open arrives after close while the run is live or observation fails | The old generation remains Closing | Closing; no replacement dispatch | A later Open can observe the same exact run again |
 | User cancels in GitHub | GitHub is lifecycle authority | Entry changes to Offline | Exact-run observation in the stable entry |
 | GitHub run lookup is delayed or unavailable | Durable Object state is not rewritten | Entry request fails without changing lifecycle | Refresh the stable entry after GitHub recovers |
 | Browser identity expires | Environment state is unchanged | GitHub identity prompt | New browser session reads the same owner record |
@@ -161,7 +166,7 @@ cleanup worker.
 
 The requirements model is in `formal/RemoteEnvironment.tla`. Its positive
 configuration checks current-run admission, descriptor freshness, close
-privacy, exact cancellation responsibility, closing convergence, and eventual
+privacy, exact cancellation responsibility, GitHub run termination, and eventual
 exit of an invalid generation. Separate faulty configurations preserve
 counterexamples for stale descriptor publication, stale-run admission, and
 premature loss of cancel responsibility.
@@ -169,6 +174,7 @@ premature loss of cancel responsibility.
 | Model transition | Implementation seam |
 | --- | --- |
 | `Open` | `EnvironmentObject /environment/open` commits owner slot and generation before dispatch |
+| `ReopenAfterTerminal` | Closing `open_environment` confirms the exact run terminal, commits Offline, and serializes one replacement open |
 | `DispatchRejected` | Typed pre-effect or non-ambiguous GitHub rejection calls `/environment/dispatch-failed` |
 | `CommitDispatch` | Successful GitHub response calls `/environment/dispatch` with the exact run |
 | `DispatchOutcomeUnknown` | Lost response, malformed success, `408`, or `5xx` calls `/environment/dispatch-unknown` without retry |
@@ -177,7 +183,8 @@ premature loss of cancel responsibility.
 | `CloseUnclaimed` | `/environment/close` revokes a dispatching generation without a run ID |
 | `CloseKnownRun` / `CloseAdmitted` | Close hides the descriptor and retains exact-run `cancelPending` |
 | `StaleRunStopsAtClaim` | A revoked or older generation receives `409` before sensitive setup |
-| `GitHubTerminates` | The authenticated Environment entry reads the exact run and commits Offline |
+| `GitHubRunTerminates` | GitHub makes the exact Environment run terminal independently of control-plane observation |
+| `ObserveTerminal` | The authenticated Environment entry reads the exact terminal run and commits Offline |
 
 The model proves application safety for every represented ordering, not the
 availability of GitHub or Cloudflare. Its liveness claims use these explicit
