@@ -93,10 +93,6 @@ header when reading `/task-stream/<task_id>`. It can open the exact GitHub run,
 repository-installation action, or resulting pull request, and it uses the
 existing `cancel_task` tool for cancellation.
 
-Claude remains a supported one-shot executor and receives lifecycle updates,
-but it does not publish native live text events. This is an explicit driver
-capability difference, not a fallback parser.
-
 `formal/TaskStream.tla` is a focused obligation model for monotonic cursors,
 bounded ordered retention, final-result authority, terminal immutability, and
 eventual delivery while a finite producer and connected observer remain
@@ -292,9 +288,8 @@ authorization and token requests must include this exact `resource` value. The
 Worker rejects an omitted value before the provider processes it; the provider
 keeps redirect-aware OAuth errors for repeated or different values.
 
-`executor` currently accepts `codex`, `claude`, and `grok`. Each executor has
-an independent workflow step. Codex uses the native official CLI; Claude Code
-and Grok Build use their current official installers. Codex and
+`executor` currently accepts `codex` and `grok`. Each executor has an
+independent workflow step and uses its current official installer. Codex and
 Grok share `MINI_END_USER_KEY` while their confidential endpoints remain in
 `MINI_CODEX_BASE_URL` and `MINI_GROK_BASE_URL`. Grok uses its native custom-model
 configuration and does not use first-party login. `mode=analyze` leaves the checkout unchanged;
@@ -399,8 +394,7 @@ the Worker's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` bindings. Configure
 `MINI_END_USER_KEY`, `MINI_CODEX_BASE_URL`, and `MINI_GROK_BASE_URL` as runner
 repository secrets. The native Codex CLI resolves the shared key and its secret
 provider endpoint from its user config. Grok resolves the same key through
-`env_key` in its native user config. Put `ANTHROPIC_API_KEY` there only when the
-Claude executor is enabled.
+`env_key` in its native user config.
 These credentials are scoped to their individual workflow steps and are not
 needed by the Worker.
 

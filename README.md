@@ -10,7 +10,6 @@ empty workspace through T3 Code and a temporary Cloudflare Quick Tunnel.
 The workflow is deliberately declarative and happy-path:
 
 - Codex uses its official standalone installer.
-- Claude Code uses its official native installer.
 - Grok Build uses its official native installer.
 - T3 Code runs with `npx --yes t3@latest`.
 - cloudflared uses Cloudflare's official package repository and system default

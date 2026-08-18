@@ -1,4 +1,4 @@
-export const EXECUTORS = ["codex", "claude", "grok"];
+export const EXECUTORS = ["codex", "grok"];
 export const MODES = ["analyze", "edit", "pull_request"];
 export const TASK_STATUSES = [
   "awaiting_installation",

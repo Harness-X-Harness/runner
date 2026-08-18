@@ -7,7 +7,7 @@
 本项目通过 `workflow_dispatch` 创建一次性的 GitHub-hosted Ubuntu runner。它可以：
 
 - 通过 Headscale/Tailscale SSH 提供私有 shell；
-- 运行 Codex、Claude Code 和 T3 Code；
+- 运行 Codex、Grok Build 和 T3 Code；
 - 通过 Cloudflare Quick Tunnel 暴露带 T3 应用层认证的临时公网入口；
 - 通过 GitHub OIDC 向认证后的 Environment 入口发布一次 ready descriptor。
 
@@ -68,7 +68,6 @@ GitHub Environment。它只接收控制面签发的不透明 `environment_id`，
 | `MINI_END_USER_KEY` | Runner repository secret | Codex 与 Grok 共用的 scoped bearer key；只通过环境变量或 Action secret input 注入 |
 | `MINI_CODEX_BASE_URL` | Runner repository secret | Codex provider base URL；不得写入仓库、日志或 artifact |
 | `MINI_GROK_BASE_URL` | Runner repository secret | Grok provider base URL；不得写入仓库、日志或 artifact |
-| `ANTHROPIC_API_KEY` | Runner repository secret | Claude Code executor，仅在对应步骤注入 |
 
 `session--none` 只允许受保护默认分支部署。workflow 不保存目标仓库 token，也不自动 clone；用户在临时环境中自行建立的 Git、GitHub 或其他凭证属于该 run 的完整用户信任边界，并在 run 结束时销毁。
 
@@ -122,9 +121,8 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 
 外部 GitHub Actions 固定到完整 commit SHA。运行时工具刻意遵循一次性开发环境的当前上游入口：
 
-- Private Development Environment 的 Codex、Claude Code 和 Grok Build 使用各自官方安装器；
+- Private Development Environment 的 Codex 和 Grok Build 使用各自官方安装器；
 - ChatGPT code-task 的 Codex 使用官方 CLI 安装器；
-- ChatGPT code-task 的 Claude Code 使用官方安装器；
 - ChatGPT code-task 的 Grok Build 使用 xAI 官方 CLI 安装器；
 - Tailscale 使用官方 Linux 安装器；
 - cloudflared 使用 Cloudflare 官方软件源；

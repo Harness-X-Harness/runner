@@ -21,7 +21,6 @@ on:
         type: choice
         options:
           - codex
-          - claude
           - grok
       mode:
         description: How changes should be delivered
@@ -160,19 +159,6 @@ jobs:
           task-id: ${{ env.TASK_ID }}
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-
-      - name: Install Claude Code
-        if: ${{ inputs.executor == 'claude' }}
-        shell: bash
-        run: curl -fsSL https://claude.ai/install.sh | bash
-
-      - name: Run Claude Code
-        if: ${{ inputs.executor == 'claude' }}
-        shell: bash
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        working-directory: target-workspace
-        run: claude --dangerously-skip-permissions -p "$(< "$RUNNER_TEMP/task.prompt")" > "$RUNNER_TEMP/executor.result"
 
       - name: Install Grok Build
         if: ${{ inputs.executor == 'grok' }}

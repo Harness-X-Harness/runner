@@ -1,5 +1,5 @@
 name: Development tools
-description: Install the native Codex, Claude Code, and Grok Build CLIs.
+description: Install the native Codex and Grok Build CLIs.
 
 runs:
   using: composite
@@ -7,5 +7,4 @@ runs:
     - shell: bash
       run: |
         curl -fsSL https://chatgpt.com/codex/install.sh | sh
-        curl -fsSL https://claude.ai/install.sh | bash
         curl -fsSL https://x.ai/cli/install.sh | bash

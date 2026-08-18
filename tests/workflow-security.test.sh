@@ -255,8 +255,9 @@ fi
 
 grep -Fq 'https://chatgpt.com/codex/install.sh' "$TOOLS_ACTION" || \
   fail 'missing official Codex installer'
-grep -Fq 'https://claude.ai/install.sh' "$TOOLS_ACTION" || \
-  fail 'missing official Claude Code installer'
+if rg -qi 'claude|anthropic' "$WORKFLOW" "$TASK_WORKFLOW" "$TOOLS_ACTION"; then
+  fail 'workflows and actions must expose only Codex and Grok executors'
+fi
 grep -Fq 'npx --yes t3@latest serve' "$T3_ACTION" || \
   fail 'missing latest T3 Code entrypoint'
 grep -Fq -- '--ttl 6h' "$T3_ACTION" || \
