@@ -31,7 +31,9 @@ interfaces and lifecycle state.
    the verified `repository_access` path.
    It obtains a short-lived GitHub Actions OIDC token, fetches the private
    prompt from `/internal/tasks/<task_id>`, and reports lifecycle events back to
-   the same task object.
+   the same task object. Codex and Grok also publish bounded, user-visible
+   semantic events from their native JSON streams. Raw reasoning, command
+   payloads, prompt text, and provider credentials are not published.
 5. `get_task`, `get_task_result`, and `cancel_task` expose only the task's safe
    public fields. Prompt text, OAuth properties, and callback credentials never
    appear in MCP structured content.
@@ -56,6 +58,46 @@ The public tools are:
 | `get_task_result` | Read summary, commit, or PR | None |
 | `open_environment` | Open or return the caller's one active Environment | Starts one runner when none is active |
 | `close_environment` | Close the caller's active Environment | Cancels its exact GitHub run |
+
+## Batch Code Task live output
+
+`submit_task` renders one MCP Apps Task card. The card observes and controls
+the existing one-shot task; it does not create a persistent Codex or Grok
+conversation. The authoritative completion value remains the task's final
+`result` published by the workflow.
+
+Codex runs with native `codex exec --json` while keeping
+`--output-last-message` as the final-result source. Grok runs with native
+`--output-format streaming-json` and assembles its final result from the last
+user-visible text segment after tool activity. One repository-owned Node Action consumes each driver's native
+format. It publishes only user-visible Agent text, generic activity, and safe
+task lifecycle snapshots. It does not publish model reasoning, raw commands,
+prompt text, or provider credentials.
+
+The Action batches events and authenticates each callback with GitHub Actions
+OIDC. `TaskObject` assigns one monotonic sequence, retains the latest 256
+events, and rejects driver events after `completed`, `failed`, or `cancelled`.
+A reconnecting card supplies its last sequence and receives the retained
+suffix. If that cursor predates the suffix, the card says that earlier live
+events are no longer retained. This event history is not a durable transcript.
+
+The Task card connects directly to the control plane through the MCP Apps CSP.
+`submit_task` returns a random task-scoped read capability only in tool-result
+metadata delivered to the card. It never appears in `structuredContent`, URLs,
+Actions logs, or public task reads. The card sends it in the `Authorization`
+header when reading `/task-stream/<task_id>`. It can open the exact GitHub run,
+repository-installation action, or resulting pull request, and it uses the
+existing `cancel_task` tool for cancellation.
+
+Claude remains a supported one-shot executor and receives lifecycle updates,
+but it does not publish native live text events. This is an explicit driver
+capability difference, not a fallback parser.
+
+`formal/TaskStream.tla` is a focused obligation model for monotonic cursors,
+bounded ordered retention, final-result authority, terminal immutability, and
+eventual delivery while a finite producer and connected observer remain
+available. Its faulty configuration preserves the counterexample in which a
+late driver event mutates the stream after terminal state.
 
 ## Remote Development Environment flow
 

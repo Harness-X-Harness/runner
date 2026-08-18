@@ -96,6 +96,13 @@ async function defaultFetch(request, env) {
     return internalEnvironmentFetch(request, env, url);
   }
 
+  if (url.pathname.startsWith("/task-stream/")) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: taskStreamCorsHeaders() });
+    }
+    if (request.method === "GET") return taskStreamFetch(request, env, url);
+  }
+
   if (url.pathname === "/environment" && request.method === "GET") {
     return environmentEntry(request, env);
   }
@@ -163,7 +170,7 @@ async function internalTaskFetch(request, env, url) {
   }
   const parts = url.pathname.split("/").filter(Boolean);
   const taskId = parts[2];
-  if (!taskId || (parts[3] !== undefined && parts[3] !== "events")) {
+  if (!taskId || (parts[3] !== undefined && !["events", "stream"].includes(parts[3]))) {
     return json({ error: "not found" }, 404);
   }
   const stub = env.TASKS.get(env.TASKS.idFromName(taskId));
@@ -203,7 +210,44 @@ async function internalTaskFetch(request, env, url) {
       headers: { "content-type": "application/json" },
     });
   }
+  if (request.method === "POST" && parts[3] === "stream") {
+    const streamed = await stub.fetch("https://task/task/stream-events", {
+      method: "POST",
+      body: JSON.stringify(await request.json()),
+    });
+    return new Response(await streamed.text(), {
+      status: streamed.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
   return json({ error: "method not allowed" }, 405);
+}
+
+async function taskStreamFetch(request, env, url) {
+  const taskId = decodeURIComponent(url.pathname.slice("/task-stream/".length));
+  if (!taskId || taskId.includes("/")) return json({ error: "not found" }, 404);
+  const target = new URL("https://task/task/stream");
+  const after = url.searchParams.get("after");
+  if (after !== null) target.searchParams.set("after", after);
+  const response = await env.TASKS.get(env.TASKS.idFromName(taskId)).fetch(target, {
+    headers: { authorization: request.headers.get("authorization") ?? "" },
+  });
+  const headers = new Headers(response.headers);
+  for (const [name, value] of taskStreamCorsHeaders()) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function taskStreamCorsHeaders() {
+  return new Headers({
+    "access-control-allow-headers": "authorization",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-origin": "*",
+    "cache-control": "no-store",
+  });
 }
 
 const githubOidcKeys = createRemoteJWKSet(

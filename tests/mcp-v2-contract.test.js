@@ -123,6 +123,10 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
       scopes: ["tasks:run", "repos:read", "repos:write", "pull_requests:write"],
     },
   ]);
+  assert.deepEqual(
+    modernTools.find(({ name }) => name === "submit_task")._meta?.ui,
+    { resourceUri: "ui://task/v1.html" },
+  );
   assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").securitySchemes, [
     { type: "oauth2", scopes: ["environments:manage"] },
   ]);
@@ -173,7 +177,7 @@ test("MCP v2 serves modern and legacy tools/list metadata", async () => {
   });
 });
 
-test("MCP v2 serves one credential-free Environment widget resource", async () => {
+test("MCP v2 serves credential-free Environment and Task widget resources", async () => {
   const props = {
     githubUserId: "test-user",
     oauthScopes: ["environments:manage"],
@@ -216,7 +220,10 @@ test("MCP v2 serves one credential-free Environment widget resource", async () =
   const listed = await request(1, "resources/list");
   assert.deepEqual(
     listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
-    [{ uri: "ui://environment/v2.html", mimeType: "text/html;profile=mcp-app" }],
+    [
+      { uri: "ui://environment/v2.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://task/v1.html", mimeType: "text/html;profile=mcp-app" },
+    ],
   );
 
   const read = await request(2, "resources/read", {
@@ -243,4 +250,15 @@ test("MCP v2 serves one credential-free Environment widget resource", async () =
   assert.doesNotMatch(resource.text, /window\.openai|window\.open\(/);
   assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
   assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
+
+  const taskRead = await request(3, "resources/read", { uri: "ui://task/v1.html" });
+  const taskResource = taskRead.result.contents[0];
+  assert.deepEqual(taskResource._meta.ui.csp, {
+    connectDomains: ["https://runner.example"],
+    resourceDomains: [],
+  });
+  assert.match(taskResource.text, /Harness X Harness · Code Task/i);
+  assert.match(taskResource.text, /task-stream/);
+  assert.match(taskResource.text, /authorization: "Bearer " \+ token/);
+  assert.doesNotMatch(taskResource.text, /private-stream-token|MINI_END_USER_KEY/);
 });

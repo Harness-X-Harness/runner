@@ -1,0 +1,24 @@
+name: Task driver
+description: Run one native coding-agent driver and publish its private live events
+inputs:
+  executor:
+    description: codex or grok
+    required: true
+  prompt-file:
+    description: File containing the private task prompt
+    required: true
+  result-file:
+    description: File receiving the final driver result
+    required: true
+  working-directory:
+    description: Target repository workspace
+    required: true
+  control-plane-url:
+    description: Worker control-plane URL
+    required: true
+  task-id:
+    description: Control-plane task identifier
+    required: true
+runs:
+  using: node24
+  main: index.js

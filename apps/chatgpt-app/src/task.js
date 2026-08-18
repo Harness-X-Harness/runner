@@ -49,6 +49,9 @@ export function publicTask(task) {
       safeTask[field] = task[field];
     }
   }
+  if (task.runId !== undefined && task.runnerRepository !== undefined) {
+    safeTask.runUrl = `https://github.com/${task.runnerRepository}/actions/runs/${encodeURIComponent(task.runId)}`;
+  }
   return safeTask;
 }
 

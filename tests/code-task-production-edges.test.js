@@ -326,15 +326,17 @@ test("Codex executor uses the native CLI driver", async () => {
     new URL("../.github/workflows/execute-task.yml", import.meta.url),
     "utf8",
   );
+  const driver = await readFile(
+    new URL("../.github/actions/task-driver/index.js", import.meta.url),
+    "utf8",
+  );
 
   assert.match(workflow, /https:\/\/chatgpt\.com\/codex\/install\.sh/);
   assert.match(workflow, /secrets\.MINI_CODEX_BASE_URL/);
   assert.match(workflow, /env_key = "MINI_END_USER_KEY"/);
-  assert.match(workflow, /working-directory: target-workspace/);
-  assert.match(
-    workflow,
-    /codex exec --ephemeral --sandbox workspace-write --output-last-message "\$RUNNER_TEMP\/executor\.result"[\s\S]*> \/dev\/null 2>&1/,
-  );
+  assert.match(workflow, /uses: \.\/\.github\/actions\/task-driver/);
+  assert.match(driver, /"--json"/);
+  assert.match(driver, /"--output-last-message", resultFile/);
   assert.doesNotMatch(
     workflow,
     /openai\/codex-action|allow-bots:|allow-bot-users:|OPENAI_API_KEY|CODEX_API_KEY|CODEX_RESPONSES_API_ENDPOINT/,
@@ -342,15 +344,26 @@ test("Codex executor uses the native CLI driver", async () => {
 });
 
 test("Grok executor writes its native headless result to the driver result", async () => {
-  const workflow = await readFile(
-    new URL("../.github/workflows/execute-task.yml", import.meta.url),
+  const driver = await readFile(
+    new URL("../.github/actions/task-driver/index.js", import.meta.url),
     "utf8",
   );
 
-  assert.match(
-    workflow,
-    /grok --no-auto-update --always-approve -m mini-grok-4-6 --output-format json --prompt-file "\$RUNNER_TEMP\/task\.prompt" \| jq -r \.text > "\$RUNNER_TEMP\/executor\.result"/,
+  assert.match(driver, /"--output-format", "streaming-json"/);
+  assert.match(driver, /result = updateGrokResult\(result, value\)/);
+  assert.doesNotMatch(driver, /console\.log/);
+});
+
+test("Task Widget stream supports browser authorization preflight", async () => {
+  const worker = await readFile(
+    new URL("../apps/chatgpt-app/src/index.js", import.meta.url),
+    "utf8",
   );
+
+  assert.match(worker, /request\.method === "OPTIONS"/);
+  assert.match(worker, /"access-control-allow-headers": "authorization"/);
+  assert.match(worker, /"access-control-allow-methods": "GET, OPTIONS"/);
+  assert.match(worker, /"access-control-allow-origin": "\*"/);
 });
 
 test("runner GitHub App credentials avoid GitHub's reserved secret prefix", async () => {
