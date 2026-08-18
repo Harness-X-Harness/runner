@@ -95,3 +95,30 @@ test("a failed native effect emits one bounded error and is not repeated", async
   assert.doesNotMatch(JSON.stringify(sent), /private native failure/);
   assert.equal(sent.filter(({ type }) => type === "ack").length, 2);
 });
+
+test("normalized driver output waits in memory for the same runtime channel to reconnect", () => {
+  const first = [];
+  const second = [];
+  const runtime = new SessionRuntime({
+    generation: "generation-1",
+    send: (message) => first.push(message),
+    execute() {},
+  });
+  runtime.event("session-1", {
+    type: "agent_message_chunk",
+    data: { turnId: "turn-1", text: "first" },
+  });
+  runtime.disconnect();
+  runtime.event("session-1", {
+    type: "agent_message_chunk",
+    data: { turnId: "turn-1", text: "while disconnected" },
+  });
+  runtime.transition("session-1", {
+    type: "complete_turn", turnId: "turn-1", status: "completed",
+  });
+  runtime.setSend((message) => second.push(message));
+
+  assert.equal(first.length, 1);
+  assert.deepEqual(second.map(({ type }) => type), ["event", "transition"]);
+  assert.equal(second[0].event.data.text, "while disconnected");
+});

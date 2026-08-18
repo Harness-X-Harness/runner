@@ -57,6 +57,11 @@ export function parseEnvironmentChannelMessage(message, attachment) {
         !value.event || typeof value.event !== "object" || Array.isArray(value.event)) return undefined;
     return value;
   }
+  if (value.type === "transition") {
+    if (!exactKeys(value, ["type", "generation", "sessionId", "action"]) ||
+        !validRunnerAction(value.action)) return undefined;
+    return value;
+  }
   return undefined;
 }
 
@@ -78,4 +83,25 @@ function exactKeys(value, keys) {
 
 function validId(value) {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function validRunnerAction(action) {
+  if (!action || typeof action !== "object" || Array.isArray(action)) return false;
+  switch (action.type) {
+    case "admit":
+      return exactKeys(action, ["type"]);
+    case "begin_turn":
+      return exactKeys(action, ["type", "turnId"]) && validId(action.turnId);
+    case "complete_turn":
+      return exactKeys(action, ["type", "turnId", "status"]) && validId(action.turnId) &&
+        new Set(["completed", "interrupted", "failed"]).has(action.status);
+    case "wait_for_user":
+      return exactKeys(action, ["type", "turnId", "request"]) && validId(action.turnId) &&
+        action.request && typeof action.request === "object" && !Array.isArray(action.request);
+    case "terminate":
+      return exactKeys(action, ["type", "reason"]) &&
+        new Set(["stopped", "driver_failed"]).has(action.reason);
+    default:
+      return false;
+  }
 }

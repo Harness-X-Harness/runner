@@ -392,7 +392,9 @@ export class EnvironmentObject extends DurableObject {
     }
     const action = incoming.type === "ack"
       ? { type: "process_command", generation: incoming.generation, commandId: incoming.commandId }
-      : { type: "append_event", generation: incoming.generation, event: incoming.event };
+      : incoming.type === "event"
+        ? { type: "append_event", generation: incoming.generation, event: incoming.event }
+        : { ...incoming.action, generation: incoming.generation };
     const response = await handleSessionRequest(
       this.ctx.storage,
       new Request(`https://environment/sessions/${incoming.sessionId}`, {

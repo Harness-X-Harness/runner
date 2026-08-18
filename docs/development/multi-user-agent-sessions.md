@@ -172,7 +172,7 @@ Harness exposes one product-level Agent Session model while each driver keeps it
 | Steer current turn | `turn/steer` with the expected turn ID | `x.ai/interject` extension for the active session |
 | Stream work | `turn/*` and `item/*` notifications | `session/update` notifications |
 | Ask for approval or input | Server-initiated approval and user-input requests | ACP permission requests |
-| Reconnect while runner lives | `thread/resume` or the loaded thread | ACP session load or resume |
+| Reconnect the control channel while runner lives | Keep the same app-server child and loaded thread | Keep the same ACP child and native session |
 
 Codex App Server is the supported rich-client interface for conversation history, approvals, and streamed Agent events. Its stdio transport is newline-delimited JSON and is suitable for a local runner-side adapter. The App Server WebSocket transport is experimental and is not required by this design.
 
@@ -330,8 +330,10 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `EnvironmentTerminates` and `TerminalIsSticky` | Exact Environment terminal and confirmed startup-failure paths make matching Sessions terminal; all later mutations fail until seven-day cleanup deletes the immutable record. |
 | `channelState` and `channelGeneration` | [`environment-channel.js`](../../apps/chatgpt-app/src/environment-channel.js) admits only the current generation, run ID, and run attempt; the WebSocket attachment survives Durable Object hibernation and stale socket close events cannot disconnect a replacement. |
 | `deliveryCount`, `processed`, and `effectCount` | The server redelivers unacknowledged stable command IDs. The generation-local [`session-runtime`](../../.github/actions/session-runtime/index.js) records a receipt before one native effect and acknowledges duplicate delivery without invoking that effect again. If the runtime process ends, the Environment run ends; receipts are never resumed in another generation. |
+| Driver admission and `StartTurn` | The runner starts exactly one [`codex app-server`](../../.github/actions/session-runtime/codex-driver.js) or [`grok agent --no-leader stdio`](../../.github/actions/session-runtime/grok-driver.js) child per Session. After native conversation creation, `admit` reaches modeled `idle`; an optional initial prompt then uses `begin_turn`, which refines to the model's `StartTurn`. |
+| Native completion and user requests | Each driver normalizes only bounded public events. Native completion sends an exact-turn `complete_turn`; server-initiated approval or input sends exact-turn `wait_for_user`. Reasoning, thought, raw protocol payloads, and native IDs do not cross the driver boundary. |
 
-The implementation adds `preparing` before the model's admitted `idle` initial state. This phase contains no native command effect. The `admit` transition is the refinement mapping from a generation-bound stored Session into the model state. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
+The implementation adds `preparing` before the model's admitted `idle` initial state. It permits one generation-bound driver-start command to create the native conversation, but no model turn begins before runner admission. The `admit` transition is the refinement mapping into the model's initial `idle`; `begin_turn` maps an optional initial prompt to `StartTurn`. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
 
 ## Primary references
 

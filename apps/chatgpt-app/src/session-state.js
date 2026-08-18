@@ -144,7 +144,12 @@ export async function pendingGenerationCommands(storage, generation) {
     if (session.generation !== String(generation) || session.phase === "terminal") continue;
     const commands = await listAll(storage, commandPrefix(session.sessionId));
     for (const command of commands.values()) {
-      if (!command.processed) pending.push({ sessionId: session.sessionId, ...publicCommand(command) });
+      if (!command.processed) pending.push({
+        sessionId: session.sessionId,
+        executor: session.executor,
+        workingDirectory: session.workingDirectory,
+        ...publicCommand(command),
+      });
     }
   }
   return pending.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -161,6 +166,9 @@ async function createSession(storage, input, now) {
   if (!new Set(["codex", "grok"]).has(input.executor)) {
     return json({ error: "invalid executor" }, 400);
   }
+  if (!input.workingDirectory.startsWith("/")) {
+    return json({ error: "working directory must be absolute" }, 400);
+  }
   const key = metaKey(input.sessionId);
   if (await storage.get(key)) return json({ error: "session already exists" }, 409);
   const timestamp = now().toISOString();
@@ -174,6 +182,7 @@ async function createSession(storage, input, now) {
     queuedTurns: [],
     activeTurnId: undefined,
     pendingRequests: [],
+    driverStartAccepted: false,
     processedCommandCount: 0,
     nextCursor: 1,
     createdAt: timestamp,
@@ -219,6 +228,8 @@ async function applyAction(storage, sessionId, action, now) {
   switch (action.type) {
     case "admit":
       return admit(storage, key, session, now);
+    case "begin_turn":
+      return beginTurn(storage, key, session, action, now);
     case "take_over":
       return takeOver(storage, key, session, action, now);
     case "queue_turn":
@@ -244,6 +255,21 @@ async function admit(storage, key, session, now) {
   if (session.phase !== "preparing") return json({ error: "session cannot be admitted" }, 409);
   const next = update(session, { phase: "idle" }, now());
   await appendEvent(storage, next, { type: "status", data: { phase: "idle" } }, now());
+  await storage.put(key, next);
+  return sessionResponse(next);
+}
+
+async function beginTurn(storage, key, session, action, now) {
+  if (session.phase !== "idle" || !validId(action.turnId) ||
+      !await turnExists(storage, session.sessionId, action.turnId)) {
+    return json({ error: "session turn cannot begin" }, 409);
+  }
+  const timestamp = now();
+  const next = update(session, { phase: "running", activeTurnId: action.turnId }, timestamp);
+  await appendEvent(storage, next, {
+    type: "turn",
+    data: { turnId: action.turnId, status: "started" },
+  }, timestamp);
   await storage.put(key, next);
   return sessionResponse(next);
 }
@@ -318,12 +344,34 @@ async function acceptCommand(storage, key, session, action, now) {
   if (transition.turn) {
     await storage.put(turnKey(session.sessionId, transition.turn.turnId), transition.turn);
   }
+  if (transition.event) await appendEvent(storage, next, transition.event, timestamp);
+  await storage.put(key, next);
   return sessionResponse(next);
 }
 
 async function commandTransition(storage, session, action, now) {
   switch (action.kind) {
     case "start": {
+      if (session.phase === "preparing") {
+        if (session.driverStartAccepted) return { error: "Session driver start is already accepted" };
+        const hasPrompt = action.turnId !== undefined || action.text !== undefined;
+        if (hasPrompt && (!validId(action.turnId) || !validText(action.text))) {
+          return { error: "initial start command is not valid" };
+        }
+        if (hasPrompt && await turnExists(storage, session.sessionId, action.turnId)) {
+          return { error: "turn already exists" };
+        }
+        return {
+          changes: { driverStartAccepted: true },
+          turn: hasPrompt
+            ? { turnId: action.turnId, text: action.text, createdAt: now.toISOString() }
+            : undefined,
+          payload: {
+            initial: true,
+            ...(hasPrompt ? { turnId: action.turnId, text: action.text } : {}),
+          },
+        };
+      }
       if (session.phase !== "idle" || !validId(action.turnId) || !validText(action.text)) {
         return { error: "start command is not valid" };
       }
@@ -332,6 +380,7 @@ async function commandTransition(storage, session, action, now) {
         changes: { phase: "running", activeTurnId: action.turnId },
         turn: { turnId: action.turnId, text: action.text, createdAt: now.toISOString() },
         payload: { turnId: action.turnId, text: action.text },
+        event: { type: "turn", data: { turnId: action.turnId, status: "started" } },
       };
     }
     case "start_queued": {
@@ -344,17 +393,27 @@ async function commandTransition(storage, session, action, now) {
       return {
         changes: { phase: "running", activeTurnId: head.turnId, queuedTurns },
         payload: { turnId: head.turnId, text: turn.text },
+        event: { type: "turn", data: { turnId: head.turnId, status: "started" } },
       };
     }
     case "steer":
+      return session.phase === "running" && session.activeTurnId === action.turnId && validText(action.text)
+        ? { changes: {}, payload: { turnId: action.turnId, text: action.text } }
+        : { error: "steer command requires the exact running turn" };
     case "interrupt":
-      return session.phase === "running" && session.activeTurnId
-        ? { changes: {} }
-        : { error: `${action.kind} command requires a running turn` };
-    case "response":
-      return session.phase === "waiting_for_user"
-        ? { changes: { phase: "running", pendingRequests: [] } }
-        : { error: "response command requires a pending request" };
+      return session.phase === "running" && session.activeTurnId === action.turnId
+        ? { changes: {}, payload: { turnId: action.turnId } }
+        : { error: "interrupt command requires the exact running turn" };
+    case "response": {
+      const pending = session.pendingRequests.find(({ requestId }) => requestId === action.requestId);
+      const response = commandResponse(action);
+      return session.phase === "waiting_for_user" && pending && response
+        ? {
+            changes: { phase: "running", pendingRequests: [] },
+            payload: { requestId: action.requestId, ...response },
+          }
+        : { error: "response command requires the exact pending request" };
+    }
     case "stop":
       return MUTABLE_PHASES.has(session.phase)
         ? { changes: { phase: "stopping" } }
@@ -376,17 +435,22 @@ async function processCommand(storage, key, session, action, now) {
 }
 
 async function completeTurn(storage, key, session, action, now) {
-  if (session.phase !== "running" || session.activeTurnId !== String(action.turnId)) {
+  const status = new Set(["completed", "interrupted", "failed"]).has(action.status)
+    ? action.status
+    : undefined;
+  if (!new Set(["running", "waiting_for_user"]).has(session.phase) ||
+      session.activeTurnId !== String(action.turnId) || !status) {
     return json({ error: "active turn mismatch" }, 409);
   }
   const next = update(session, { phase: "idle", activeTurnId: undefined, pendingRequests: [] }, now());
-  await appendEvent(storage, next, { type: "turn", data: { turnId: action.turnId, status: "completed" } }, now());
+  await appendEvent(storage, next, { type: "turn", data: { turnId: action.turnId, status } }, now());
   await storage.put(key, next);
   return sessionResponse(next);
 }
 
 async function waitForUser(storage, key, session, action, now) {
-  if (session.phase !== "running" || !validId(action.request?.requestId)) {
+  if (session.phase !== "running" || session.activeTurnId !== action.turnId ||
+      !validId(action.request?.requestId)) {
     return json({ error: "session cannot wait for user" }, 409);
   }
   const event = validateEvent({ type: "request", data: action.request });
@@ -475,7 +539,7 @@ function validEventData(type, data) {
         validRequestChoices(data.choices) && validInputSchema(data.inputSchema);
     case "turn":
       return validId(data.turnId) &&
-        new Set(["queued", "started", "completed", "interrupted", "cancelled"]).has(data.status);
+        new Set(["queued", "started", "completed", "interrupted", "cancelled", "failed"]).has(data.status);
     case "error":
       return optionalText(data.scope) && boundedText(data.code) && boundedText(data.message);
     default:
@@ -578,7 +642,23 @@ function commandFingerprint(action) {
     kind: String(action.kind),
     turnId: action.turnId === undefined ? undefined : String(action.turnId),
     text: action.text === undefined ? undefined : String(action.text),
+    requestId: action.requestId === undefined ? undefined : String(action.requestId),
+    choiceId: action.choiceId === undefined ? undefined : String(action.choiceId),
+    answers: action.answers,
   });
+}
+
+function commandResponse(action) {
+  if (validId(action.choiceId)) return { choiceId: action.choiceId };
+  if (!action.answers || typeof action.answers !== "object" || Array.isArray(action.answers) ||
+      Object.keys(action.answers).length > 20) return undefined;
+  const answers = {};
+  for (const [name, values] of Object.entries(action.answers)) {
+    if (!validId(name) || !Array.isArray(values) || values.length > 20 ||
+        !values.every((value) => typeof value === "string" && value.length <= 16_384)) return undefined;
+    answers[name] = [...values];
+  }
+  return { answers };
 }
 
 async function turnExists(storage, sessionId, turnId) {
@@ -649,7 +729,7 @@ function validId(value) {
 }
 
 function validText(value) {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === "string" && value.length > 0 && value.length <= 65_536;
 }
 
 function parseNonNegativeInteger(value, fallback) {
