@@ -1,6 +1,6 @@
 # Multi-user Agent Sessions
 
-Status: implementation in progress. The Session state authority and generation-bound runtime channel are implemented; native drivers, MCP Session tools, the Session Widget, and legacy Task cutover remain pending. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
+Status: implementation in progress. Session state, the generation-bound runtime channel, native drivers, the MCP Session tools, and the Session Widget are implemented. The synchronized legacy Task cutover and production acceptance remain pending. The organization-owned scavenger remains a non-blocking future decision and is not part of the first release.
 
 ## Goal
 
@@ -202,7 +202,9 @@ Each tool represents one user intent. A generic tool with an `action` discrimina
 
 ## Session Widget
 
-The Session Widget renders one Session snapshot and its ordered event timeline. It receives a private, short-lived, Session-bound stream capability in MCP result metadata and reconnects from its last durable cursor. The capability and control-channel details never appear in structured content.
+The Session Widget renders one Session snapshot and its ordered event timeline. It receives an encrypted, ten-minute, Session- and Grant-bound stream capability only in private MCP result metadata. The capability token does not enter the stream URL, structured content, text, logs, or Session Events. The edge decrypts it only to route the read to the owner `EnvironmentObject`; the direct stream route has no mutation operation.
+
+The Widget consumes private NDJSON updates and reconnects from its last durable cursor. Each update contains the same safe snapshot projection plus only events after that cursor. Durable `read_session` remains the read authority: an expired capability causes the Widget to obtain a new capability through `read_session`, and cursor deduplication prevents reconnect from rendering a committed chunk twice.
 
 The Widget provides:
 

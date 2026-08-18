@@ -21,6 +21,12 @@ import {
   taskWidgetHtml,
 } from "./task-widget.js";
 import {
+  SESSION_WIDGET_MIME_TYPE,
+  SESSION_WIDGET_URI,
+  sessionWidgetHtml,
+} from "./session-widget.js";
+import { createSessionStreamCapability } from "./session-stream.js";
+import {
   createInstallationRequest,
   resolveRepositoryAccess,
 } from "./repository-authorization.js";
@@ -185,6 +191,36 @@ export function createServer(env, props) {
             "openai/widgetCSP": {
               redirect_domains: [controlPlaneOrigin, "https://github.com"],
               connect_domains: [controlPlaneOrigin],
+            },
+          },
+        },
+      ],
+    }),
+  );
+  server.registerResource(
+    "session-widget",
+    SESSION_WIDGET_URI,
+    {
+      description: "Show and control one private multi-turn Agent Session.",
+      mimeType: SESSION_WIDGET_MIME_TYPE,
+    },
+    async () => ({
+      contents: [
+        {
+          uri: SESSION_WIDGET_URI,
+          mimeType: SESSION_WIDGET_MIME_TYPE,
+          text: sessionWidgetHtml(controlPlaneOrigin),
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              domain: controlPlaneOrigin,
+              csp: { connectDomains: [controlPlaneOrigin], resourceDomains: [] },
+            },
+            "openai/widgetDescription":
+              "Shows one private Agent Session timeline and its exact interaction controls.",
+            "openai/widgetCSP": {
+              connect_domains: [controlPlaneOrigin],
+              redirect_domains: [controlPlaneOrigin, "https://github.com"],
             },
           },
         },
@@ -369,6 +405,7 @@ export function createServer(env, props) {
       outputSchema: sessionSnapshotSchema,
       securitySchemes: SECURITY_SCHEMES.start_session,
       annotations: annotations("start_session"),
+      _meta: sessionWidgetToolMeta("Starting session…", "Session started."),
     },
     async (input) => {
       const requestProps = currentProps(props);
@@ -389,7 +426,11 @@ export function createServer(env, props) {
           runId,
         ),
       );
-      return result(session, `Session ${session.sessionId} is ${session.phase}.`);
+      return result(
+        session,
+        `Session ${session.sessionId} is ${session.phase}.`,
+        await sessionStreamMeta(env, requestProps, session.sessionId),
+      );
     },
   );
 
@@ -430,6 +471,7 @@ export function createServer(env, props) {
       outputSchema: sessionReadSchema,
       securitySchemes: SECURITY_SCHEMES.read_session,
       annotations: annotations("read_session"),
+      _meta: sessionWidgetToolMeta("Reading session…", "Session updated."),
     },
     async ({ sessionId, afterCursor, limit }) => {
       const requestProps = currentProps(props);
@@ -442,7 +484,11 @@ export function createServer(env, props) {
         sessionId,
         { afterCursor, limit },
       );
-      return result(read, `Session ${sessionId} is ${read.session.phase}.`);
+      return result(
+        read,
+        `Session ${sessionId} is ${read.session.phase}.`,
+        await sessionStreamMeta(env, requestProps, sessionId),
+      );
     },
   );
 
@@ -464,6 +510,7 @@ export function createServer(env, props) {
       }),
       securitySchemes: SECURITY_SCHEMES.send_turn,
       annotations: annotations("send_turn"),
+      _meta: sessionWidgetToolMeta("Sending turn…", "Turn sent."),
     },
     async ({ sessionId, text, delivery = "steer" }) => {
       const requestProps = currentProps(props);
@@ -476,11 +523,15 @@ export function createServer(env, props) {
         text,
         delivery,
       );
-      return result(sent, `${delivery === "queue" ? "Queued" : "Sent"} turn ${sent.turnId}.`);
+      return result(
+        sent,
+        `${delivery === "queue" ? "Queued" : "Sent"} turn ${sent.turnId}.`,
+        await sessionStreamMeta(env, requestProps, sessionId),
+      );
     },
   );
 
-  registerSessionMutationTool(server, "cancel_queued_turn", {
+  registerSessionMutationTool(server, env, props, "cancel_queued_turn", {
     title: "Cancel queued Session turn",
     description: "Cancel one exact queued turn before it starts.",
     inputSchema: z.object({ sessionId: z.string(), turnId: z.string() }),
@@ -492,7 +543,7 @@ export function createServer(env, props) {
     input.turnId,
   ));
 
-  registerSessionMutationTool(server, "interrupt_turn", {
+  registerSessionMutationTool(server, env, props, "interrupt_turn", {
     title: "Interrupt active Session turn",
     description: "Interrupt one exact active turn without stopping the native Session.",
     inputSchema: z.object({ sessionId: z.string(), activeTurnId: z.string() }),
@@ -504,7 +555,7 @@ export function createServer(env, props) {
     input.activeTurnId,
   ));
 
-  registerSessionMutationTool(server, "respond_to_session", {
+  registerSessionMutationTool(server, env, props, "respond_to_session", {
     title: "Respond to Session request",
     description: "Answer one exact pending approval, question, or authorization request.",
     inputSchema: z.object({
@@ -526,7 +577,7 @@ export function createServer(env, props) {
     );
   });
 
-  registerSessionMutationTool(server, "take_over_session", {
+  registerSessionMutationTool(server, env, props, "take_over_session", {
     title: "Take control of coding session",
     description: "Atomically make this MCP Grant the controller for future Session writes.",
     inputSchema: z.object({ sessionId: z.string() }),
@@ -537,7 +588,7 @@ export function createServer(env, props) {
     input.sessionId,
   ));
 
-  registerSessionMutationTool(server, "stop_session", {
+  registerSessionMutationTool(server, env, props, "stop_session", {
     title: "Stop coding session",
     description: "Stop one native Session without closing the shared private Environment.",
     inputSchema: z.object({ sessionId: z.string() }),
@@ -637,18 +688,48 @@ function registerAppTool(server, name, config, handler) {
   }, handler);
 }
 
-function registerSessionMutationTool(server, name, config, mutate) {
+function registerSessionMutationTool(server, env, fallbackProps, name, config, mutate) {
   registerAppTool(server, name, {
     ...config,
     outputSchema: sessionSnapshotSchema,
     securitySchemes: SECURITY_SCHEMES[name],
     annotations: annotations(name),
+    _meta: sessionWidgetToolMeta("Updating session…", "Session updated."),
   }, async (input) => {
-    const requestProps = currentProps();
+    const requestProps = currentProps(fallbackProps);
     requireScopes(requestProps, SECURITY_SCHEMES[name][0].scopes);
     const session = await mutate(input, requestProps);
-    return result(session, `Session ${session.sessionId} is ${session.phase}.`);
+    return result(
+      session,
+      `Session ${session.sessionId} is ${session.phase}.`,
+      await sessionStreamMeta(env, requestProps, session.sessionId),
+    );
   });
+}
+
+function sessionWidgetToolMeta(invoking, invoked) {
+  return {
+    ui: { resourceUri: SESSION_WIDGET_URI },
+    "openai/outputTemplate": SESSION_WIDGET_URI,
+    "openai/toolInvocation/invoking": invoking,
+    "openai/toolInvocation/invoked": invoked,
+  };
+}
+
+async function sessionStreamMeta(env, props, sessionId) {
+  const capability = await createSessionStreamCapability(
+    requiredGitHubUserId(props),
+    sessionId,
+    requiredSessionController(props).grantId,
+    env.ENVIRONMENT_SESSION_SECRET,
+  );
+  return {
+    sessionStream: {
+      url: `${new URL(env.TASK_CONTROL_PLANE_URL).origin}/session-stream/${encodeURIComponent(sessionId)}`,
+      token: capability.token,
+      expiresAt: capability.expiresAt,
+    },
+  };
 }
 
 async function isToolsListRequest(request) {

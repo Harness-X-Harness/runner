@@ -1,7 +1,7 @@
 import { dispatchClaimedEnvironment, readEnvironment } from "./environment.js";
 import { issueEnvironmentIdentity } from "./environment-identity.js";
+import { publicSessionSnapshot } from "./session-public.js";
 
-const ACTIVE_ENVIRONMENT_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
 const DEFAULT_WORKING_DIRECTORY = "/home/runner";
 
 export async function startAgentSession(
@@ -47,7 +47,12 @@ export async function startAgentSession(
   const current = created.dispatch
     ? await sessionRecord(env, ownerId, sessionId)
     : created.session;
-  return sessionSnapshot(current, environment, controller, env.TASK_CONTROL_PLANE_URL);
+  return publicSessionSnapshot(
+    current,
+    environment,
+    controller.grantId,
+    env.TASK_CONTROL_PLANE_URL,
+  );
 }
 
 export async function listAgentSessions(env, ownerId, controller) {
@@ -56,7 +61,7 @@ export async function listAgentSessions(env, ownerId, controller) {
     readEnvironment(env, ownerId),
   ]);
   return body.sessions.map((session) =>
-    sessionSnapshot(session, environment, controller, env.TASK_CONTROL_PLANE_URL));
+    publicSessionSnapshot(session, environment, controller.grantId, env.TASK_CONTROL_PLANE_URL));
 }
 
 export async function readAgentSession(env, ownerId, controller, sessionId, options = {}) {
@@ -68,7 +73,12 @@ export async function readAgentSession(env, ownerId, controller, sessionId, opti
     readEnvironment(env, ownerId),
   ]);
   return {
-    session: sessionSnapshot(body.session, environment, controller, env.TASK_CONTROL_PLANE_URL),
+    session: publicSessionSnapshot(
+      body.session,
+      environment,
+      controller.grantId,
+      env.TASK_CONTROL_PLANE_URL,
+    ),
     events: body.events,
     nextCursor: body.nextCursor,
     hasMore: body.hasMore,
@@ -198,45 +208,12 @@ function mutateSession(env, ownerId, sessionId, action) {
 
 async function snapshotFromCurrentEnvironment(env, ownerId, controller, session) {
   const environment = await readEnvironment(env, ownerId);
-  return sessionSnapshot(session, environment, controller, env.TASK_CONTROL_PLANE_URL);
-}
-
-function sessionSnapshot(session, environment, controller, controlPlaneUrl) {
-  const matchingEnvironment = environment?.generation === session.generation
-    ? environment
-    : undefined;
-  const pendingReplacement = environment?.status === "closing" &&
-    environment.replacementGeneration === session.generation;
-  return {
-    sessionId: session.sessionId,
-    executor: session.executor,
-    phase: session.phase,
-    ...(session.terminalReason ? { terminalReason: session.terminalReason } : {}),
-    channelState: matchingEnvironment?.channelState === "connected" ? "connected" : "disconnected",
-    controller: {
-      clientName: session.controllerClientName,
-      currentGrant: session.controllerGrantId === controller.grantId,
-    },
-    workingDirectory: session.workingDirectory,
-    ...(session.activeTurnId ? { activeTurnId: session.activeTurnId } : {}),
-    queuedTurns: session.queuedTurns,
-    pendingRequests: session.pendingRequests,
-    latestCursor: session.latestCursor,
-    environment: {
-      status: pendingReplacement ? "closing" : publicEnvironmentStatus(matchingEnvironment),
-      entryUrl: new URL("/environment", controlPlaneUrl).toString(),
-      ...(matchingEnvironment?.runUrl ? { runUrl: matchingEnvironment.runUrl } : {}),
-    },
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-  };
-}
-
-function publicEnvironmentStatus(environment) {
-  if (!environment || !ACTIVE_ENVIRONMENT_STATUSES.has(environment.status)) return "offline";
-  if (environment.status === "ready") return "ready";
-  if (environment.status === "closing") return "closing";
-  return "starting";
+  return publicSessionSnapshot(
+    session,
+    environment,
+    controller.grantId,
+    env.TASK_CONTROL_PLANE_URL,
+  );
 }
 
 function normalizeAnswers(values) {
