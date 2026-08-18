@@ -65,12 +65,12 @@ Open ==
   /\ UNCHANGED << liveRun, cancelledRuns >>
 
 (***************************************************************************)
-(* One Open request can observe that the exact closing GitHub run is       *)
+(* One Open request can observe that the exact known GitHub run is         *)
 (* terminal and create the next generation. A failed or non-terminal       *)
 (* observation does not enable this action.                                *)
 (***************************************************************************)
 ReopenAfterTerminal ==
-  /\ phase = "closing"
+  /\ phase \in {"starting", "ready", "closing"}
   /\ runId # NoIdentity
   /\ liveRun = NoIdentity
   /\ generation < 2

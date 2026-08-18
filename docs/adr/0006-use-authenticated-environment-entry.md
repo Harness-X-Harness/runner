@@ -6,10 +6,10 @@ returns the caller's active run, and `close_environment` records close intent
 and cancels that exact run. The GitHub-hosted platform limit remains the final
 execution bound.
 
-When Open observes a Closing record, it checks only that exact GitHub run. A
-confirmed terminal run permits one serialized replacement generation in the
-same request. A live or unavailable observation remains Closing and cannot
-authorize another dispatch.
+When Open observes a Starting, Ready, or Closing record with an exact run, it
+checks only that GitHub run. A confirmed terminal run permits one serialized
+replacement generation in the same request. A live or unavailable observation
+returns the current phase and cannot authorize another dispatch.
 
 After T3, Quick Tunnel, and Tailscale are ready, the workflow publishes one
 Connection Descriptor through a GitHub OIDC-authenticated callback. The stable
