@@ -65,10 +65,10 @@ If an exact run is already known and cancellation cannot be delivered,
 `close_environment` returns Closing and keeps the cancellation pending.
 Repeating close can affect only that same run. The stable Environment entry
 observes the exact run and changes to Offline after GitHub makes it terminal.
-Calling `open_environment` while Closing also observes only that exact run. If
-GitHub confirms it terminal, the same request creates one replacement
-generation; if the run is still live or the lookup is unavailable, it remains
-Closing and does not dispatch.
+Calling `open_environment` while Starting, Ready, or Closing observes only that
+exact run. If GitHub confirms it terminal, the same request creates one
+replacement generation; if the run is still live or the lookup is unavailable,
+it returns the current phase and does not dispatch.
 If that exact-run lookup is temporarily unavailable, the entry request can
 fail, but it does not rewrite Environment state. Refresh it after GitHub
 recovers; do not use an empty list or a failed lookup to start another run.

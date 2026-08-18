@@ -3,9 +3,11 @@ EXTENDS Naturals, FiniteSets
 
 (***************************************************************************)
 (* Focused obligation for concurrent Open requests while one Environment   *)
-(* is Closing. GitHub owns the exact run's terminal reality. A replacement *)
+(* has a known run. GitHub owns the exact run's terminal reality. A         *)
+(* replacement                                                             *)
 (* generation is authorized only after the control plane commits a         *)
-(* terminal observation. Live and unknown observations retain Closing.     *)
+(* terminal observation. Live and unknown observations retain the current  *)
+(* active phase.                                                           *)
 (***************************************************************************)
 
 CONSTANT Requests
@@ -20,42 +22,46 @@ VARIABLES runState,
           phase,
           requestPhase,
           observation,
+          response,
           terminalEvidence,
           generation,
           dispatchCount,
           dispatchOwner
 
-vars == << runState, phase, requestPhase, observation, terminalEvidence,
+vars == << runState, phase, requestPhase, observation, response, terminalEvidence,
            generation, dispatchCount, dispatchOwner >>
 
 RunStates == {"live", "terminal"}
-Phases == {"closing", "offline", "dispatching"}
+ActivePhases == {"starting", "ready", "closing"}
+Phases == ActivePhases \cup {"offline", "dispatching"}
 RequestPhases == {
   "idle", "observing", "held", "terminalObserved", "opening", "done"
 }
 Observations == {"none", "live", "terminal", "unknown"}
+Responses == {"none", "current", "replacement"}
 
 Init ==
   /\ runState = "live"
-  /\ phase = "closing"
+  /\ phase \in ActivePhases
   /\ requestPhase = [r \in Requests |-> "idle"]
   /\ observation = [r \in Requests |-> "none"]
+  /\ response = [r \in Requests |-> "none"]
   /\ terminalEvidence = FALSE
   /\ generation = 1
   /\ dispatchCount = 0
   /\ dispatchOwner = NoRequest
 
 StartOpen(r) ==
-  /\ phase = "closing"
+  /\ phase \in ActivePhases
   /\ requestPhase[r] = "idle"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "observing"]
-  /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
+  /\ UNCHANGED << runState, phase, observation, response, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
 GitHubTerminates ==
   /\ runState = "live"
   /\ runState' = "terminal"
-  /\ UNCHANGED << phase, requestPhase, observation, terminalEvidence,
+  /\ UNCHANGED << phase, requestPhase, observation, response, terminalEvidence,
                   generation, dispatchCount, dispatchOwner >>
 
 ObserveLive(r) ==
@@ -63,14 +69,14 @@ ObserveLive(r) ==
   /\ runState = "live"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "held"]
   /\ observation' = [observation EXCEPT ![r] = "live"]
-  /\ UNCHANGED << runState, phase, terminalEvidence, generation,
+  /\ UNCHANGED << runState, phase, response, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
 ObserveUnknown(r) ==
   /\ requestPhase[r] = "observing"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "held"]
   /\ observation' = [observation EXCEPT ![r] = "unknown"]
-  /\ UNCHANGED << runState, phase, terminalEvidence, generation,
+  /\ UNCHANGED << runState, phase, response, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
 ObserveTerminal(r) ==
@@ -78,12 +84,13 @@ ObserveTerminal(r) ==
   /\ runState = "terminal"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "terminalObserved"]
   /\ observation' = [observation EXCEPT ![r] = "terminal"]
-  /\ UNCHANGED << runState, phase, terminalEvidence, generation,
+  /\ UNCHANGED << runState, phase, response, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
-ReturnClosing(r) ==
+ReturnCurrent(r) ==
   /\ requestPhase[r] = "held"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "done"]
+  /\ response' = [response EXCEPT ![r] = "current"]
   /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
@@ -93,11 +100,11 @@ ReturnClosing(r) ==
 (***************************************************************************)
 CommitTerminal(r) ==
   /\ requestPhase[r] = "terminalObserved"
-  /\ phase \in {"closing", "offline"}
+  /\ phase \in ActivePhases \cup {"offline"}
   /\ phase' = "offline"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "opening"]
   /\ terminalEvidence' = TRUE
-  /\ UNCHANGED << runState, observation, generation, dispatchCount,
+  /\ UNCHANGED << runState, observation, response, generation, dispatchCount,
                   dispatchOwner >>
 
 (***************************************************************************)
@@ -108,6 +115,7 @@ RejectStaleTerminalCommit(r) ==
   /\ requestPhase[r] = "terminalObserved"
   /\ phase = "dispatching"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "done"]
+  /\ response' = [response EXCEPT ![r] = "replacement"]
   /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
@@ -120,7 +128,7 @@ OpenCommittedOffline(r) ==
   /\ phase = "offline"
   /\ terminalEvidence
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "opening"]
-  /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
+  /\ UNCHANGED << runState, phase, observation, response, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
 SerializeReplacement(r) ==
@@ -134,12 +142,14 @@ SerializeReplacement(r) ==
   /\ generation' = 2
   /\ dispatchCount' = 1
   /\ dispatchOwner' = r
+  /\ response' = [response EXCEPT ![r] = "replacement"]
   /\ UNCHANGED << runState, observation, terminalEvidence >>
 
 JoinReplacement(r) ==
   /\ requestPhase[r] \in {"idle", "opening"}
   /\ phase = "dispatching"
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "done"]
+  /\ response' = [response EXCEPT ![r] = "replacement"]
   /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
                   dispatchCount, dispatchOwner >>
 
@@ -150,7 +160,7 @@ Next ==
        \/ ObserveLive(r)
        \/ ObserveUnknown(r)
        \/ ObserveTerminal(r)
-       \/ ReturnClosing(r)
+       \/ ReturnCurrent(r)
        \/ CommitTerminal(r)
        \/ RejectStaleTerminalCommit(r)
        \/ OpenCommittedOffline(r)
@@ -164,6 +174,7 @@ TypeOK ==
   /\ phase \in Phases
   /\ requestPhase \in [Requests -> RequestPhases]
   /\ observation \in [Requests -> Observations]
+  /\ response \in [Requests -> Responses]
   /\ terminalEvidence \in BOOLEAN
   /\ generation \in 1..2
   /\ dispatchCount \in 0..2
@@ -178,12 +189,15 @@ ReplacementHasTerminalEvidence ==
 
 AtMostOneReplacementDispatch == dispatchCount <= 1
 
+TerminalObservationNeverReturnsCurrent ==
+  \A r \in Requests: observation[r] = "terminal" => response[r] # "current"
+
 (***************************************************************************)
 (* Negative witnesses preserve both correctness boundaries.                 *)
 (***************************************************************************)
 BadReopenWithoutEvidence(r) ==
   /\ requestPhase[r] = "held"
-  /\ phase = "closing"
+  /\ phase \in ActivePhases
   /\ generation = 1
   /\ dispatchCount = 0
   /\ phase' = "dispatching"
@@ -191,6 +205,7 @@ BadReopenWithoutEvidence(r) ==
   /\ generation' = 2
   /\ dispatchCount' = 1
   /\ dispatchOwner' = r
+  /\ response' = [response EXCEPT ![r] = "replacement"]
   /\ UNCHANGED << runState, observation, terminalEvidence >>
 
 BadDuplicateDispatch(r) ==
@@ -201,7 +216,16 @@ BadDuplicateDispatch(r) ==
   /\ requestPhase' = [requestPhase EXCEPT ![r] = "done"]
   /\ dispatchCount' = 2
   /\ dispatchOwner' = r
+  /\ response' = [response EXCEPT ![r] = "replacement"]
   /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation >>
+
+BadReturnTerminalAsCurrent(r) ==
+  /\ requestPhase[r] = "terminalObserved"
+  /\ phase \in ActivePhases
+  /\ requestPhase' = [requestPhase EXCEPT ![r] = "done"]
+  /\ response' = [response EXCEPT ![r] = "current"]
+  /\ UNCHANGED << runState, phase, observation, terminalEvidence, generation,
+                  dispatchCount, dispatchOwner >>
 
 ObservationBadNext ==
   Next \/ \E r \in Requests: BadReopenWithoutEvidence(r)
@@ -212,5 +236,10 @@ DuplicateBadNext ==
   Next \/ \E r \in Requests: BadDuplicateDispatch(r)
 
 DuplicateBadSpec == Init /\ [][DuplicateBadNext]_vars
+
+StaleReturnBadNext ==
+  Next \/ \E r \in Requests: BadReturnTerminalAsCurrent(r)
+
+StaleReturnBadSpec == Init /\ [][StaleReturnBadNext]_vars
 
 ====

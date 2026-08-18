@@ -15,7 +15,7 @@ export async function openEnvironment(
 ) {
   if (typeof dispatch !== "function") throw new TypeError("Environment dispatch authority is required");
   let current = await readEnvironment(env, ownerId);
-  if (current?.status === "closing" && current.runId) {
+  if (current?.runId && ACTIVE_STATUSES.has(current.status)) {
     try {
       current = await reconcileEnvironment(env, ownerId, current, observe);
     } catch {

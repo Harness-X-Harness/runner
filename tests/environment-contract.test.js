@@ -174,7 +174,7 @@ test("a lost Durable Object open response never causes a second dispatch", async
   });
 });
 
-test("Starting open and close do not preflight an active GitHub run", async () => {
+test("Starting open and close retain the same run when observation is unavailable", async () => {
   const environments = fakeEnvironments();
   const env = {
     ENVIRONMENTS: environments.binding,
@@ -672,6 +672,51 @@ test("open reconciles one terminal closing run before dispatching its replacemen
   assert.deepEqual(dispatched, ["generation-two"]);
   assert.equal(reopened.status, "starting");
   assert.equal(environments.get("github-42").generation, "generation-two");
+});
+
+test("open reconciles one terminal ready run before dispatching its replacement", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+    ENVIRONMENT_SESSION_SECRET: "environment-session-secret",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }));
+  const generation = environments.get("github-42").generation;
+  assert.equal((await publishEnvironmentReady(env, generation, "123456", {
+    t3Url: "https://quick-tunnel.example",
+    pairingUrl: "https://quick-tunnel.example/pair#token=private",
+    tailscaleHost: "gha-123456-1",
+  })).status, 200);
+
+  const observed = [];
+  const dispatched = [];
+  const reopened = await openEnvironment(
+    env,
+    "42",
+    async (_env, request) => {
+      dispatched.push(request.environmentId);
+      return {
+        runId: "654321",
+        runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/654321",
+      };
+    },
+    () => "generation-two",
+    async () => { throw new Error("must not cancel the terminal run"); },
+    async (_env, runId) => {
+      observed.push(runId);
+      return { status: "completed", conclusion: "cancelled" };
+    },
+  );
+
+  assert.deepEqual(observed, ["123456"]);
+  assert.deepEqual(dispatched, ["generation-two"]);
+  assert.equal(reopened.status, "starting");
+  assert.equal(environments.get("github-42").generation, "generation-two");
+  assert.equal(environments.get("github-42").pairingUrl, undefined);
 });
 
 test("concurrent open after terminal evidence dispatches one replacement generation", async () => {

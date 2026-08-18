@@ -147,13 +147,13 @@ When GitHub reports the run terminal, the Environment entry converges to
 Offline. GitHub Actions remains lifecycle authority; users can cancel the run
 directly if ChatGPT is unavailable.
 
-Starting and Ready open requests, plus close requests, do not preflight the
-recorded run through GitHub. They use the serialized Environment record for
-the idempotent command path. An Open request received while Closing observes
-only the exact recorded run. Confirmed terminal state converges the old
-generation and permits one serialized replacement dispatch in the same
-request. A non-terminal or unavailable observation stays Closing. The stable
-browser entry remains the read boundary for terminal Starting and Ready runs.
+An Open request with an exact recorded run first observes only that run through
+GitHub. Confirmed terminal state converges the old generation and permits one
+serialized replacement dispatch in the same request. A non-terminal or
+unavailable observation returns the existing Starting, Ready, or Closing state
+without dispatch. Close requests use the serialized Environment record and
+cancel only its exact run. The stable browser entry applies the same terminal
+observation before it redirects to T3.
 
 ### Distributed lifecycle and failure contract
 
@@ -187,6 +187,7 @@ when no run claims the generation.
 | Tool install, Tailscale, Tunnel, or T3 fails | Exact run remains stored | GitHub run fails | Environment entry observes terminal GitHub state |
 | Ready callback is delayed or rejected | No new descriptor is published | Preparing or Offline | Exact generation and run checks reject stale delivery |
 | Ready callback commits but its response is lost | Descriptor may exist briefly while the workflow fails | Entry checks GitHub before redirect | Terminal observation removes the descriptor and returns Offline |
+| Open reads Starting or Ready after the exact run terminated | GitHub exact-run observation plus owner Durable Object | One replacement generation starts instead of returning stale active state | Terminal observation and serialized open occur in one request |
 | Close storage response is lost | Revocation or `cancelPending` remains committed | Tool transport error | Repeated close is safe and can cancel only the same run |
 | Close cancel response is lost or GitHub is unavailable | `cancelPending` remains on the exact run | Closing | Repeated close retries only that run; terminal observation clears it |
 | Open arrives after close while the exact run is terminal | GitHub exact-run observation plus owner Durable Object | One replacement generation starts | Terminal observation and serialized open occur in one request |
@@ -214,14 +215,15 @@ counterexamples for stale descriptor publication, stale-run admission, and
 premature loss of cancel responsibility.
 
 `formal/EnvironmentReopen.tla` is a focused obligation model for concurrent
-Open requests while an Environment is Closing. It keeps GitHub run reality,
+Open requests while an Environment has a known Starting, Ready, or Closing run. It keeps GitHub run reality,
 the per-request observation (`terminal`, `live`, or `unknown`), committed
 terminal evidence, and replacement dispatch ownership distinct. Its positive
 configuration checks that only committed terminal evidence authorizes a
 replacement and that two concurrent Open requests dispatch at most one new
-generation. Two faulty configurations preserve counterexamples for treating a
+generation. Three faulty configurations preserve counterexamples for treating a
 live or unknown observation as terminal and for issuing a second replacement
-dispatch. The controlled trace
+dispatch, or for returning the old active generation after a terminal
+observation. The controlled trace
 `concurrent open after terminal evidence dispatches one replacement generation`
 holds both GitHub observations at the same cut point, then proves the owner
 Durable Object permits only one replacement dispatch.
@@ -229,7 +231,7 @@ Durable Object permits only one replacement dispatch.
 | Model transition | Implementation seam |
 | --- | --- |
 | `Open` | `EnvironmentObject /environment/open` commits owner slot and generation before dispatch |
-| `ReopenAfterTerminal` | Closing `open_environment` confirms the exact run terminal, commits Offline, and serializes one replacement open |
+| `ReopenAfterTerminal` | `open_environment` confirms an exact Starting, Ready, or Closing run terminal, commits Offline, and serializes one replacement open |
 | `DispatchRejected` | Typed pre-effect or non-ambiguous GitHub rejection calls `/environment/dispatch-failed` |
 | `CommitDispatch` | Successful GitHub response calls `/environment/dispatch` with the exact run |
 | `DispatchOutcomeUnknown` | Lost response, malformed success, `408`, or `5xx` calls `/environment/dispatch-unknown` without retry |
