@@ -14,8 +14,16 @@ export async function openEnvironment(
   dispatch = dispatchEnvironmentWorkflow,
   newGeneration = () => issueEnvironmentIdentity(ownerId, env.ENVIRONMENT_SESSION_SECRET),
   cancel = cancelEnvironmentWorkflow,
+  observe = getEnvironmentWorkflowRun,
 ) {
-  const current = await readEnvironment(env, ownerId);
+  let current = await readEnvironment(env, ownerId);
+  if (current?.status === "closing" && current.runId) {
+    try {
+      current = await reconcileEnvironment(env, ownerId, current, observe);
+    } catch {
+      return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
+    }
+  }
   if (current && ACTIVE_STATUSES.has(current.status)) {
     return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
   }

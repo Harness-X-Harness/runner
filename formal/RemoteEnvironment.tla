@@ -65,6 +65,28 @@ Open ==
   /\ UNCHANGED << liveRun, cancelledRuns >>
 
 (***************************************************************************)
+(* One Open request can observe that the exact closing GitHub run is       *)
+(* terminal and create the next generation. A failed or non-terminal       *)
+(* observation does not enable this action.                                *)
+(***************************************************************************)
+ReopenAfterTerminal ==
+  /\ phase = "closing"
+  /\ runId # NoIdentity
+  /\ liveRun = NoIdentity
+  /\ generation < 2
+  /\ generation' = generation + 1
+  /\ validGeneration' = generation + 1
+  /\ phase' = "dispatching"
+  /\ runId' = NoIdentity
+  /\ admittedRun' = NoIdentity
+  /\ descriptorGeneration' = NoIdentity
+  /\ descriptorRun' = NoIdentity
+  /\ closeRequested' = FALSE
+  /\ cancelPending' = FALSE
+  /\ dispatchIssued' = TRUE
+  /\ UNCHANGED << liveRun, cancelledRuns >>
+
+(***************************************************************************)
 (* A response proving rejection means no run was created for this request. *)
 (* An older unclaimed run can still exist and remains unable to pass the    *)
 (* now-invalid claim gate.                                                  *)
@@ -212,22 +234,37 @@ StaleRunStopsAtClaim ==
                   descriptorGeneration, descriptorRun, closeRequested,
                   cancelPending, dispatchIssued, cancelledRuns >>
 
-GitHubTerminates ==
+GitHubRunTerminates ==
   /\ phase \in {"starting", "ready", "closing"}
   /\ runId # NoIdentity
   /\ admittedRun \in {NoIdentity, runId}
+  /\ liveRun = runId
+  /\ liveRun' = NoIdentity
+  /\ UNCHANGED << generation, validGeneration, phase, runId, admittedRun,
+                  descriptorGeneration, descriptorRun, closeRequested,
+                  cancelPending, dispatchIssued, cancelledRuns >>
+
+(***************************************************************************)
+(* Terminal reality and control-plane observation are distinct. The stable *)
+(* browser entry can commit Offline; Open can instead take the direct       *)
+(* ReopenAfterTerminal path above.                                          *)
+(***************************************************************************)
+ObserveTerminal ==
+  /\ phase \in {"starting", "ready", "closing"}
+  /\ runId # NoIdentity
+  /\ liveRun = NoIdentity
   /\ phase' = "offline"
   /\ validGeneration' = NoIdentity
-  /\ liveRun' = IF liveRun = runId THEN NoIdentity ELSE liveRun
   /\ admittedRun' = NoIdentity
   /\ cancelPending' = FALSE
   /\ descriptorGeneration' = NoIdentity
   /\ descriptorRun' = NoIdentity
-  /\ UNCHANGED << generation, runId, closeRequested, dispatchIssued,
+  /\ UNCHANGED << generation, runId, liveRun, closeRequested, dispatchIssued,
                   cancelledRuns >>
 
 Next ==
   \/ Open
+  \/ ReopenAfterTerminal
   \/ DispatchRejected
   \/ CommitDispatch
   \/ DispatchOutcomeUnknown
@@ -239,13 +276,14 @@ Next ==
   \/ SendCancel
   \/ AcknowledgeCancel
   \/ StaleRunStopsAtClaim
-  \/ GitHubTerminates
+  \/ GitHubRunTerminates
+  \/ ObserveTerminal
 
 Spec == Init /\ [][Next]_vars
              /\ WF_vars(SendCancel)
              /\ WF_vars(AcknowledgeCancel)
              /\ WF_vars(StaleRunStopsAtClaim)
-             /\ WF_vars(GitHubTerminates)
+             /\ WF_vars(GitHubRunTerminates)
 
 TypeOK ==
   /\ generation \in 0..2
@@ -281,7 +319,7 @@ KnownRunIsCurrent ==
   phase \in {"starting", "ready"} =>
     /\ validGeneration = generation
     /\ runId = generation
-    /\ liveRun = generation
+    /\ liveRun \in {NoIdentity, generation}
 
 ReadyRunIsAdmitted == phase = "ready" => admittedRun = runId
 
@@ -292,8 +330,9 @@ CancelResponsibilityRetained ==
    /\ runId \notin cancelledRuns)
   => cancelPending
 
-ClosingConverges ==
-  []((phase = "closing" /\ runId # NoIdentity) => <>(phase = "offline"))
+ClosingRunTerminates ==
+  []((phase = "closing" /\ runId # NoIdentity /\ liveRun = runId) =>
+    <>(liveRun = NoIdentity))
 
 InvalidGenerationRunStops ==
   []((liveRun # NoIdentity /\ liveRun # validGeneration /\
