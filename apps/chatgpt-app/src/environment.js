@@ -12,6 +12,7 @@ export async function openEnvironment(
   newGeneration = () => issueEnvironmentIdentity(ownerId, env.ENVIRONMENT_SESSION_SECRET),
   cancel = missingWorkflowAuthority,
   observe = missingWorkflowAuthority,
+  observeOnly = false,
 ) {
   if (typeof dispatch !== "function") throw new TypeError("Environment dispatch authority is required");
   let current = await readEnvironment(env, ownerId);
@@ -21,6 +22,9 @@ export async function openEnvironment(
     } catch {
       return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
     }
+  }
+  if (observeOnly) {
+    return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);
   }
   if (current && ACTIVE_STATUSES.has(current.status)) {
     return publicEnvironment(current, env.TASK_CONTROL_PLANE_URL);

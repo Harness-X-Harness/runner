@@ -88,8 +88,9 @@ generation fails this gate.
 _Avoid_: dispatch response, ready callback
 
 **Connection Descriptor**:
-Private connection data for one active Environment, such as its Tailscale host
-and T3 pairing entry. It exists only in owner-scoped state and the runner.
+Private T3 connection data for one active Environment. It exists only in
+owner-scoped state and the runner. The optional Tailscale hostname is derived
+from the exact GitHub run and is not part of readiness.
 _Avoid_: stable tunnel, MCP result, artifact
 
 **T3 Interface**:

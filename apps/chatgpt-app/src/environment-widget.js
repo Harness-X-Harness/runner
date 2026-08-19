@@ -1,6 +1,6 @@
 import { WIDGET_BASE_STYLES, WIDGET_HOST_CONTEXT_SCRIPT } from "./widget-shell.js";
 
-export const ENVIRONMENT_WIDGET_URI = "ui://environment/v5.html";
+export const ENVIRONMENT_WIDGET_URI = "ui://environment/v6.html";
 export const ENVIRONMENT_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 export function environmentWidgetHtml(controlPlaneUrl) {
@@ -48,6 +48,8 @@ ${WIDGET_BASE_STYLES}
     let current;
     let openRefresh;
     let openRequested = true;
+    let replacementAvailable;
+    let replacementStarted = false;
 
 ${WIDGET_HOST_CONTEXT_SCRIPT}
 
@@ -72,9 +74,14 @@ ${WIDGET_HOST_CONTEXT_SCRIPT}
         offline: ["Offline", "The temporary environment is closed."],
       };
       const state = states[current.status] ? current.status : "starting";
+      if (replacementAvailable === undefined) replacementAvailable = state === "closing";
+      if (state === "starting" && replacementStarted) replacementAvailable = false;
+      if (state === "ready") openRequested = false;
+      if (state === "closing" && !replacementAvailable) openRequested = false;
+      if (state === "offline" && (!replacementAvailable || replacementStarted)) openRequested = false;
       badge.dataset.status = state;
       statusLabel.textContent = states[state][0];
-      description.textContent = state === "closing" && openRequested
+      description.textContent = state === "closing" && openRequested && replacementAvailable
         ? "The runner is stopping. A replacement will start automatically."
         : states[state][1];
 
@@ -108,10 +115,10 @@ ${WIDGET_HOST_CONTEXT_SCRIPT}
     function scheduleOpenRefresh(state) {
       if (openRefresh !== undefined) clearTimeout(openRefresh);
       openRefresh = undefined;
-      if (!openRequested || (state !== "closing" && state !== "starting")) return;
+      if (!openRequested || (state !== "starting" && !(state === "closing" && replacementAvailable))) return;
       openRefresh = setTimeout(() => {
         openRefresh = undefined;
-        callTool("open_environment");
+        callTool("open_environment", { operation: "observe" }, "observe");
       }, 10_000);
     }
 
@@ -125,25 +132,48 @@ ${WIDGET_HOST_CONTEXT_SCRIPT}
       window.parent.postMessage({ jsonrpc: "2.0", method }, "*");
     }
 
-    async function callTool(name) {
-      openRequested = name === "open_environment";
+    async function callTool(name, args = {}, mode = "command") {
+      if (mode === "command" && name === "open_environment") {
+        openRequested = true;
+        replacementAvailable = undefined;
+        replacementStarted = false;
+      }
+      if (mode === "command" && name === "close_environment") openRequested = false;
       setBusy(true);
       let failed = false;
       let rendered = false;
+      let startReplacement = false;
       try {
-        const result = await request("tools/call", { name, arguments: {} });
+        const result = await request("tools/call", { name, arguments: args });
         if (result?.structuredContent) {
-          render(result.structuredContent);
-          rendered = true;
+          const snapshot = result.structuredContent;
+          startReplacement = mode === "observe" && snapshot.status === "offline" &&
+            openRequested && replacementAvailable && !replacementStarted;
+          if (!startReplacement) {
+            render(snapshot);
+            rendered = true;
+          }
         }
       } catch {
         failed = true;
       } finally {
         setBusy(false);
       }
-      const openPending = openRequested && (current?.status === "closing" || current?.status === "starting");
+      if (startReplacement) {
+        replacementStarted = true;
+        await callTool("open_environment", { operation: "open" }, "replacement");
+        return;
+      }
+      if (failed && name === "open_environment" && mode !== "observe") {
+        if (mode === "replacement") replacementAvailable = false;
+        render({ status: "starting" });
+        message.textContent = "Checking whether the environment started…";
+        return;
+      }
+      const openPending = openRequested &&
+        (current?.status === "starting" || (current?.status === "closing" && replacementAvailable));
       if (failed) message.textContent = openPending ? "Still waiting. Retrying…" : "Could not update the environment.";
-      if (!rendered && openPending) scheduleOpenRefresh(current.status);
+      if (!rendered && mode === "observe" && openPending) scheduleOpenRefresh(current.status);
     }
 
     async function openLink(href) {
@@ -157,7 +187,10 @@ ${WIDGET_HOST_CONTEXT_SCRIPT}
     }
 
     function perform(button) {
-      if (button.dataset.action) callTool(button.dataset.action);
+      if (button.dataset.action) callTool(
+        button.dataset.action,
+        button.dataset.action === "open_environment" ? { operation: "open" } : {},
+      );
       else openLink(button.dataset.href);
     }
 

@@ -298,9 +298,14 @@ interrupt_turn(sessionId, activeTurnId)
 respond_to_session(sessionId, requestId, choiceId, values?)
 take_over_session(sessionId)
 stop_session(sessionId)
-open_environment()
+open_environment(operation = "open" | "observe")
 close_environment()
 ```
+
+`open` is an explicit user mutation. `observe` is reserved for side-effect-free
+Widget refresh and cannot create a generation or dispatch a workflow. The
+required discriminator also makes a cached client with the old empty argument
+contract fail closed.
 
 `cancel_queued_turn` fails after its turn starts. `interrupt_turn` fails when `activeTurnId` is stale. `respond_to_session` fails after its exact request resolves. `steer` starts a new turn only when the Session is idle; it fails while the control channel is disconnected. Explicit `queue` remains durable while the channel is disconnected.
 

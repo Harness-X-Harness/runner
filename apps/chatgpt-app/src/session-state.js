@@ -5,6 +5,11 @@ const SESSION_COMMAND_PREFIX = "session:command:";
 
 export const SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
+export function environmentTerminalReason(environment) {
+  if (environment?.closeRequested) return "stopped";
+  return environment?.status === "ready" ? "environment_ended" : "startup_failed";
+}
+
 const SESSION_PHASES = new Set([
   "preparing",
   "idle",

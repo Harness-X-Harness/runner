@@ -1,124 +1,190 @@
 ---- MODULE EnvironmentWidget ----
 
+EXTENDS Naturals
+
 (***************************************************************************)
-(* Focused obligation for the Environment Widget while one explicit Open   *)
-(* intent remains active. The backend owns Environment lifecycle state.    *)
-(* The Widget owns only its displayed snapshot, one timer, and one tool     *)
-(* call. An explicit Close supersedes the local Open intent.                *)
+(* The backend owns the Environment lifecycle. The Widget may observe that *)
+(* authority. Only one explicit user Open, or the one replacement reserved *)
+(* when that Open first sees Closing, may mutate it.                        *)
 (***************************************************************************)
 
 VARIABLES authorityPhase,
           displayedPhase,
           intent,
           timerArmed,
-          callPending,
-          failureAvailable
+          callKind,
+          failureAvailable,
+          replacementBudget,
+          replacementCount
 
-vars == << authorityPhase, displayedPhase, intent, timerArmed,
-           callPending, failureAvailable >>
+vars == << authorityPhase, displayedPhase, intent, timerArmed, callKind,
+           failureAvailable, replacementBudget, replacementCount >>
 
 Phases == {"closing", "offline", "starting", "ready"}
-ObservedOpenPhases == {"closing", "starting"}
 Intents == {"open", "closed"}
+CallKinds == {"none", "observe", "replace"}
 
 Init ==
-  /\ authorityPhase \in ObservedOpenPhases
+  /\ authorityPhase \in {"closing", "starting"}
   /\ displayedPhase = authorityPhase
   /\ intent = "open"
   /\ timerArmed = TRUE
-  /\ callPending = FALSE
+  /\ callKind = "none"
   /\ failureAvailable = TRUE
+  /\ replacementBudget = IF authorityPhase = "closing" THEN 1 ELSE 0
+  /\ replacementCount = 0
 
-ArmOpenRefresh ==
-  /\ intent = "open"
-  /\ displayedPhase \in ObservedOpenPhases
+CanObserve ==
+  intent = "open" /\
+    (displayedPhase = "starting" \/
+      (displayedPhase = "closing" /\ replacementBudget = 1))
+
+ArmObservation ==
+  /\ CanObserve
   /\ ~timerArmed
-  /\ ~callPending
+  /\ callKind = "none"
   /\ timerArmed' = TRUE
-  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callPending,
-                  failureAvailable >>
+  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callKind,
+                  failureAvailable, replacementBudget, replacementCount >>
 
 TimerFires ==
-  /\ intent = "open"
+  /\ CanObserve
   /\ timerArmed
-  /\ ~callPending
+  /\ callKind = "none"
   /\ timerArmed' = FALSE
-  /\ callPending' = TRUE
+  /\ callKind' = "observe"
   /\ UNCHANGED << authorityPhase, displayedPhase, intent,
-                  failureAvailable >>
+                  failureAvailable, replacementBudget, replacementCount >>
 
-(***************************************************************************)
-(* The finite obligation admits one transient MCP failure. The active Open *)
-(* intent rearms the timer instead of becoming a stale snapshot.           *)
-(***************************************************************************)
-OpenCallFails ==
+ObservationFails ==
   /\ intent = "open"
-  /\ callPending
+  /\ callKind = "observe"
   /\ failureAvailable
-  /\ callPending' = FALSE
+  /\ callKind' = "none"
   /\ failureAvailable' = FALSE
-  /\ UNCHANGED << authorityPhase, displayedPhase, intent, timerArmed >>
+  /\ UNCHANGED << authorityPhase, displayedPhase, intent, timerArmed,
+                  replacementBudget, replacementCount >>
 
-OpenReturnsCurrent ==
+ObserveStarting ==
   /\ intent = "open"
-  /\ callPending
-  /\ authorityPhase \in {"closing", "starting", "ready"}
-  /\ displayedPhase' = authorityPhase
-  /\ callPending' = FALSE
-  /\ UNCHANGED << authorityPhase, intent, timerArmed, failureAvailable >>
+  /\ callKind = "observe"
+  /\ authorityPhase = "starting"
+  /\ displayedPhase' = "starting"
+  /\ callKind' = "none"
+  /\ UNCHANGED << authorityPhase, intent, timerArmed, failureAvailable,
+                  replacementBudget, replacementCount >>
 
-(***************************************************************************)
-(* An Open that observes terminal evidence creates one replacement through *)
-(* the backend contract. The Widget observes only the resulting Starting   *)
-(* phase; replacement dispatch safety remains in EnvironmentReopen.tla.    *)
-(***************************************************************************)
-OpenStartsReplacement ==
+ObserveReady ==
   /\ intent = "open"
-  /\ callPending
+  /\ callKind = "observe"
+  /\ authorityPhase = "ready"
+  /\ displayedPhase' = "ready"
+  /\ intent' = "closed"
+  /\ timerArmed' = FALSE
+  /\ callKind' = "none"
+  /\ UNCHANGED << authorityPhase, failureAvailable, replacementBudget,
+                  replacementCount >>
+
+ObserveClosing ==
+  /\ intent = "open"
+  /\ callKind = "observe"
+  /\ authorityPhase = "closing"
+  /\ displayedPhase' = "closing"
+  /\ callKind' = "none"
+  /\ IF replacementBudget = 1
+       THEN UNCHANGED << intent, timerArmed >>
+       ELSE /\ intent' = "closed"
+            /\ timerArmed' = FALSE
+  /\ UNCHANGED << authorityPhase, failureAvailable, replacementBudget,
+                  replacementCount >>
+
+ObserveOffline ==
+  /\ intent = "open"
+  /\ callKind = "observe"
+  /\ authorityPhase = "offline"
+  /\ displayedPhase' = "offline"
+  /\ timerArmed' = FALSE
+  /\ IF replacementBudget = 1
+       THEN /\ callKind' = "replace"
+            /\ replacementBudget' = 0
+            /\ replacementCount' = replacementCount + 1
+            /\ UNCHANGED intent
+       ELSE /\ callKind' = "none"
+            /\ intent' = "closed"
+            /\ UNCHANGED << replacementBudget, replacementCount >>
+  /\ UNCHANGED << authorityPhase, failureAvailable >>
+
+ReplacementStarts ==
+  /\ intent = "open"
+  /\ callKind = "replace"
   /\ authorityPhase = "offline"
   /\ authorityPhase' = "starting"
   /\ displayedPhase' = "starting"
-  /\ callPending' = FALSE
-  /\ UNCHANGED << intent, timerArmed, failureAvailable >>
+  /\ callKind' = "none"
+  /\ UNCHANGED << intent, timerArmed, failureAvailable, replacementBudget,
+                  replacementCount >>
 
+(***************************************************************************)
+(* A GitHub run may terminate before Ready. This production transition was *)
+(* missing from the previous model and hid an unbounded replacement loop.  *)
+(***************************************************************************)
 GitHubRunTerminates ==
-  /\ authorityPhase = "closing"
+  /\ authorityPhase \in {"closing", "starting"}
   /\ authorityPhase' = "offline"
-  /\ UNCHANGED << displayedPhase, intent, timerArmed, callPending,
-                  failureAvailable >>
+  /\ UNCHANGED << displayedPhase, intent, timerArmed, callKind,
+                  failureAvailable, replacementBudget, replacementCount >>
 
 ReadyCallback ==
   /\ authorityPhase = "starting"
   /\ authorityPhase' = "ready"
-  /\ UNCHANGED << displayedPhase, intent, timerArmed, callPending,
-                  failureAvailable >>
+  /\ UNCHANGED << displayedPhase, intent, timerArmed, callKind,
+                  failureAvailable, replacementBudget, replacementCount >>
+
+(***************************************************************************)
+(* A Close from this or another client revokes automatic replacement. The  *)
+(* Widget can learn an external Close on its next observation.              *)
+(***************************************************************************)
+ExternalClose ==
+  /\ authorityPhase \in {"starting", "ready"}
+  /\ authorityPhase' = "closing"
+  /\ replacementBudget' = 0
+  /\ UNCHANGED << displayedPhase, intent, timerArmed, callKind,
+                  failureAvailable, replacementCount >>
 
 ExplicitClose ==
   /\ intent = "open"
-  /\ authorityPhase \in {"starting", "ready"}
-  /\ ~callPending
+  /\ authorityPhase \in {"starting", "ready", "closing"}
+  /\ callKind = "none"
   /\ authorityPhase' = "closing"
   /\ displayedPhase' = "closing"
   /\ intent' = "closed"
   /\ timerArmed' = FALSE
-  /\ UNCHANGED << callPending, failureAvailable >>
+  /\ replacementBudget' = 0
+  /\ UNCHANGED << callKind, failureAvailable, replacementCount >>
 
 CoreNext ==
   \/ TimerFires
-  \/ OpenCallFails
-  \/ OpenReturnsCurrent
-  \/ OpenStartsReplacement
+  \/ ObservationFails
+  \/ ObserveStarting
+  \/ ObserveReady
+  \/ ObserveClosing
+  \/ ObserveOffline
+  \/ ReplacementStarts
   \/ GitHubRunTerminates
   \/ ReadyCallback
+  \/ ExternalClose
   \/ ExplicitClose
 
-Next == ArmOpenRefresh \/ CoreNext
+Next == ArmObservation \/ CoreNext
 
 Spec == Init /\ [][Next]_vars
-               /\ WF_vars(ArmOpenRefresh)
+               /\ WF_vars(ArmObservation)
                /\ WF_vars(TimerFires)
-               /\ WF_vars(OpenReturnsCurrent)
-               /\ WF_vars(OpenStartsReplacement)
+               /\ WF_vars(ObserveStarting)
+               /\ WF_vars(ObserveReady)
+               /\ WF_vars(ObserveClosing)
+               /\ WF_vars(ObserveOffline)
+               /\ WF_vars(ReplacementStarts)
                /\ WF_vars(GitHubRunTerminates)
                /\ WF_vars(ReadyCallback)
 
@@ -127,38 +193,44 @@ TypeOK ==
   /\ displayedPhase \in Phases
   /\ intent \in Intents
   /\ timerArmed \in BOOLEAN
-  /\ callPending \in BOOLEAN
+  /\ callKind \in CallKinds
   /\ failureAvailable \in BOOLEAN
+  /\ replacementBudget \in 0..1
+  /\ replacementCount \in 0..2
 
 ClosedIntentHasNoOpenWork ==
-  intent = "closed" => ~timerArmed /\ ~callPending
+  intent = "closed" => ~timerArmed /\ callKind = "none"
 
 ReadyDisplayHasNoOpenWork ==
-  displayedPhase = "ready" => ~timerArmed /\ ~callPending
+  displayedPhase = "ready" => ~timerArmed /\ callKind = "none"
+
+AtMostOneReplacement == replacementCount <= 1
 
 OpenIntentConverges ==
   []((intent = "open") => <>(displayedPhase = "ready" \/ intent = "closed"))
 
 (***************************************************************************)
-(* Historical fault: only Closing rearms. After replacement or an initial  *)
-(* Starting result, the display remains Starting even after Ready.         *)
+(* Historical fault: only Closing rearms, so Starting can stay stale.      *)
 (***************************************************************************)
 BadArmOnlyClosing ==
   /\ intent = "open"
   /\ displayedPhase = "closing"
+  /\ replacementBudget = 1
   /\ ~timerArmed
-  /\ ~callPending
+  /\ callKind = "none"
   /\ timerArmed' = TRUE
-  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callPending,
-                  failureAvailable >>
+  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callKind,
+                  failureAvailable, replacementBudget, replacementCount >>
 
 BadRefreshNext == BadArmOnlyClosing \/ CoreNext
-
 BadRefreshSpec == Init /\ [][BadRefreshNext]_vars
                          /\ WF_vars(BadArmOnlyClosing)
                          /\ WF_vars(TimerFires)
-                         /\ WF_vars(OpenReturnsCurrent)
-                         /\ WF_vars(OpenStartsReplacement)
+                         /\ WF_vars(ObserveStarting)
+                         /\ WF_vars(ObserveReady)
+                         /\ WF_vars(ObserveClosing)
+                         /\ WF_vars(ObserveOffline)
+                         /\ WF_vars(ReplacementStarts)
                          /\ WF_vars(GitHubRunTerminates)
                          /\ WF_vars(ReadyCallback)
 
@@ -166,12 +238,30 @@ BadArmAfterClose ==
   /\ intent = "closed"
   /\ displayedPhase = "closing"
   /\ ~timerArmed
-  /\ ~callPending
+  /\ callKind = "none"
   /\ timerArmed' = TRUE
-  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callPending,
-                  failureAvailable >>
+  /\ UNCHANGED << authorityPhase, displayedPhase, intent, callKind,
+                  failureAvailable, replacementBudget, replacementCount >>
 
 BadCloseNext == Next \/ BadArmAfterClose
 BadCloseSpec == Init /\ [][BadCloseNext]_vars
+
+(***************************************************************************)
+(* Production fault: an observation was implemented as a mutating Open. It *)
+(* could dispatch another replacement after the first replacement failed.  *)
+(***************************************************************************)
+BadRepeatReplacement ==
+  /\ intent = "open"
+  /\ callKind = "observe"
+  /\ authorityPhase = "offline"
+  /\ replacementBudget = 0
+  /\ authorityPhase' = "starting"
+  /\ displayedPhase' = "starting"
+  /\ callKind' = "none"
+  /\ replacementCount' = replacementCount + 1
+  /\ UNCHANGED << intent, timerArmed, failureAvailable, replacementBudget >>
+
+BadReplacementNext == Next \/ BadRepeatReplacement
+BadReplacementSpec == Init /\ [][BadReplacementNext]_vars
 
 ====

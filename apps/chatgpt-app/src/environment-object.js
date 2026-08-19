@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import {
   createSessionRecord,
+  environmentTerminalReason,
   expireSessions,
   handleSessionRequest,
   pendingGenerationCommands,
@@ -321,7 +322,6 @@ export class EnvironmentObject extends DurableObject {
           channelPreparation: {
             pairingUrl: String(event.pairingUrl),
             t3Url: String(event.t3Url),
-            tailscaleHost: String(event.tailscaleHost),
           },
           updatedAt: new Date().toISOString(),
         };
@@ -413,7 +413,6 @@ export class EnvironmentObject extends DurableObject {
           cancelPending: Boolean(current.runId),
           pairingUrl: undefined,
           t3Url: undefined,
-          tailscaleHost: undefined,
           channelState: "disconnected",
           connectionId: undefined,
           channelPreparation: undefined,
@@ -459,6 +458,7 @@ export class EnvironmentObject extends DurableObject {
       const result = await this.ctx.storage.transaction(async (storage) => {
         const current = /** @type {any} */ (await storage.get(STORAGE_KEY));
         if (!current || current.runId !== String(event.runId)) return undefined;
+        const terminalReason = environmentTerminalReason(current);
         const environment = {
           ownerId: current.ownerId,
           generation: current.generation,
@@ -475,7 +475,7 @@ export class EnvironmentObject extends DurableObject {
         await terminateGenerationSessions(
           storage,
           current.generation,
-          current.closeRequested ? "stopped" : "environment_ended",
+          terminalReason,
         );
         return environment;
       });

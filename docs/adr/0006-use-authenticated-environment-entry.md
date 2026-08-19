@@ -6,13 +6,18 @@ returns the caller's active run, and `close_environment` records close intent
 and cancels that exact run. The GitHub-hosted platform limit remains the final
 execution bound.
 
-When Open observes a Starting, Ready, or Closing record with an exact run, it
-checks only that GitHub run. A confirmed terminal run permits one serialized
-replacement generation in the same request. A live or unavailable observation
-returns the current phase and cannot authorize another dispatch.
+An explicit Open that observes a Starting, Ready, or Closing record checks only
+that exact GitHub run. A confirmed terminal run permits one serialized
+replacement generation in that user request. The Widget's timed observation is
+an explicit read-only mode: it can reconcile the run, but cannot create a
+generation or dispatch. If the original Open first sees Closing, the Widget may
+consume one replacement Open after terminal evidence. A failed replacement
+becomes Offline instead of recursively reopening. A Close from any client
+revokes this local continuation.
 
-After T3, Quick Tunnel, and Tailscale are ready, the workflow publishes one
-Connection Descriptor through a GitHub OIDC-authenticated callback. The stable
+After T3 and its Quick Tunnel are ready, the workflow publishes one Connection
+Descriptor through a GitHub OIDC-authenticated runtime. Tailscale is a separate
+best-effort administrator interface and does not enter this descriptor. The stable
 control-plane Environment entry verifies GitHub browser identity before it
 redirects the owner to T3's native pairing flow.
 

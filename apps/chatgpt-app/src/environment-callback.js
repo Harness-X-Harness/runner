@@ -46,7 +46,6 @@ export async function prepareEnvironmentChannel(
   if (
     typeof descriptor?.pairingUrl !== "string" ||
     typeof descriptor?.t3Url !== "string" ||
-    typeof descriptor?.tailscaleHost !== "string" ||
     !validEnvironmentDescriptor(descriptor)
   ) return json({ error: "invalid environment descriptor" }, 400);
 
@@ -63,7 +62,6 @@ export async function prepareEnvironmentChannel(
           runAttempt: String(runAttempt),
           pairingUrl: descriptor.pairingUrl,
           t3Url: descriptor.t3Url,
-          tailscaleHost: descriptor.tailscaleHost,
         }),
       },
     );
@@ -100,8 +98,7 @@ export function validEnvironmentDescriptor(descriptor) {
       pairing.protocol === "https:" &&
       pairing.origin === t3.origin &&
       pairing.pathname === "/pair" &&
-      new URLSearchParams(pairing.hash.slice(1)).has("token") &&
-      /^gha-\d+-\d+$/.test(descriptor.tailscaleHost);
+      new URLSearchParams(pairing.hash.slice(1)).has("token");
   } catch {
     return false;
   }

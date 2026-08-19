@@ -7,12 +7,13 @@ Environment URL. The control plane dispatches **Private Development
 Environment** with one signed generation and one opaque owner concurrency
 slot. The workflow uses the fixed `session--none` GitHub Environment. It
 claims its exact run through GitHub OIDC before loading credentials or starting
-private interfaces. It then creates an empty
-`$HOME/workspace`, joins Headscale, and starts T3 through a Quick Tunnel.
+private interfaces. It then creates an empty `$HOME/workspace`, attempts the
+optional Headscale attachment, and starts T3 through a Quick Tunnel. A failed
+Headscale attachment does not block T3 or the Session runtime.
 
 ## Connect
 
-With the default Tailscale SSH mode:
+When the optional Tailscale attachment succeeds:
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>
@@ -24,7 +25,7 @@ Read the private connection data after connecting:
 cat ~/private-runner-session/t3code/connection.txt
 ```
 
-The file is mode `0600`. After all connections are ready, the authenticated
+The file is mode `0600`. After T3 and the Environment Control Channel are ready, the authenticated
 Environment entry redirects its owning user to T3's native pairing flow. Do
 not copy pairing data to Actions output, artifacts, chat, or public tracking
 systems.
@@ -37,7 +38,8 @@ GitHub run directly. The platform run limit is the other termination path.
 ## Failure behavior
 
 This repository follows the happy path. Native commands keep their normal
-output and exit status; the workflow has no custom retry, timeout, fallback, or
+output and exit status. Only the optional Tailscale step uses GitHub's native
+`continue-on-error`; core setup has no custom retry, timeout, fallback, or
 diagnostic-artifact layer.
 
 GitHub Actions is authoritative for current run status. The control plane only
@@ -65,15 +67,25 @@ If an exact run is already known and cancellation cannot be delivered,
 `close_environment` returns Closing and keeps the cancellation pending.
 Repeating close can affect only that same run. The stable Environment entry
 observes the exact run and changes to Offline after GitHub makes it terminal.
-Calling `open_environment` while Starting, Ready, or Closing observes only that
-exact run. If GitHub confirms it terminal, the same request creates one
-replacement generation; if the run is still live or the lookup is unavailable,
-it returns the current phase and does not dispatch.
-While an Open intent remains active, the ChatGPT Environment card repeats Open
-every ten seconds through Closing and Starting until it observes Ready. Each
-call observes the same exact run; only terminal evidence permits one
-replacement dispatch. An explicit Close clears the Open intent. The Worker
-does not persist a user token or create a background reopen job.
+An explicit `open_environment` call while Starting, Ready, or Closing observes
+only that exact run. If GitHub confirms it terminal, the same user request can
+create one replacement generation; a live or unavailable observation cannot
+dispatch.
+
+The Environment card uses `open_environment({ operation: "observe" })` every ten
+seconds while it waits. This mode can reconcile the exact run but cannot create
+a generation or dispatch a workflow. If the original Open first returned
+Closing, the card may issue one explicit replacement Open after terminal
+evidence. It consumes that one replacement before observing the new Starting
+run. A startup failure then becomes Offline; it never starts a second
+replacement. A Close observed from any MCP client clears the card's local Open
+intent. The Worker does not persist a user token or create a background reopen
+job. `operation` is required, so cached clients that omit it cannot mutate the
+Environment. A direct user Open uses `operation: "open"`.
+
+A run that terminates before Ready ends its generation-bound Sessions with
+`startup_failed`. A run that terminates after Ready uses `environment_ended`;
+an explicit Close uses `stopped`.
 If that exact-run lookup is temporarily unavailable, the entry request can
 fail, but it does not rewrite Environment state. Refresh it after GitHub
 recovers; do not use an empty list or a failed lookup to start another run.

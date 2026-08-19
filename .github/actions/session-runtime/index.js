@@ -153,7 +153,6 @@ async function privateDescriptor() {
   return {
     t3Url,
     pairingUrl,
-    tailscaleHost: `gha-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`,
   };
 }
 

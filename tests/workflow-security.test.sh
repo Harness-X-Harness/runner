@@ -60,6 +60,8 @@ grep -Fq 'environment: session--none' "$WORKFLOW" || \
   fail 'private environment must use the fixed session--none profile'
 grep -Fq 'uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' "$WORKFLOW" || \
   fail 'private environment must join the private network through the SHA-pinned official action'
+[[ "$(grep -Fc 'continue-on-error: true' "$WORKFLOW")" == 1 ]] || \
+  fail 'only the optional private-network step may tolerate failure'
 grep -Fq 'authkey: ${{ secrets.HEADSCALE_AUTHKEY }}' "$WORKFLOW" || \
   fail 'private environment must authenticate to Headscale with its environment secret'
 grep -Fq -- '--login-server=${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
@@ -85,9 +87,12 @@ fi
 claim_line="$(grep -nF 'uses: ./.github/actions/environment-control' "$WORKFLOW" | cut -d: -f1)"
 secret_line="$(grep -nF 'MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}' "$WORKFLOW" | cut -d: -f1)"
 network_line="$(grep -nF 'uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8' "$WORKFLOW" | cut -d: -f1)"
+network_optional_line="$(grep -nF 'continue-on-error: true' "$WORKFLOW" | cut -d: -f1)"
 t3_line="$(grep -nF 'uses: ./.github/actions/t3-session' "$WORKFLOW" | cut -d: -f1)"
 (( claim_line < secret_line && claim_line < network_line && claim_line < t3_line )) || \
   fail 'runner claim must precede credentials, private network, and T3 setup'
+(( network_optional_line < network_line && network_line < t3_line )) || \
+  fail 'only the pre-T3 private-network step may be best effort'
 grep -Fq 'id-token: write' "$WORKFLOW" || \
   fail 'private environment must request OIDC identity for its callback'
 runtime_line="$(grep -nF 'uses: ./.github/actions/session-runtime' "$WORKFLOW" | cut -d: -f1)"
@@ -122,6 +127,9 @@ grep -Fq '::add-mask::${pairingUrl}' "$SESSION_RUNTIME_SCRIPT" || \
   fail 'Session runtime must mask native T3 pairing access'
 grep -Fq 'new WebSocket(' "$SESSION_RUNTIME_SCRIPT" || \
   fail 'Session runtime must initiate its outbound control channel'
+if rg -q 'tailscaleHost' "$SESSION_RUNTIME_SCRIPT" "$ROOT_DIR/apps/chatgpt-app/src"; then
+  fail 'optional Tailscale identity must not enter the Environment ready descriptor'
+fi
 if rg -q 'LARK_APP_|LARK_CHAT_|lark-send' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'mandatory Lark delivery must not remain in the Environment path'
 fi
