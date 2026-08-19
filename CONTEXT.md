@@ -1,85 +1,110 @@
-# Harness X Harness Task Runner
+# Harness X Harness
 
-This context describes two parallel products: asynchronous Code Tasks and ephemeral Remote Development Environments.
+Harness X Harness provides one temporary private development Environment and
+interactive Agent Sessions for each authorized GitHub user.
 
 ## Language
 
 **Harness Principal**:
-One person identified by a stable GitHub numeric user ID. The same person remains one Principal across ChatGPT, VS Code, and other MCP clients.
+One person identified by a stable GitHub numeric user ID. The same person is
+one Principal across ChatGPT, VS Code, and other MCP clients.
 _Avoid_: MCP User, ChatGPT User, Client Account
 
 **MCP Client**:
-One software interface that connects to Harness and holds its own authorization grant. It does not define the owner of Tasks or Remote Development Environments.
+One software interface that connects to Harness and holds its own authorization
+grant. It does not own Environments or Sessions.
 _Avoid_: Harness Principal, User
 
 **MCP Grant**:
-One revocable permission relationship between an MCP Client and a Harness Principal. Grants remain separate even when several clients belong to the same Principal.
+One revocable permission relationship between an MCP Client and a Harness
+Principal. Grants remain separate when several clients belong to one Principal.
 _Avoid_: User Account, GitHub Authorization
 
 **Execution Repository**:
-The trusted GitHub repository whose workflows allocate and operate all Code Task and Remote Development Environment runners. Access to a Target Repository does not by itself grant access to this repository.
-_Avoid_: Target Repository, Workspace
-
-**Target Repository**:
-The GitHub repository that a Code Task reads or changes. Its authorization is independent of permission to use the Execution Repository.
-_Avoid_: Execution Repository, Runner Repository
+The trusted GitHub repository whose workflow allocates and operates temporary
+Environment runners.
+_Avoid_: Workspace, user project repository
 
 **Execution Authorization**:
-GitHub's decision that a Harness Principal may dispatch, observe, or cancel a workflow in the Execution Repository. Harness presents a GitHub App user token scoped to that repository and `Actions: write`, so the Principal remains the GitHub actor.
-_Avoid_: Organization Membership, Repository Installation, App Dispatch
+GitHub's decision that a Harness Principal may dispatch, observe, or cancel a
+workflow in the Execution Repository. Harness presents a GitHub App user token
+scoped to that repository and `Actions: write`; the Principal remains the
+GitHub actor.
+_Avoid_: Organization Membership, installation token, App dispatch
 
 **Agent GitHub Authorization**:
-GitHub authorization that the user establishes inside one admitted Environment for `gh`, Git, or GitHub MCP. Harness transports its interactive login prompts but does not issue, store, refresh, or inject this credential. It ends with the Environment.
-_Avoid_: Execution Authorization, MCP Grant, Harness GitHub OAuth token
+GitHub authorization that the user establishes inside one admitted Environment
+for `gh`, Git, or GitHub MCP. Harness transports interactive prompts but does
+not issue, store, refresh, or inject this credential. It ends with the
+Environment.
+_Avoid_: Execution Authorization, MCP Grant
 
 **Executor Provider Credential**:
-One platform-managed credential and provider endpoint configuration shared with trusted organization users so Codex and Grok work immediately inside an Environment. It is not isolated from other processes owned by that Environment user.
+One platform-managed credential and private provider configuration shared with
+trusted organization users so Codex and Grok work immediately. Other processes
+owned by the Environment user can read it.
 _Avoid_: Agent GitHub Authorization, Execution Authorization, per-user secret
 
 **Agent Session**:
-One user-delegated, multi-turn Codex or Grok conversation that retains native agent context until the user closes it or the runner expires. Parallel Sessions may use the same user-managed working directory; their native session records do not isolate filesystem state.
-_Avoid_: Code Task, T3 Thread, Fixed Pipeline
+One user-delegated, multi-turn Codex or Grok conversation that retains native
+agent context until it stops or the runner ends. Parallel Sessions can use the
+same user-managed working directory; native session records do not isolate
+filesystem state.
+_Avoid_: T3 Thread, fixed pipeline, workflow run
 
 **Session Controller**:
-The single MCP Grant currently allowed to send turns and answer requests for an Agent Session. The owning Harness Principal may explicitly transfer control to another of their Grants.
-_Avoid_: Session Owner, MCP Client, Lease
+The one MCP Grant allowed to send turns and answer requests for an Agent
+Session. The owning Principal can explicitly transfer control to another Grant.
+_Avoid_: Session Owner, MCP Client, lease
 
 **Session Event**:
-One private, ordered Agent output, lifecycle change, approval, question, or response in an Agent Session. A cursor identifies its position for reconnect without implying cross-Environment recovery.
-_Avoid_: Workflow Log, Complete Transcript, MCP Notification
+One private, ordered user-visible Agent output, lifecycle change, request, or
+error. Its cursor supports reconnect inside the same Environment generation.
+_Avoid_: Workflow Log, raw transcript, MCP Notification
 
 **Environment Control Channel**:
-The single outbound WebSocket from one admitted Environment Run to its owner's EnvironmentObject. It multiplexes commands and Agent Session events for that Environment generation. Tailscale, T3, and public runner ingress are not control channels.
-_Avoid_: T3 Interface, Private Network Interface, MCP connection
-
-**Code Task**:
-One asynchronous execution of one prompt that ends with a final status and result. It invokes its selected CLI driver directly and does not require T3.
-_Avoid_: Environment, T3 Thread
+The single outbound WebSocket from one admitted Environment Run to its owner's
+`EnvironmentObject`. It multiplexes commands and Session Events for that
+generation.
+_Avoid_: T3 Interface, Tailscale, MCP connection
 
 **Remote Development Environment**:
-One user-owned, general-purpose GitHub-hosted runner that exists for exactly one workflow run. It can contain zero or many repositories and can be reached through several remote clients. All files, processes, tool sessions, and credentials are destroyed when the workflow ends.
-_Avoid_: Code Task, persistent Session, repository workflow
+One user-owned GitHub-hosted runner for exactly one workflow run. It can contain
+zero or many repositories and can be reached through several remote clients.
+All files, processes, native Sessions, and transient credentials disappear when
+the run ends.
+_Avoid_: persistent machine, repository workflow
 
 **Environment Run**:
-The GitHub Actions workflow run that creates and terminates one Remote Development Environment. Its native GitHub status is lifecycle authority. The control plane stores only owner association, opaque generation, exact run identity, private delivery, and close intent.
-_Avoid_: Code Task, control-plane Session
+The GitHub Actions workflow run that creates and terminates one Environment.
+GitHub status is lifecycle authority. The control plane stores only owner,
+generation, exact run, private delivery, and close intent.
+_Avoid_: Agent Session, control-plane lifecycle authority
 
 **Environment Admission**:
-The OIDC-authenticated claim that binds one exact GitHub run to the current user generation before the workflow receives executor credentials, joins Tailscale, or starts T3. A workflow from a closed or older generation fails at this gate and is not a Remote Development Environment.
-_Avoid_: workflow dispatch response, ready callback, repository authorization
+The OIDC-authenticated claim that binds one exact GitHub run to the current user
+generation before executor credentials, Tailscale, or T3 start. A closed or old
+generation fails this gate.
+_Avoid_: dispatch response, ready callback
 
 **Connection Descriptor**:
-The current private connection information for one active Environment, such as its Tailscale hostname and T3 origin or pairing entry. The runner publishes it once to the owner-specific control-plane state through GitHub OIDC.
-_Avoid_: Stable Tunnel, credential log, artifact
+Private connection data for one active Environment, such as its Tailscale host
+and T3 pairing entry. It exists only in owner-scoped state and the runner.
+_Avoid_: stable tunnel, MCP result, artifact
 
 **T3 Interface**:
-One optional remote code-editor interface running inside the Environment. T3 owns its own projects, Threads, Turns, provider streams, approvals, diffs, and terminal, but it does not own Environment lifecycle.
+An optional remote code-editor interface inside the Environment. T3 owns its
+projects, Threads, approvals, diffs, and terminals; it does not own Environment
+or Agent Session lifecycle.
 _Avoid_: Environment control plane, MCP transport
 
 **Private Network Interface**:
-The Tailscale/Headscale connection to the Environment. It provides Tailscale SSH today and can support another remote client only when that client's protocol and required port are explicitly verified and authorized.
+The Tailscale/Headscale connection to the Environment. It provides Tailscale
+SSH and can support another verified remote client.
 _Avoid_: T3 Tunnel, proof of client compatibility
 
 **Environment Entry**:
-The stable authenticated browser route that shows Preparing, redirects the owner to T3 native pairing when ready, and becomes Offline after the authoritative GitHub run terminates.
+The stable authenticated browser route that shows Preparing, redirects the
+owner to T3 pairing when ready, and becomes Offline after the exact GitHub run
+terminates.
 _Avoid_: Stable Tunnel, pairing-token MCP result, lifecycle authority

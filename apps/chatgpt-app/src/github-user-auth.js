@@ -54,7 +54,7 @@ export async function scopeGitHubUserToken(
         accept: "application/vnd.github+json",
         authorization: `Basic ${credentials}`,
         "content-type": "application/json",
-        "user-agent": "HarnessXHarnessTaskRunner",
+        "user-agent": "HarnessXHarness",
         "x-github-api-version": API_VERSION,
       },
       body: JSON.stringify({
@@ -167,20 +167,19 @@ export async function githubGrantTokenExchange(
   requireScopedAuthority(options.props);
   const currentTime = now();
   if (options.grantType === "authorization_code") {
-    const accessTokenTTL = minimumLifetime([
-      remainingLifetime(options.props.githubAccessTokenExpiresAt, currentTime),
-      remainingLifetime(
-        options.props.environmentGithubAccessTokenExpiresAt,
-        currentTime,
-      ),
-    ]);
+    const newProps = withoutLegacyBaseAccessToken(options.props);
+    const accessTokenTTL = remainingLifetime(
+      newProps.environmentGithubAccessTokenExpiresAt,
+      currentTime,
+    );
     if (accessTokenTTL !== undefined && accessTokenTTL < MINIMUM_TOKEN_TTL) {
-      return rotateGitHubUserToken(env, options.props, fetchImpl, currentTime, true);
+      return rotateGitHubUserToken(env, newProps, fetchImpl, currentTime, true);
     }
     return compact({
+      ...(newProps !== options.props ? { newProps } : {}),
       accessTokenTTL,
       refreshTokenTTL: remainingLifetime(
-        options.props.githubRefreshTokenExpiresAt,
+        newProps.githubRefreshTokenExpiresAt,
         currentTime,
       ),
     });
@@ -220,7 +219,7 @@ async function rotateGitHubUserToken(
     fetchImpl,
   );
   const newProps = {
-    ...props,
+    ...withoutLegacyBaseAccessToken(props),
     ...githubUserTokenProps(token, scopedToken, currentTime),
   };
   const accessTokenTTL = minimumLifetime([
@@ -250,9 +249,7 @@ export function githubUserTokenProps(
   issuedAt = currentUnixTime(),
 ) {
   return compact({
-    githubAccessToken: token.access_token,
     githubRefreshToken: token.refresh_token,
-    githubAccessTokenExpiresAt: expirationTime(issuedAt, token.expires_in),
     githubRefreshTokenExpiresAt: expirationTime(
       issuedAt,
       token.refresh_token_expires_in,
@@ -318,6 +315,19 @@ function compact(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
   );
+}
+
+function withoutLegacyBaseAccessToken(props) {
+  if (
+    !Object.hasOwn(props, "githubAccessToken") &&
+    !Object.hasOwn(props, "githubAccessTokenExpiresAt")
+  ) return props;
+  const {
+    githubAccessToken: _accessToken,
+    githubAccessTokenExpiresAt: _accessTokenExpiresAt,
+    ...current
+  } = props;
+  return current;
 }
 
 function positiveInteger(value) {

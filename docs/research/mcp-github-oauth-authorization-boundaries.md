@@ -1,5 +1,7 @@
 # MCP 与 GitHub 授权页面的边界
 
+> 历史研究：授权边界分析仍有参考价值，但 legacy Task scope 和 installation-token execution 已删除。当前 MCP scope 只有 `sessions:manage` 和 `environments:manage`。
+
 研究日期：2026-08-18
 
 状态：研究结论。本文不修改实现、部署或外部配置。

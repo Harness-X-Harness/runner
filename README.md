@@ -116,12 +116,10 @@ actionlint
 See the [operations runbook](docs/runner-operations-runbook.md) for the concise
 operator flow and [SECURITY.md](SECURITY.md) for the current trust model.
 
-For ChatGPT-driven environments and code tasks, see the
-[ChatGPT app](docs/chatgpt-app.md). The same stable Worker exposes two separate
-interfaces: Remote Development Environments and Batch Code Tasks.
-Batch Codex and Grok tasks show private live semantic output in their ChatGPT
-card while preserving the workflow's final result as completion authority.
-Public-repository analysis runs without installing the GitHub App. Private
-repositories and write modes request repository installation only when their
-required access is missing; the original task remains waiting and resumes only
-after GitHub user and installation permissions are verified.
+For MCP-driven development, see the [Harness X Harness app](docs/chatgpt-app.md).
+The same stable Worker exposes Remote Development Environments and interactive
+Codex or Grok Agent Sessions. A Session card streams bounded private output and
+supports explicit Steer, Queue, request response, interruption, takeover, and
+stop controls. Harness does not clone a target repository or create commits and
+pull requests through a fixed pipeline. Users establish any needed GitHub login
+inside their private temporary Environment and direct the Agent there.

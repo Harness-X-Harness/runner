@@ -82,7 +82,7 @@ test("Environment token is scoped to one runner repository and Actions write", a
   assert.equal(token.token, "ghu_scoped");
 });
 
-test("GitHub callback stores base and scoped authority in one Principal grant", async () => {
+test("GitHub callback stores only refresh and scoped Environment authority", async () => {
   const authRequest = {
     responseType: "code",
     clientId: "client-123",
@@ -134,7 +134,7 @@ test("GitHub callback stores base and scoped authority in one Principal grant", 
   assert.equal(response.status, 302);
   assert.equal(completedAuthorization.userId, "github-123");
   assert.deepEqual(completedAuthorization.metadata, { githubLogin: "octocat" });
-  assert.equal(completedAuthorization.props.githubAccessToken, "ghu_base");
+  assert.equal(completedAuthorization.props.githubAccessToken, undefined);
   assert.equal(completedAuthorization.props.githubRefreshToken, "ghr_refresh");
   assert.equal(completedAuthorization.props.environmentGithubAccessToken, "ghu_scoped");
   assert.equal(completedAuthorization.props.environmentGithubAccessTokenExpiresAt, 1_893_456_000);
@@ -160,9 +160,7 @@ test("token properties retain GitHub App refresh metadata", () => {
       1_000,
     ),
     {
-      githubAccessToken: "ghu_base",
       githubRefreshToken: "ghr_refresh",
-      githubAccessTokenExpiresAt: 29_800,
       githubRefreshTokenExpiresAt: 15_898_600,
       environmentGithubAccessToken: "ghu_scoped",
       environmentGithubAccessTokenExpiresAt: 1_893_456_000,
@@ -171,7 +169,35 @@ test("token properties retain GitHub App refresh metadata", () => {
   );
 });
 
-test("MCP refresh rotates the base token and derives a new scoped token", async () => {
+test("token exchange removes a retained legacy base access token", async () => {
+  const result = await githubGrantTokenExchange(
+    appEnv(),
+    {
+      grantType: "authorization_code",
+      props: {
+        githubUserId: 123,
+        githubAccessToken: "ghu_legacy",
+        githubAccessTokenExpiresAt: 2_000,
+        githubRefreshToken: "ghr_current",
+        githubRefreshTokenExpiresAt: 3_000,
+        environmentGithubAccessToken: "ghu_scoped",
+        environmentGithubAccessTokenExpiresAt: 2_000,
+        githubAuthorizationKind: "github_app_scoped",
+      },
+    },
+    async () => {
+      throw new Error("refresh must not run");
+    },
+    () => 1_000,
+  );
+
+  assert.equal(result.accessTokenTTL, 1_000);
+  assert.equal(result.newProps.githubAccessToken, undefined);
+  assert.equal(result.newProps.githubAccessTokenExpiresAt, undefined);
+  assert.equal(result.newProps.environmentGithubAccessToken, "ghu_scoped");
+});
+
+test("MCP refresh derives a new scoped token without retaining the base token", async () => {
   const requests = [];
   const result = await githubGrantTokenExchange(
     appEnv(),
@@ -180,7 +206,6 @@ test("MCP refresh rotates the base token and derives a new scoped token", async 
       props: {
         githubUserId: 123,
         githubLogin: "octocat",
-        githubAccessToken: "ghu_old",
         githubRefreshToken: "ghr_old",
         environmentGithubAccessToken: "ghu_scoped_old",
         environmentGithubAccessTokenExpiresAt: 2_000,
@@ -210,7 +235,7 @@ test("MCP refresh rotates the base token and derives a new scoped token", async 
     refresh_token: "ghr_old",
   });
   assert.equal(result.accessTokenTTL, 500);
-  assert.equal(result.newProps.githubAccessToken, "ghu_new");
+  assert.equal(result.newProps.githubAccessToken, undefined);
   assert.equal(result.newProps.environmentGithubAccessToken, "ghu_scoped_new");
   assert.equal(result.newProps.githubRefreshToken, "ghr_new");
 });
@@ -249,7 +274,7 @@ test("GitHub failures expose no upstream response or credential details", async 
   );
 });
 
-test("deployment reuses the GitHub App without manual installation IDs or OAuth App secrets", async () => {
+test("deployment uses only GitHub App user authorization and no installation-token credentials", async () => {
   const files = await Promise.all(
     [
       "../apps/chatgpt-app/src/index.js",
@@ -264,4 +289,8 @@ test("deployment reuses the GitHub App without manual installation IDs or OAuth 
   assert.match(configuration, /GITHUB_APP_CLIENT_SECRET/);
   assert.doesNotMatch(configuration, /GITHUB_OAUTH_CLIENT_/);
   assert.doesNotMatch(configuration, /GITHUB_APP_INSTALLATION_ID|RUNNER_INSTALLATION_ID/);
+  assert.doesNotMatch(
+    configuration,
+    /secret put GITHUB_APP_PRIVATE_KEY|RUNNER_GITHUB_APP_ID|RUNNER_GITHUB_APP_PRIVATE_KEY/,
+  );
 });

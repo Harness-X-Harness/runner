@@ -1,9 +1,9 @@
 {
-  "name": "runner-chatgpt-app",
+  "name": "harness-x-harness-control-plane",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ../../tests/task-contract.test.js",
+    "test": "node --test ../../tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
