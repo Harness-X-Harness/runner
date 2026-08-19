@@ -54,6 +54,14 @@ const sessionPhaseSchema = z.enum([
   "stopping",
   "terminal",
 ]);
+const sessionActionSchema = z.enum([
+  "send_turn",
+  "interrupt_turn",
+  "respond_to_session",
+  "cancel_queued_turn",
+  "take_over_session",
+  "stop_session",
+]);
 const sessionSnapshotSchema = z.object({
   sessionId: z.string(),
   executor: z.enum(["codex", "grok"]),
@@ -61,6 +69,8 @@ const sessionSnapshotSchema = z.object({
   terminalReason: z.enum(["stopped", "environment_ended", "startup_failed", "driver_failed"]).optional(),
   channelState: z.enum(["connected", "disconnected"]),
   controller: z.object({ clientName: z.string(), currentGrant: z.boolean() }),
+  allowedActions: z.array(sessionActionSchema),
+  allowedTurnDeliveries: z.array(z.enum(["steer", "queue"])),
   workingDirectory: z.string(),
   activeTurnId: z.string().optional(),
   queuedTurns: z.array(z.object({ turnId: z.string(), createdAt: z.string() })),

@@ -37,10 +37,10 @@ test("nine Session tools expose one executor-neutral OAuth contract", async () =
   for (const name of names.filter((name) => name !== "list_sessions")) {
     const tool = tools.find((candidate) => candidate.name === name);
     assert.deepEqual(tool._meta.ui, {
-      resourceUri: "ui://session/v2.html",
+      resourceUri: "ui://session/v3.html",
       visibility: ["model", "app"],
     });
-    assert.equal(tool._meta["openai/outputTemplate"], "ui://session/v2.html");
+    assert.equal(tool._meta["openai/outputTemplate"], "ui://session/v3.html");
     assert.equal(tool._meta["openai/widgetAccessible"], true);
   }
   assert.equal(tools.find(({ name }) => name === "send_turn")
@@ -64,6 +64,8 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   assert.equal(started.controller.currentGrant, true);
   assert.equal(started.channelState, "connected");
   assert.equal(started.environment.status, "ready");
+  assert.deepEqual(started.allowedActions, ["stop_session"]);
+  assert.deepEqual(started.allowedTurnDeliveries, []);
   assert.doesNotMatch(JSON.stringify(started), /generation-1|grant-a|ghu_|pairing|tailscale|token/i);
   const streamMeta = startResponse.result._meta.sessionStream;
   assert.match(streamMeta.url, new RegExp(`/session-stream/${sessionId}$`));
@@ -90,11 +92,15 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   const listedByB = structured(await callTool(harness.env, grantB, "list_sessions", {}));
   assert.equal(listedByB.sessions.length, 1);
   assert.equal(listedByB.sessions[0].controller.currentGrant, false);
+  assert.deepEqual(listedByB.sessions[0].allowedActions, ["take_over_session"]);
+  assert.deepEqual(listedByB.sessions[0].allowedTurnDeliveries, []);
   assert.equal(Object.hasOwn(listedByB.sessions[0], "events"), false);
 
   const takeoverResponse = await callTool(harness.env, grantB, "take_over_session", { sessionId });
   const taken = structured(takeoverResponse);
   assert.deepEqual(taken.controller, { clientName: "VS Code", currentGrant: true });
+  assert.deepEqual(taken.allowedActions, ["send_turn", "stop_session"]);
+  assert.deepEqual(taken.allowedTurnDeliveries, ["steer", "queue"]);
   assert.notEqual(takeoverResponse.result._meta.sessionStream.token, streamMeta.token);
   assert.equal((await callTool(harness.env, grantA, "send_turn", {
     sessionId,
@@ -107,6 +113,12 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   }));
   assert.equal(sent.delivery, "steer");
   assert.equal(sent.session.phase, "running");
+  assert.deepEqual(sent.session.allowedActions, [
+    "send_turn",
+    "interrupt_turn",
+    "stop_session",
+  ]);
+  assert.deepEqual(sent.session.allowedTurnDeliveries, ["steer", "queue"]);
   const activeTurnId = sent.turnId;
 
   harness.environment(OWNER).channelState = "disconnected";
@@ -202,6 +214,8 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   const terminal = structured(await callTool(harness.env, grantB, "read_session", { sessionId }));
   assert.equal(terminal.session.phase, "terminal");
   assert.equal(terminal.session.terminalReason, "stopped");
+  assert.deepEqual(terminal.session.allowedActions, []);
+  assert.deepEqual(terminal.session.allowedTurnDeliveries, []);
 
   const other = structured(await callTool(harness.env, {
     ...grantA,

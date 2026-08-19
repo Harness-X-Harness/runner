@@ -11,6 +11,8 @@ export function publicSessionSnapshot(
     : undefined;
   const pendingReplacement = environment?.status === "closing" &&
     environment.replacementGeneration === session.generation;
+  const currentGrant = session.controllerGrantId === grantId;
+  const actionProjection = sessionAllowedActions(session, matchingEnvironment, currentGrant);
   return {
     sessionId: session.sessionId,
     executor: session.executor,
@@ -19,8 +21,10 @@ export function publicSessionSnapshot(
     channelState: matchingEnvironment?.channelState === "connected" ? "connected" : "disconnected",
     controller: {
       clientName: session.controllerClientName,
-      currentGrant: session.controllerGrantId === grantId,
+      currentGrant,
     },
+    allowedActions: actionProjection.actions,
+    allowedTurnDeliveries: actionProjection.turnDeliveries,
     workingDirectory: session.workingDirectory,
     ...(session.activeTurnId ? { activeTurnId: session.activeTurnId } : {}),
     queuedTurns: session.queuedTurns,
@@ -34,6 +38,30 @@ export function publicSessionSnapshot(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
   };
+}
+
+function sessionAllowedActions(session, environment, currentGrant) {
+  if (["stopping", "terminal"].includes(session.phase)) {
+    return { actions: [], turnDeliveries: [] };
+  }
+  if (!currentGrant) {
+    return { actions: ["take_over_session"], turnDeliveries: [] };
+  }
+
+  const actions = [];
+  const turnDeliveries = [];
+  if (environment?.channelState === "connected" && ["idle", "running"].includes(session.phase)) {
+    turnDeliveries.push("steer");
+  }
+  if (["idle", "running", "waiting_for_user"].includes(session.phase)) {
+    turnDeliveries.push("queue");
+  }
+  if (turnDeliveries.length > 0) actions.push("send_turn");
+  if (session.phase === "running" && session.activeTurnId) actions.push("interrupt_turn");
+  if (session.pendingRequests.length > 0) actions.push("respond_to_session");
+  if (session.queuedTurns.length > 0) actions.push("cancel_queued_turn");
+  actions.push("stop_session");
+  return { actions, turnDeliveries };
 }
 
 function publicEnvironmentStatus(environment) {

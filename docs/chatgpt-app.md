@@ -23,9 +23,10 @@ interface.
    Environment.
 4. The admitted workflow starts Tailscale, T3, and one multiplexed Session
    runtime. The Session becomes `idle` or `running` without another open call.
-5. Read and control the Session in natural language or through the Session
-   Widget. Explicit controls support Steer, Queue, queued-turn cancellation,
-   active-turn interruption, request response, takeover, and stop.
+5. Send ordinary turns through the MCP client's conversation. The Session
+   Widget streams recent output and exposes only the current structured request
+   or lifecycle action. All nine Session tools remain available to natural-
+   language clients.
 6. `stop_session` stops only that native conversation. `close_environment`
    terminates all Sessions in that Environment and cancels the exact GitHub
    run.
@@ -138,14 +139,25 @@ establishes any needed GitHub login inside it.
 
 ## Session Widget and private stream
 
-The versioned `ui://session/v2.html` resource is a consumer and command
+The versioned `ui://session/v3.html` resource is a consumer and narrow command
 surface, never a state authority. It renders the authoritative Session snapshot
-and ordered event timeline. Every mutation calls the same MCP tool used by
-natural-language clients. A client can observe a newer snapshot through the
-stream before an older tool response arrives. The Widget therefore applies
-Session snapshots by monotonic `latestCursor`; a lower-cursor response cannot
-replace a newer view. The displayed controller is the client's latest
-observation, not a lock or a second authority.
+and the five most recent user-visible event groups without nested scrolling or
+a duplicate conversation input. Its contextual action area contains at most
+one primary and one secondary action. The snapshot includes server-computed
+`allowedActions` and exact `allowedTurnDeliveries`; the Widget does not recreate
+controller, phase, or channel eligibility rules.
+
+Every displayed mutation calls the same MCP tool used by natural-language
+clients. A client can observe a newer snapshot through the stream before an
+older tool response arrives. The Widget therefore applies Session snapshots by
+monotonic `latestCursor`; a lower-cursor response cannot replace a newer view.
+The displayed controller is the client's latest observation, not a lock or a
+second authority.
+
+Both versioned Widgets use the shared MCP Apps bridge for tool calls and links.
+ChatGPT's optional `window.openai.theme` and `openai:set_globals` signals only
+adapt system color semantics; clients without those extensions keep the same
+functional card through CSS `color-scheme`.
 
 Single-Session tool results put a ten-minute encrypted Session stream
 capability only in private `_meta`. It is bound to owner, Session, and Grant.

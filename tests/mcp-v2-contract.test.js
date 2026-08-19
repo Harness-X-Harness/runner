@@ -143,11 +143,11 @@ test("MCP v2 serves the same Session and Environment tools to modern and legacy 
   });
   assert.deepEqual(
     modernTools.find(({ name }) => name === "open_environment")._meta?.ui,
-    { resourceUri: "ui://environment/v4.html" },
+    { resourceUri: "ui://environment/v5.html" },
   );
   assert.equal(
     modernTools.find(({ name }) => name === "open_environment")._meta?.["openai/outputTemplate"],
-    "ui://environment/v4.html",
+    "ui://environment/v5.html",
   );
   assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").securitySchemes, [
     { type: "oauth2", scopes: ["environments:manage"] },
@@ -227,17 +227,17 @@ test("MCP v2 serves credential-free Environment and Session widget resources", a
   assert.deepEqual(
     listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
     [
-      { uri: "ui://environment/v4.html", mimeType: "text/html;profile=mcp-app" },
-      { uri: "ui://session/v2.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://environment/v5.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://session/v3.html", mimeType: "text/html;profile=mcp-app" },
     ],
   );
 
   const read = await request(2, "resources/read", {
-    uri: "ui://environment/v4.html",
+    uri: "ui://environment/v5.html",
   });
   assert.equal(read.result.contents.length, 1);
   const resource = read.result.contents[0];
-  assert.equal(resource.uri, "ui://environment/v4.html");
+  assert.equal(resource.uri, "ui://environment/v5.html");
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
   assert.deepEqual(resource._meta.ui, {
     prefersBorder: true,
@@ -247,25 +247,27 @@ test("MCP v2 serves credential-free Environment and Session widget resources", a
   assert.deepEqual(resource._meta["openai/widgetCSP"], {
     redirect_domains: ["https://runner.example", "https://github.com"],
   });
-  assert.match(resource.text, /Private Development Environment/);
+  assert.match(resource.text, /Private development environment/);
   assert.match(resource.text, /tools\/call/);
   assert.match(resource.text, /open_environment/);
   assert.match(resource.text, /close_environment/);
   assert.match(resource.text, /ui\/initialize/);
   assert.match(resource.text, /ui\/open-link/);
-  assert.doesNotMatch(resource.text, /window\.openai|window\.open\(/);
+  assert.match(resource.text, /openai:set_globals/);
+  assert.doesNotMatch(resource.text, /window\.open\(/);
   assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
   assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
 
-  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v2.html" });
+  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v3.html" });
   const sessionResource = sessionRead.result.contents[0];
   assert.deepEqual(sessionResource._meta.ui.csp, {
     connectDomains: ["https://runner.example"],
     resourceDomains: [],
   });
-  assert.match(sessionResource.text, /Harness X Harness · Agent Session/i);
+  assert.match(sessionResource.text, /Coding session/i);
   assert.match(sessionResource.text, /session-stream/);
-  assert.match(sessionResource.text, /send_turn/);
+  assert.match(sessionResource.text, /allowedActions/);
   assert.match(sessionResource.text, /take_over_session/);
+  assert.doesNotMatch(sessionResource.text, /<textarea|overflow:\s*auto/);
   assert.doesNotMatch(sessionResource.text, /MINI_END_USER_KEY|pairingUrl|tailscaleHost/);
 });

@@ -46,7 +46,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 34. Every Environment Control Channel command has a stable command ID. The runner records processed command IDs and returns acknowledgements so reconnect can redeliver without repeating a native effect.
 35. If `start_session` arrives while the Environment is closing, its Session remains `preparing`. After the EnvironmentObject confirms that the exact old GitHub run is terminal, it dispatches one replacement generation and continues that Session without requiring another user request.
 36. `read_session` is the single read authority. It returns a current Session snapshot plus a page of ordered events after an optional cursor, with `nextCursor` and `hasMore`. Final Agent output remains in the event stream; there is no separate result tool.
-37. The Session Widget is both a live view and a direct interaction surface. It includes a composer with `Steer now` and `Queue`, pending request controls, stop, and explicit takeover. Natural-language MCP Client interaction remains available through the same tools.
+37. The Session Widget is a live view and narrow contextual command surface. Ordinary turns use the MCP Client's conversation and `send_turn`; the inline Widget does not duplicate that composer. It shows recent bounded output and at most two current actions for a pending request, interruption, takeover, stop, Environment entry, or GitHub run. All nine Session tools remain available through natural-language MCP Client interaction.
 38. Durable Session Events retain bounded, user-visible tool summaries and status changes, not complete command stdout, stderr, or tool result bodies. Detailed terminal output remains on the temporary Environment and its direct interfaces.
 39. Explicit queued turns form a FIFO. `send_turn` returns a stable turn ID, and `cancel_queued_turn` may cancel that exact turn only before it becomes active.
 40. `interrupt_turn` interrupts one exact active turn while preserving its native Agent Session and queued turns. `stop_session` remains the whole-Session terminal operation.
@@ -212,14 +212,18 @@ The Widget consumes private NDJSON updates and reconnects from its last durable 
 
 The Widget provides:
 
-- executor, Session phase, channel state, controller, working directory, and Environment status;
-- coalesced Agent messages, tool progress, lifecycle changes, and errors;
-- direct `Steer now` and `Queue` actions with the user's unmodified composer text;
+- executor, Session phase, controller summary, working directory, and connection state;
+- the five most recent coalesced Agent, user, activity, request, or error groups;
+- one primary and at most one secondary contextual action;
 - controls for a pending approval, question, or authorization request;
-- explicit `Take control` when another Grant is controller;
-- `Stop session`, plus links to the Environment and GitHub run when applicable.
+- explicit `Take control`, interruption, stop, Environment entry, or GitHub run when applicable.
 
-Widget actions call the same MCP tools as natural-language clients. The Widget is not state authority and cannot bypass controller, owner, generation, scope, or pending-request checks.
+The public snapshot returns server-computed `allowedActions` and
+`allowedTurnDeliveries`. Widget actions call the same MCP tools as natural-
+language clients. The Widget is not state authority and cannot bypass
+controller, owner, generation, scope, or pending-request checks. It uses the
+standard MCP Apps bridge; ChatGPT theme signals are optional progressive
+enhancement and are not required by other MCP Clients.
 
 ## Session lifecycle
 

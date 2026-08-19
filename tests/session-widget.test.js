@@ -4,6 +4,25 @@ import vm from "node:vm";
 
 import { sessionWidgetHtml } from "../apps/chatgpt-app/src/session-widget.js";
 
+const IDS = [
+  "title",
+  "subtitle",
+  "badge",
+  "phase",
+  "summary",
+  "timeline",
+  "requestPanel",
+  "requestTitle",
+  "requestDetail",
+  "requestChoices",
+  "requestFields",
+  "queueSummary",
+  "actions",
+  "primary",
+  "secondary",
+  "message",
+];
+
 class Element {
   constructor() {
     this.children = [];
@@ -11,8 +30,6 @@ class Element {
     this.disabled = false;
     this.hidden = false;
     this.listeners = new Map();
-    this.scrollHeight = 100;
-    this.scrollTop = 0;
     this.textContent = "";
     this.type = "";
     this.value = "";
@@ -37,18 +54,21 @@ function script(html) {
   return match[1];
 }
 
-test("Session Widget streams ordered events and invokes every exact Session control", async () => {
-  const ids = ["title","badge","phase","executor","channel","controller","cwd","environment","timeline","requestPanel","requestTitle","requestDetail","requestChoices","requestFields","respond","queuePanel","queuedTurns","cancelQueued","composer","steer","queue","interrupt","takeover","stop","openEnvironment","viewRun","message"];
-  const elements = new Map(ids.map((id) => [id, new Element()]));
-  const outbound = [];
-  const listeners = [];
-  const toolCalls = [];
-  const session = {
+function fixtureSession(fields = {}) {
+  return {
     sessionId: "session-1",
     executor: "codex",
     phase: "running",
     channelState: "connected",
     controller: { clientName: "ChatGPT", currentGrant: true },
+    allowedActions: [
+      "send_turn",
+      "interrupt_turn",
+      "respond_to_session",
+      "cancel_queued_turn",
+      "stop_session",
+    ],
+    allowedTurnDeliveries: ["steer", "queue"],
     workingDirectory: "/home/runner",
     activeTurnId: "turn-active",
     queuedTurns: [{ turnId: "turn-queued", createdAt: "2026-08-19T00:00:00.000Z" }],
@@ -61,7 +81,17 @@ test("Session Widget streams ordered events and invokes every exact Session cont
     },
     createdAt: "2026-08-19T00:00:00.000Z",
     updatedAt: "2026-08-19T00:00:00.000Z",
+    ...fields,
   };
+}
+
+test("Session Widget keeps one focused decision, streams recent output, and follows host theme", async () => {
+  const elements = new Map(IDS.map((id) => [id, new Element()]));
+  const outbound = [];
+  const messageListeners = [];
+  const hostListeners = new Map();
+  const toolCalls = [];
+  const session = fixtureSession();
   const parent = {
     postMessage(message) {
       outbound.push(message);
@@ -96,7 +126,7 @@ test("Session Widget streams ordered events and invokes every exact Session cont
       }
     },
   };
-  const deliver = (data) => listeners.forEach((listener) => listener({ source: parent, data }));
+  const deliver = (data) => messageListeners.forEach((listener) => listener({ source: parent, data }));
   const payload = new TextEncoder().encode(`${JSON.stringify({
     type: "snapshot",
     session,
@@ -112,58 +142,63 @@ test("Session Widget streams ordered events and invokes every exact Session cont
   })}\n`);
   let reads = 0;
   const fetchCalls = [];
-  const fetch = async (url, options) => {
-    fetchCalls.push({ url: String(url), options });
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => ({
-          read: async () => reads++ === 0
-            ? { done: false, value: payload }
-            : new Promise(() => {}),
-        }),
-      },
-    };
+  const document = {
+    documentElement: { dataset: {} },
+    getElementById: (id) => elements.get(id),
+    createElement: () => new Element(),
+  };
+  const window = {
+    parent,
+    openai: { theme: "dark" },
+    addEventListener(name, listener) {
+      if (name === "message") messageListeners.push(listener);
+      else hostListeners.set(name, listener);
+    },
   };
 
   vm.runInNewContext(script(sessionWidgetHtml("https://runner.example")), {
     console,
-    document: {
-      getElementById: (id) => elements.get(id),
-      createElement: () => new Element(),
+    document,
+    fetch: async (url, options) => {
+      fetchCalls.push({ url: String(url), options });
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: async () => reads++ === 0
+              ? { done: false, value: payload }
+              : new Promise(() => {}),
+          }),
+        },
+      };
     },
-    fetch,
     Map,
     Object,
     Promise,
     queueMicrotask,
+    Set,
     setTimeout,
     TextDecoder,
     URL,
-    window: {
-      parent,
-      addEventListener(name, listener) { if (name === "message") listeners.push(listener); },
-    },
+    window,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(fetchCalls[0].options.headers.authorization, "Bearer private-capability");
   assert.match(fetchCalls[0].url, /after=0/);
-  assert.match(elements.get("timeline").textContent, /You · steer/);
+  assert.match(elements.get("timeline").textContent, /You · Inspect/);
   assert.match(elements.get("timeline").textContent, /Agent · Working answer/);
   assert.doesNotMatch(elements.get("timeline").textContent, /duplicate/);
   assert.equal(elements.get("requestPanel").hidden, false);
   assert.equal(elements.get("requestChoices").children[0].value, "allow-once");
+  assert.equal(elements.get("primary").dataset.action, "respond_to_session");
+  assert.equal(elements.get("secondary").dataset.action, "stop_session");
+  assert.equal(document.documentElement.dataset.theme, "dark");
+  hostListeners.get("openai:set_globals")({ detail: { globals: { theme: "light" } } });
+  assert.equal(document.documentElement.dataset.theme, "light");
 
-  elements.get("composer").value = "Steer text";
-  await elements.get("steer").click();
-  elements.get("composer").value = "Queue text";
-  await elements.get("queue").click();
-  await elements.get("cancelQueued").click();
-  await elements.get("interrupt").click();
-  await elements.get("respond").click();
-  await elements.get("stop").click();
+  elements.get("primary").click();
   await new Promise((resolve) => setImmediate(resolve));
 
   deliver({
@@ -171,10 +206,10 @@ test("Session Widget streams ordered events and invokes every exact Session cont
     method: "ui/notifications/tool-result",
     params: {
       structuredContent: {
-        session: {
-          ...session,
+        session: fixtureSession({
           pendingRequests: [{ requestId: "request-2", kind: "input" }],
-        },
+          latestCursor: 5,
+        }),
         events: [{
           cursor: 5,
           sessionId: "session-1",
@@ -196,37 +231,62 @@ test("Session Widget streams ordered events and invokes every exact Session cont
     },
   });
   elements.get("requestFields").children[0].children[0].value = "main";
-  await elements.get("respond").click();
+  elements.get("primary").click();
+  await new Promise((resolve) => setImmediate(resolve));
 
   deliver({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-result",
-    params: { structuredContent: { ...session, controller: { clientName: "VS Code", currentGrant: false } } },
+    params: {
+      structuredContent: fixtureSession({
+        pendingRequests: [],
+        allowedActions: ["interrupt_turn", "stop_session"],
+        latestCursor: 6,
+      }),
+    },
   });
-  assert.equal(elements.get("takeover").hidden, false);
-  await elements.get("takeover").click();
+  assert.equal(elements.get("primary").dataset.action, "interrupt_turn");
+  elements.get("primary").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  elements.get("secondary").click();
+  await new Promise((resolve) => setImmediate(resolve));
 
   deliver({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-result",
-    params: { structuredContent: { ...session, channelState: "disconnected" } },
+    params: {
+      structuredContent: fixtureSession({
+        controller: { clientName: "VS Code", currentGrant: false },
+        allowedActions: ["take_over_session"],
+        pendingRequests: [],
+        latestCursor: 7,
+      }),
+    },
   });
-  assert.equal(elements.get("steer").disabled, true);
-  assert.equal(elements.get("queue").disabled, false);
+  assert.equal(elements.get("primary").dataset.action, "take_over_session");
+  elements.get("primary").click();
+  await new Promise((resolve) => setImmediate(resolve));
 
-  await elements.get("openEnvironment").click();
-  await elements.get("viewRun").click();
+  deliver({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: {
+      structuredContent: fixtureSession({
+        phase: "terminal",
+        terminalReason: "stopped",
+        allowedActions: [],
+        pendingRequests: [],
+        latestCursor: 8,
+      }),
+    },
+  });
+  assert.equal(elements.get("primary").dataset.href, "https://runner.example/environment");
+  assert.equal(elements.get("secondary").dataset.href, "https://github.com/example/runner/actions/runs/1");
+  elements.get("primary").click();
+  elements.get("secondary").click();
+  await new Promise((resolve) => setImmediate(resolve));
+
   const plainToolCalls = JSON.parse(JSON.stringify(toolCalls));
-  assert.deepEqual(
-    plainToolCalls.filter(({ name }) => name === "send_turn").map(({ arguments: args }) => args),
-    [
-      { sessionId: "session-1", text: "Steer text", delivery: "steer" },
-      { sessionId: "session-1", text: "Queue text", delivery: "queue" },
-    ],
-  );
-  const byName = Object.fromEntries(plainToolCalls.map((call) => [call.name, call.arguments]));
-  assert.deepEqual(byName.cancel_queued_turn, { sessionId: "session-1", turnId: "turn-queued" });
-  assert.deepEqual(byName.interrupt_turn, { sessionId: "session-1", activeTurnId: "turn-active" });
   assert.deepEqual(
     plainToolCalls.filter(({ name }) => name === "respond_to_session").map(({ arguments: args }) => args),
     [
@@ -234,8 +294,12 @@ test("Session Widget streams ordered events and invokes every exact Session cont
       { sessionId: "session-1", requestId: "request-2", values: { branch: "main" } },
     ],
   );
+  const byName = Object.fromEntries(plainToolCalls.map((call) => [call.name, call.arguments]));
+  assert.deepEqual(byName.interrupt_turn, { sessionId: "session-1", activeTurnId: "turn-active" });
   assert.deepEqual(byName.stop_session, { sessionId: "session-1" });
   assert.deepEqual(byName.take_over_session, { sessionId: "session-1" });
+  assert.equal(byName.send_turn, undefined);
+  assert.equal(byName.cancel_queued_turn, undefined);
   assert.deepEqual(
     outbound.filter(({ method }) => method === "ui/open-link").map(({ params }) => params.url),
     [
@@ -243,28 +307,25 @@ test("Session Widget streams ordered events and invokes every exact Session cont
       "https://github.com/example/runner/actions/runs/1",
     ],
   );
-  assert.equal(sessionWidgetHtml("https://runner.example").includes("private-capability"), false);
+  const html = sessionWidgetHtml("https://runner.example");
+  assert.doesNotMatch(html, /<textarea|overflow:\s*auto/);
+  assert.equal(html.includes("private-capability"), false);
 });
 
 test("Session Widget accepts early initialization data and refreshes an expired stream capability", async () => {
-  const ids = ["title","badge","phase","executor","channel","controller","cwd","environment","timeline","requestPanel","requestTitle","requestDetail","requestChoices","requestFields","respond","queuePanel","queuedTurns","cancelQueued","composer","steer","queue","interrupt","takeover","stop","openEnvironment","viewRun","message"];
-  const elements = new Map(ids.map((id) => [id, new Element()]));
+  const elements = new Map(IDS.map((id) => [id, new Element()]));
   const listeners = [];
   const toolCalls = [];
-  const base = {
+  const base = fixtureSession({
     sessionId: "session-refresh",
     executor: "grok",
     phase: "idle",
-    channelState: "connected",
-    controller: { clientName: "ChatGPT", currentGrant: true },
-    workingDirectory: "/home/runner",
+    allowedActions: ["send_turn", "stop_session"],
+    activeTurnId: undefined,
     queuedTurns: [],
     pendingRequests: [],
     latestCursor: 0,
-    environment: { status: "ready", entryUrl: "https://runner.example/environment" },
-    createdAt: "2026-08-19T00:00:00.000Z",
-    updatedAt: "2026-08-19T00:00:00.000Z",
-  };
+  });
   const parent = {
     postMessage(message) {
       if (message.method === "ui/initialize") {
@@ -285,7 +346,7 @@ test("Session Widget accepts early initialization data and refreshes an expired 
           id: message.id,
           result: {
             structuredContent: {
-              session: { ...base, phase: "terminal", terminalReason: "stopped" },
+              session: { ...base, phase: "terminal", terminalReason: "stopped", allowedActions: [] },
               events: [],
               nextCursor: 0,
               hasMore: false,
@@ -301,6 +362,7 @@ test("Session Widget accepts early initialization data and refreshes an expired 
   vm.runInNewContext(script(sessionWidgetHtml("https://runner.example")), {
     console,
     document: {
+      documentElement: { dataset: {} },
       getElementById: (id) => elements.get(id),
       createElement: () => new Element(),
     },
@@ -312,6 +374,7 @@ test("Session Widget accepts early initialization data and refreshes an expired 
     Object,
     Promise,
     queueMicrotask,
+    Set,
     setTimeout,
     TextDecoder,
     URL,
@@ -328,29 +391,24 @@ test("Session Widget accepts early initialization data and refreshes an expired 
     name: "read_session",
     arguments: { sessionId: "session-refresh", afterCursor: 0, limit: 100 },
   }]);
-  assert.equal(elements.get("phase").textContent, "terminal");
+  assert.equal(elements.get("phase").textContent, "Ended");
 });
 
 test("Session Widget does not let a delayed tool response replace a newer stream snapshot", async () => {
-  const ids = ["title","badge","phase","executor","channel","controller","cwd","environment","timeline","requestPanel","requestTitle","requestDetail","requestChoices","requestFields","respond","queuePanel","queuedTurns","cancelQueued","composer","steer","queue","interrupt","takeover","stop","openEnvironment","viewRun","message"];
-  const elements = new Map(ids.map((id) => [id, new Element()]));
+  const elements = new Map(IDS.map((id) => [id, new Element()]));
   const listeners = [];
   let pendingToolCall;
   let releaseStream;
-  const base = {
+  const base = fixtureSession({
     sessionId: "session-race",
-    executor: "codex",
     phase: "idle",
-    channelState: "connected",
     controller: { clientName: "VS Code", currentGrant: false },
-    workingDirectory: "/home/runner",
+    allowedActions: ["take_over_session"],
+    activeTurnId: undefined,
     queuedTurns: [],
     pendingRequests: [],
     latestCursor: 9,
-    environment: { status: "ready", entryUrl: "https://runner.example/environment" },
-    createdAt: "2026-08-19T00:00:00.000Z",
-    updatedAt: "2026-08-19T00:00:09.000Z",
-  };
+  });
   const parent = {
     postMessage(message) {
       if (message.method === "ui/initialize") {
@@ -398,6 +456,7 @@ test("Session Widget does not let a delayed tool response replace a newer stream
   vm.runInNewContext(script(sessionWidgetHtml("https://runner.example")), {
     console,
     document: {
+      documentElement: { dataset: {} },
       getElementById: (id) => elements.get(id),
       createElement: () => new Element(),
     },
@@ -416,6 +475,7 @@ test("Session Widget does not let a delayed tool response replace a newer stream
     Object,
     Promise,
     queueMicrotask,
+    Set,
     setTimeout,
     TextDecoder,
     URL,
@@ -426,11 +486,11 @@ test("Session Widget does not let a delayed tool response replace a newer stream
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  const takeover = elements.get("takeover").click();
+  elements.get("primary").click();
   assert.equal(pendingToolCall.params.name, "take_over_session");
   releaseStream({ done: false, value: streamPayload });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(elements.get("controller").textContent, "Cursor 11 Client");
+  assert.match(elements.get("summary").textContent, /Cursor 11 Client controls/);
 
   deliver({
     jsonrpc: "2.0",
@@ -439,13 +499,14 @@ test("Session Widget does not let a delayed tool response replace a newer stream
       structuredContent: {
         ...base,
         controller: { clientName: "Delayed Cursor 10 Client", currentGrant: true },
+        allowedActions: [],
         latestCursor: 10,
         updatedAt: "2026-08-19T00:00:10.000Z",
       },
     },
   });
-  await takeover;
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(elements.get("controller").textContent, "Cursor 11 Client");
-  assert.equal(elements.get("takeover").hidden, false);
+  assert.match(elements.get("summary").textContent, /Cursor 11 Client controls/);
+  assert.equal(elements.get("primary").dataset.action, "take_over_session");
 });
