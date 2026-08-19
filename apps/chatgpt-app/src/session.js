@@ -14,8 +14,11 @@ export async function startAgentSession(
   newGeneration = () => issueEnvironmentIdentity(ownerId, env.ENVIRONMENT_SESSION_SECRET),
 ) {
   if (typeof dispatch !== "function") throw new TypeError("Environment dispatch authority is required");
+  if (typeof input.initialPrompt !== "string" || input.initialPrompt.length === 0) {
+    throw new TypeError("Initial prompt is required");
+  }
   const sessionId = `session_${crypto.randomUUID()}`;
-  const initialTurnId = input.initialPrompt ? `turn_${crypto.randomUUID()}` : undefined;
+  const initialTurnId = `turn_${crypto.randomUUID()}`;
   const created = await sessionRequest(env, ownerId, "/environment/start-session", {
     method: "POST",
     body: JSON.stringify({
@@ -28,9 +31,8 @@ export async function startAgentSession(
         executor: input.executor,
         workingDirectory: input.workingDirectory ?? DEFAULT_WORKING_DIRECTORY,
         startCommandId: `command_${crypto.randomUUID()}`,
-        ...(initialTurnId
-          ? { initialTurnId, initialPrompt: input.initialPrompt }
-          : {}),
+        initialTurnId,
+        initialPrompt: input.initialPrompt,
       },
     }),
   });

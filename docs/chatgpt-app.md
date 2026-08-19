@@ -18,9 +18,9 @@ interface.
    `environments:manage` and `sessions:manage`.
 2. GitHub verifies the user through the dedicated GitHub App. Harness derives
    one user token limited to `Harness-X-Harness/runner` and `Actions: write`.
-3. Call `start_session` for Codex or Grok. If the user has no active
-   Environment, the same operation reserves one Session and starts one
-   Environment.
+3. Call `start_session` with Codex or Grok and the user's first task. If the
+   user has no active Environment, the same operation reserves one Session,
+   starts one Environment, and delivers that task after admission.
 4. The admitted workflow starts Tailscale, T3, and one multiplexed Session
    runtime. The Session becomes `idle` or `running` without another open call.
 5. Send ordinary turns through the MCP client's conversation. The Session
@@ -38,7 +38,7 @@ an Agent Session.
 
 | Tool | Purpose |
 | --- | --- |
-| `start_session` | Start one Codex or Grok Session in the user's Environment |
+| `start_session` | Start one Codex or Grok Session and send its required first task |
 | `list_sessions` | List the user's Sessions without transcript events |
 | `read_session` | Read one snapshot and ordered events after a cursor |
 | `send_turn` | Send exact text as explicit `steer` or `queue` delivery |
@@ -146,6 +146,10 @@ a duplicate conversation input. Its contextual action area contains at most
 one primary and one secondary action. The snapshot includes server-computed
 `allowedActions` and exact `allowedTurnDeliveries`; the Widget does not recreate
 controller, phase, or channel eligibility rules.
+
+`start_session` always carries the first task. Later turns use the MCP client's
+native conversation and `send_turn`, so the inline Widget does not need a
+second composer.
 
 Every displayed mutation calls the same MCP tool used by natural-language
 clients. A client can observe a newer snapshot through the stream before an

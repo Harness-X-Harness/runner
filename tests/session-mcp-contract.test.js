@@ -45,17 +45,25 @@ test("nine Session tools expose one executor-neutral OAuth contract", async () =
   }
   assert.equal(tools.find(({ name }) => name === "send_turn")
     .inputSchema.properties.delivery.default, undefined);
-  assert.deepEqual(tools.find(({ name }) => name === "start_session")
-    .inputSchema.properties.executor.enum, ["codex", "grok"]);
+  const startSession = tools.find(({ name }) => name === "start_session");
+  assert.deepEqual(startSession.inputSchema.properties.executor.enum, ["codex", "grok"]);
+  assert.deepEqual(startSession.inputSchema.required, ["executor", "initialPrompt"]);
 });
 
 test("Session MCP tools preserve owner, controller, exact IDs, queue order, and private output", async () => {
   const harness = fakeHarness();
   const grantA = grant("grant-a", "ChatGPT");
   const grantB = grant("grant-b", "VS Code");
+  const missingPrompt = await callTool(harness.env, grantA, "start_session", {
+    executor: "codex",
+  });
+  assert.equal(missingPrompt.result.isError, true);
+  assert.deepEqual(structured(await callTool(harness.env, grantA, "list_sessions", {})).sessions, []);
+
   const startResponse = await callTool(harness.env, grantA, "start_session", {
     executor: "codex",
     workingDirectory: "/home/runner/workspace",
+    initialPrompt: "Inspect the repository architecture",
   });
   const started = structured(startResponse);
   const sessionId = started.sessionId;
@@ -86,9 +94,20 @@ test("Session MCP tools preserve owner, controller, exact IDs, queue order, and 
   assert.equal(pending.length, 1);
   assert.equal(pending[0].executor, "codex");
   assert.equal(pending[0].kind, "start");
-  assert.deepEqual(pending[0].payload, { initial: true });
+  assert.equal(pending[0].payload.initial, true);
+  assert.equal(pending[0].payload.text, "Inspect the repository architecture");
+  assert.match(pending[0].payload.turnId, /^turn_/);
 
   await runnerAction(harness, sessionId, { type: "admit" });
+  await runnerAction(harness, sessionId, {
+    type: "begin_turn",
+    turnId: pending[0].payload.turnId,
+  });
+  await runnerAction(harness, sessionId, {
+    type: "complete_turn",
+    turnId: pending[0].payload.turnId,
+    status: "completed",
+  });
   const listedByB = structured(await callTool(harness.env, grantB, "list_sessions", {}));
   assert.equal(listedByB.sessions.length, 1);
   assert.equal(listedByB.sessions[0].controller.currentGrant, false);
@@ -243,7 +262,7 @@ test("offline and closing Environment starts keep one stable preparing Session i
     harness.env,
     OWNER,
     controller,
-    { executor: "codex" },
+    { executor: "codex", initialPrompt: "Prepare the private environment" },
     async (_env, request) => {
       dispatches.push(request);
       return { runId: "run-1", runUrl: "https://github.com/example/actions/runs/1" };
@@ -298,7 +317,7 @@ test("a real signed Environment generation can own a Session", async () => {
     harness.env,
     ownerId,
     { grantId: "grant-a", clientName: "Codex" },
-    { executor: "codex" },
+    { executor: "codex", initialPrompt: "Inspect the signed environment" },
     async () => { throw new Error("active Environment must not dispatch"); },
     async () => {},
   );

@@ -103,7 +103,7 @@ export function createServer(env, props) {
     { name: "harness-x-harness", version: "1.0.0" },
     {
       instructions:
-        "Use Agent Sessions for interactive coding: start_session, then read_session and send_turn.",
+        "Use Agent Sessions for interactive coding: start_session includes the first task; use read_session and send_turn for later turns.",
     },
   );
   const controlPlaneOrigin = new URL(env.TASK_CONTROL_PLANE_URL).origin;
@@ -171,14 +171,16 @@ export function createServer(env, props) {
     server,
     "start_session",
     {
-      title: "Start coding session",
-      description: "Start one private long-lived Codex or Grok Session in the user's temporary Environment.",
+      title: "Start coding task",
+      description:
+        "Start one private long-lived Codex or Grok Session and immediately send its first task. Ask the user for the task before calling this tool.",
       inputSchema: z.object({
         executor: z.enum(["codex", "grok"]),
         workingDirectory: z.string().max(65_536).refine((value) => value.startsWith("/"), {
           message: "workingDirectory must be absolute",
         }).optional(),
-        initialPrompt: z.string().min(1).max(65_536).optional(),
+        initialPrompt: z.string().min(1).max(65_536)
+          .describe("The first task for the coding agent."),
       }),
       outputSchema: sessionSnapshotSchema,
       securitySchemes: SECURITY_SCHEMES.start_session,
