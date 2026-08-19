@@ -126,6 +126,13 @@ Commands are durable and at-least-once. A command ID gives idempotent native
 effects. Events use one monotonic cursor. Reconnect replays unacknowledged
 commands and reads events after the last cursor.
 
+The runtime bounds each disconnected Session outbox and each native driver
+registry. The control plane also bounds active Sessions, queued turns, accepted
+command IDs, and retained Events. Recoverable Agent message chunks can be
+dropped under pressure. A non-recoverable overflow terminates only that
+Session with `resource_exhausted`; it does not close the shared Environment
+channel or another Session.
+
 - Codex uses one native `codex app-server` thread per Session.
 - Grok uses one native ACP stdio session per Session.
 - Drivers normalize only user-visible text, bounded activity, lifecycle, safe

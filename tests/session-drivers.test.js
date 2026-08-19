@@ -4,9 +4,14 @@ import { createRequire } from "node:module";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
+import { MAX_ACTIVE_SESSIONS } from "../apps/chatgpt-app/src/session-state.js";
+
 const require = createRequire(import.meta.url);
 const { CodexDriver } = require("../.github/actions/session-runtime/codex-driver.js");
-const { DriverRegistry } = require("../.github/actions/session-runtime/drivers.js");
+const {
+  DriverRegistry,
+  MAX_DRIVERS,
+} = require("../.github/actions/session-runtime/drivers.js");
 const { GrokDriver } = require("../.github/actions/session-runtime/grok-driver.js");
 const { JsonRpcError, JsonRpcProcess } = require("../.github/actions/session-runtime/json-rpc.js");
 
@@ -374,6 +379,43 @@ test("registry isolates one child per Session and bounds startup failure", async
   assert.deepEqual(commandTransitions, [{
     sessionId: "session-2",
     action: { type: "terminate", reason: "driver_failed" },
+  }]);
+});
+
+test("registry capacity rejects only the new Session driver", async () => {
+  assert.equal(MAX_DRIVERS, MAX_ACTIVE_SESSIONS);
+  const events = [];
+  const transitions = [];
+  const drivers = [];
+  class Driver {
+    constructor({ sessionId }) {
+      this.sessionId = sessionId;
+      drivers.push(this);
+    }
+    async start() {}
+    stop() { this.stopped = true; }
+  }
+  const registry = new DriverRegistry({
+    emit: (sessionId, event) => events.push({ sessionId, event }),
+    transition: (sessionId, action) => transitions.push({ sessionId, action }),
+    driverTypes: { codex: Driver },
+    maxDrivers: 1,
+  });
+  const start = (sessionId) => registry.execute(sessionId, {
+    executor: "codex",
+    workingDirectory: "/workspace",
+    kind: "start",
+    payload: { initial: true },
+  });
+  await start("session-a");
+  await start("session-b");
+
+  assert.equal(drivers.length, 1);
+  assert.equal(drivers[0].stopped, undefined);
+  assert.deepEqual(events, []);
+  assert.deepEqual(transitions, [{
+    sessionId: "session-b",
+    action: { type: "terminate", reason: "resource_exhausted" },
   }]);
 });
 

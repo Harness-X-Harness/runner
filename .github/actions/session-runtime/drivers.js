@@ -1,11 +1,19 @@
 const { CodexDriver } = require("./codex-driver.js");
 const { GrokDriver } = require("./grok-driver.js");
 
+const MAX_DRIVERS = 8;
+
 class DriverRegistry {
-  constructor({ emit, transition, driverTypes = { codex: CodexDriver, grok: GrokDriver } }) {
+  constructor({
+    emit,
+    transition,
+    driverTypes = { codex: CodexDriver, grok: GrokDriver },
+    maxDrivers = MAX_DRIVERS,
+  }) {
     this.emit = emit;
     this.transition = transition;
     this.driverTypes = driverTypes;
+    this.maxDrivers = maxDrivers;
     this.drivers = new Map();
   }
 
@@ -14,6 +22,10 @@ class DriverRegistry {
     if (!driver) {
       if (command.kind !== "start" || command.payload?.initial !== true) {
         throw new Error("Session driver has not started");
+      }
+      if (this.drivers.size >= this.maxDrivers) {
+        this.transition(sessionId, { type: "terminate", reason: "resource_exhausted" });
+        return;
       }
       const Driver = this.driverTypes[command.executor];
       if (!Driver) throw new Error("Session executor is unavailable");
@@ -65,6 +77,13 @@ class DriverRegistry {
     for (const driver of this.drivers.values()) driver.stop();
     this.drivers.clear();
   }
+
+  stop(sessionId) {
+    const driver = this.drivers.get(sessionId);
+    if (!driver) return;
+    driver.stop();
+    this.drivers.delete(sessionId);
+  }
 }
 
-module.exports = { DriverRegistry };
+module.exports = { DriverRegistry, MAX_DRIVERS };

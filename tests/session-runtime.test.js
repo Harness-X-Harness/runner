@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { MAX_SESSION_COMMANDS } from "../apps/chatgpt-app/src/session-state.js";
+
 const require = createRequire(import.meta.url);
 const {
   ENVIRONMENT_CHANNEL_PROTOCOL,
+  MAX_RECEIPTS_PER_SESSION,
   SessionRuntime,
   channelProtocols,
 } = require("../.github/actions/session-runtime/index.js");
 
 test("runner protocol carries OIDC only in the WebSocket handshake", () => {
+  assert.equal(MAX_RECEIPTS_PER_SESSION, MAX_SESSION_COMMANDS);
   const protocols = channelProtocols("header.payload.signature");
   assert.deepEqual(protocols, [
     ENVIRONMENT_CHANNEL_PROTOCOL,
@@ -121,4 +125,78 @@ test("normalized driver output waits in memory for the same runtime channel to r
   assert.equal(first.length, 1);
   assert.deepEqual(second.map(({ type }) => type), ["event", "transition"]);
   assert.equal(second[0].event.data.text, "while disconnected");
+});
+
+test("a disconnected runtime bounds each Session outbox and keeps the newest recoverable chunks", () => {
+  const sent = [];
+  const runtime = new SessionRuntime({
+    generation: "generation-1",
+    send() {},
+    execute() {},
+    maxOutboxMessages: 2,
+  });
+  runtime.disconnect();
+  for (const text of ["first", "second", "third"]) {
+    runtime.event("session-1", {
+      type: "agent_message_chunk",
+      data: { turnId: "turn-1", text },
+    });
+  }
+  runtime.setSend((message) => sent.push(message));
+  assert.deepEqual(sent.map(({ event }) => event.data.text), ["second", "third"]);
+});
+
+test("a non-recoverable outbox overflow terminates only the target Session", () => {
+  const sent = [];
+  const stopped = [];
+  const runtime = new SessionRuntime({
+    generation: "generation-1",
+    send() {},
+    execute() {},
+    terminate: (sessionId) => stopped.push(sessionId),
+    maxOutboxMessages: 2,
+  });
+  runtime.disconnect();
+  runtime.transition("session-a", { type: "admit" });
+  runtime.transition("session-a", { type: "begin_turn", turnId: "turn-a" });
+  runtime.transition("session-b", { type: "admit" });
+  runtime.transition("session-a", {
+    type: "complete_turn", turnId: "turn-a", status: "completed",
+  });
+  runtime.setSend((message) => sent.push(message));
+
+  assert.deepEqual(stopped, ["session-a"]);
+  assert.deepEqual(sent.filter(({ sessionId }) => sessionId === "session-a"), [{
+    type: "transition",
+    generation: "generation-1",
+    sessionId: "session-a",
+    action: { type: "terminate", reason: "resource_exhausted" },
+  }]);
+  assert.equal(sent.filter(({ sessionId }) => sessionId === "session-b").length, 1);
+});
+
+test("a Session receipt overflow rejects another effect and converges terminal", async () => {
+  const sent = [];
+  const effects = [];
+  const runtime = new SessionRuntime({
+    generation: "generation-1",
+    send: (message) => sent.push(message),
+    execute: async (sessionId, command) => effects.push([sessionId, command.commandId]),
+    maxReceipts: 1,
+  });
+  for (const commandId of ["command-1", "command-2"]) {
+    await runtime.receive(JSON.stringify({
+      type: "command",
+      generation: "generation-1",
+      sessionId: "session-1",
+      command: { commandId, kind: "steer", payload: {} },
+    }));
+  }
+  assert.deepEqual(effects, [["session-1", "command-1"]]);
+  assert.deepEqual(sent.at(-1), {
+    type: "transition",
+    generation: "generation-1",
+    sessionId: "session-1",
+    action: { type: "terminate", reason: "resource_exhausted" },
+  });
 });

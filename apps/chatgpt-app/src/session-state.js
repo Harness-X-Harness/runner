@@ -4,6 +4,10 @@ const SESSION_TURN_PREFIX = "session:turn:";
 const SESSION_COMMAND_PREFIX = "session:command:";
 
 export const SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const MAX_ACTIVE_SESSIONS = 8;
+export const MAX_QUEUED_TURNS = 16;
+export const MAX_SESSION_COMMANDS = 256;
+export const MAX_SESSION_EVENTS = 512;
 
 export function environmentTerminalReason(environment) {
   if (environment?.closeRequested) return "stopped";
@@ -30,6 +34,7 @@ const TERMINAL_REASONS = new Set([
   "environment_ended",
   "startup_failed",
   "driver_failed",
+  "resource_exhausted",
 ]);
 const EVENT_FIELDS = {
   status: new Set(["phase", "channelState", "controllerName", "terminalReason"]),
@@ -113,10 +118,12 @@ export async function terminateGenerationSessions(
     }
     if (session.generation !== String(generation)) continue;
     const next = terminalSession(session, reason, timestamp);
-    await appendEvent(storage, next, {
-      type: "status",
-      data: { phase: "terminal", terminalReason: next.terminalReason },
-    }, timestamp);
+    if (await reserveEventCapacity(storage, next, 1, { terminal: true })) {
+      await appendEvent(storage, next, {
+        type: "status",
+        data: { phase: "terminal", terminalReason: next.terminalReason },
+      }, timestamp);
+    }
     await storage.put(key, next);
     earliestExpiry = minDate(earliestExpiry, next.expiresAt);
     terminated += 1;
@@ -213,6 +220,12 @@ export async function createSessionRecord(storage, input, timestamp = new Date()
   }
   const key = metaKey(input.sessionId);
   if (await storage.get(key)) return failure("session already exists", 409);
+  const sessions = await listAll(storage, SESSION_META_PREFIX);
+  const activeCount = [...sessions.values()].filter((session) =>
+    session.generation === input.generation && session.phase !== "terminal").length;
+  if (activeCount >= MAX_ACTIVE_SESSIONS) {
+    return failure("Environment Session limit reached", 429);
+  }
   const initial = initialDriverCommand(input, timestamp);
   if (initial?.error) return failure(initial.error, 400);
   const initialCommand = initial?.command;
@@ -229,7 +242,9 @@ export async function createSessionRecord(storage, input, timestamp = new Date()
     activeTurnId: undefined,
     pendingRequests: [],
     driverStartAccepted: Boolean(initial),
+    acceptedCommandCount: initial ? 1 : 0,
     processedCommandCount: 0,
+    retainedEventCount: 0,
     nextCursor: 1,
     createdAt: timestamp.toISOString(),
     updatedAt: timestamp.toISOString(),
@@ -350,6 +365,9 @@ async function applyAction(storage, sessionId, action, now) {
 
 async function admit(storage, key, session, now) {
   if (session.phase !== "preparing") return json({ error: "session cannot be admitted" }, 409);
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    return exhaustSession(storage, key, session, now);
+  }
   const next = update(session, { phase: "idle" }, now());
   await appendEvent(storage, next, { type: "status", data: { phase: "idle" } }, now());
   await storage.put(key, next);
@@ -360,6 +378,9 @@ async function beginTurn(storage, key, session, action, now) {
   if (session.phase !== "idle" || !validId(action.turnId) ||
       !await turnExists(storage, session.sessionId, action.turnId)) {
     return json({ error: "session turn cannot begin" }, 409);
+  }
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    return exhaustSession(storage, key, session, now);
   }
   const timestamp = now();
   const next = update(session, { phase: "running", activeTurnId: action.turnId }, timestamp);
@@ -377,6 +398,9 @@ async function takeOver(storage, key, session, action, now) {
     return json({ error: "session cannot change controller" }, 409);
   }
   if (action.grantId === session.controllerGrantId) return sessionResponse(session, { duplicate: true });
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    return exhaustSession(storage, key, session, now);
+  }
   const timestamp = now();
   const next = update(session, {
     controllerGrantId: action.grantId,
@@ -397,6 +421,12 @@ async function queueTurn(storage, key, session, action, now) {
   if (!validId(action.turnId) || !validText(action.text)) return json({ error: "invalid turn" }, 400);
   if (await turnExists(storage, session.sessionId, action.turnId)) {
     return json({ error: "turn already exists" }, 409);
+  }
+  if (session.queuedTurns.length >= MAX_QUEUED_TURNS) {
+    return exhaustSession(storage, key, session, now);
+  }
+  if (!await reserveEventCapacity(storage, session, 2)) {
+    return exhaustSession(storage, key, session, now);
   }
   const timestamp = now();
   const turn = { turnId: action.turnId, text: action.text, createdAt: timestamp.toISOString() };
@@ -421,6 +451,9 @@ async function cancelQueuedTurn(storage, key, session, action, now) {
   }
   const index = session.queuedTurns.findIndex(({ turnId }) => turnId === action.turnId);
   if (index < 0) return json({ error: "queued turn not found" }, 409);
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    return exhaustSession(storage, key, session, now);
+  }
   const queuedTurns = session.queuedTurns.slice();
   queuedTurns.splice(index, 1);
   const timestamp = now();
@@ -452,11 +485,20 @@ async function acceptCommand(storage, key, session, action, now) {
     if (existing.fingerprint !== fingerprint) return json({ error: "command identity conflict" }, 409);
     return sessionResponse(session, { duplicate: true });
   }
+  if ((session.acceptedCommandCount ?? 0) >= MAX_SESSION_COMMANDS) {
+    return exhaustSession(storage, key, session, now);
+  }
 
   const timestamp = now();
   const transition = await commandTransition(storage, session, action, timestamp);
   if (transition.error) return json({ error: transition.error }, transition.status ?? 409);
-  const next = update(session, transition.changes, timestamp);
+  if (!await reserveEventCapacity(storage, session, transition.events?.length ?? 0)) {
+    return exhaustSession(storage, key, session, now);
+  }
+  const next = update(session, {
+    ...transition.changes,
+    acceptedCommandCount: (session.acceptedCommandCount ?? 0) + 1,
+  }, timestamp);
   const command = {
     commandId: action.commandId,
     generation: session.generation,
@@ -599,8 +641,20 @@ async function completeTurn(storage, key, session, action, now) {
       session.activeTurnId !== String(action.turnId) || !status) {
     return json({ error: "active turn mismatch" }, 409);
   }
+  if (session.queuedTurns.length > 0 &&
+      (session.acceptedCommandCount ?? 0) >= MAX_SESSION_COMMANDS) {
+    return exhaustSession(storage, key, session, now);
+  }
+  const requiredEvents = session.queuedTurns.length > 0 ? 2 : 1;
+  if (!await reserveEventCapacity(storage, session, requiredEvents)) {
+    return exhaustSession(storage, key, session, now);
+  }
   const timestamp = now();
-  const next = update(session, { phase: "idle", activeTurnId: undefined, pendingRequests: [] }, timestamp);
+  const next = update(session, {
+    phase: "idle",
+    activeTurnId: undefined,
+    pendingRequests: [],
+  }, timestamp);
   await appendEvent(storage, next, { type: "turn", data: { turnId: action.turnId, status } }, timestamp);
   if (next.queuedTurns.length > 0) {
     const [head, ...queuedTurns] = next.queuedTurns;
@@ -609,6 +663,7 @@ async function completeTurn(storage, key, session, action, now) {
     next.phase = "running";
     next.activeTurnId = head.turnId;
     next.queuedTurns = queuedTurns;
+    next.acceptedCommandCount = (session.acceptedCommandCount ?? 0) + 1;
     const commandId = `command_${crypto.randomUUID()}`;
     const command = {
       commandId,
@@ -641,6 +696,9 @@ async function waitForUser(storage, key, session, action, now) {
   }
   const event = validateEvent({ type: "request", data: action.request });
   if (!event) return json({ error: "invalid request event" }, 400);
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    return exhaustSession(storage, key, session, now);
+  }
   const pendingRequests = [{
     requestId: action.request.requestId,
     kind: action.request.kind,
@@ -656,6 +714,12 @@ async function waitForUser(storage, key, session, action, now) {
 async function appendPublicEvent(storage, key, session, action, now) {
   const event = validateEvent(action.event);
   if (!event) return json({ error: "invalid public session event" }, 400);
+  if (!await reserveEventCapacity(storage, session, 1)) {
+    if (event.type === "agent_message_chunk") {
+      return sessionResponse(session, { dropped: true });
+    }
+    return exhaustSession(storage, key, session, now);
+  }
   const timestamp = now();
   await appendEvent(storage, session, event, timestamp);
   const next = update(session, {}, timestamp);
@@ -668,10 +732,12 @@ async function terminateOne(storage, key, session, action, now) {
   if (!TERMINAL_REASONS.has(action.reason)) return json({ error: "invalid terminal reason" }, 400);
   const timestamp = now();
   const next = terminalSession(session, action.reason, timestamp);
-  await appendEvent(storage, next, {
-    type: "status",
-    data: { phase: "terminal", terminalReason: next.terminalReason },
-  }, timestamp);
+  if (await reserveEventCapacity(storage, next, 1, { terminal: true })) {
+    await appendEvent(storage, next, {
+      type: "status",
+      data: { phase: "terminal", terminalReason: next.terminalReason },
+    }, timestamp);
+  }
   await storage.put(key, next);
   await scheduleNextExpiry(storage);
   return sessionResponse(next);
@@ -679,6 +745,7 @@ async function terminateOne(storage, key, session, action, now) {
 
 async function appendEvent(storage, session, input, timestamp) {
   const cursor = session.nextCursor;
+  const retained = retainedEventCount(session);
   const event = {
     cursor,
     sessionId: session.sessionId,
@@ -688,7 +755,46 @@ async function appendEvent(storage, session, input, timestamp) {
   };
   await storage.put(eventKey(session.sessionId, cursor), event);
   session.nextCursor = cursor + 1;
+  session.retainedEventCount = retained + 1;
   return event;
+}
+
+async function reserveEventCapacity(storage, session, required, { terminal = false } = {}) {
+  const limit = terminal ? MAX_SESSION_EVENTS : MAX_SESSION_EVENTS - 1;
+  let retained = retainedEventCount(session);
+  if (retained + required <= limit) return true;
+  const events = await listAll(storage, eventPrefix(session.sessionId));
+  for (const [key, event] of events) {
+    if (event.type !== "agent_message_chunk") continue;
+    await storage.delete(key);
+    retained -= 1;
+    if (retained + required <= limit) break;
+  }
+  session.retainedEventCount = Math.max(0, retained);
+  return retained + required <= limit;
+}
+
+async function exhaustSession(storage, key, session, now) {
+  const timestamp = now();
+  const next = terminalSession(session, "resource_exhausted", timestamp);
+  if (await reserveEventCapacity(storage, next, 1, { terminal: true })) {
+    await appendEvent(storage, next, {
+      type: "status",
+      data: { phase: "terminal", terminalReason: "resource_exhausted" },
+    }, timestamp);
+  }
+  await storage.put(key, next);
+  await scheduleNextExpiry(storage);
+  return json({
+    error: "Session resource limit reached",
+    session: publicSession(next),
+  }, 429);
+}
+
+function retainedEventCount(session) {
+  return Number.isSafeInteger(session.retainedEventCount)
+    ? session.retainedEventCount
+    : Math.max(0, session.nextCursor - 1);
 }
 
 function validateEvent(event) {
@@ -814,6 +920,7 @@ function terminalSession(session, reason, timestamp) {
     phase: "terminal",
     terminalReason: String(reason),
     activeTurnId: undefined,
+    queuedTurns: [],
     pendingRequests: [],
     expiresAt: new Date(timestamp.getTime() + SESSION_RETENTION_MS).toISOString(),
   }, timestamp);

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   channelAllowsSessionAction,
+  channelResponseIsFatal,
   connectEnvironmentChannel,
   disconnectEnvironmentChannel,
   parseEnvironmentChannelMessage,
@@ -130,6 +131,12 @@ test("channel accepts only generation-bound acknowledgements and bounded event e
   }), attachment).action, {
     type: "complete_turn", turnId: "turn-1", status: "failed",
   });
+  assert.deepEqual(parseEnvironmentChannelMessage(JSON.stringify({
+    type: "transition",
+    generation: "generation-1",
+    sessionId: "session-1",
+    action: { type: "terminate", reason: "resource_exhausted" },
+  }), attachment).action, { type: "terminate", reason: "resource_exhausted" });
   for (const message of [
     new Uint8Array([1, 2]).buffer,
     "not json",
@@ -157,6 +164,12 @@ test("disconnected Environment accepts durable queueing but rejects immediate st
     type: "accept_command",
     kind: "steer",
   }), true);
+});
+
+test("resource exhaustion is local while protocol rejection closes the shared channel", () => {
+  assert.equal(channelResponseIsFatal(new Response(null, { status: 429 })), false);
+  assert.equal(channelResponseIsFatal(new Response(null, { status: 409 })), true);
+  assert.equal(channelResponseIsFatal(new Response(null, { status: 200 })), false);
 });
 
 test("runner OIDC is accepted only from the exact WebSocket subprotocol pair", () => {
