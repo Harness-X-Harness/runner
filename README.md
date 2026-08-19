@@ -121,7 +121,8 @@ The same stable Worker exposes Remote Development Environments and interactive
 Codex or Grok Agent Sessions. A Session card streams recent bounded private
 output and presents at most two contextual actions. Ordinary turns stay in the
 MCP client's conversation; structured requests, interruption, takeover, and
-stop remain direct card controls. Harness does not clone a target repository or
-create commits and pull requests through a fixed pipeline. Users establish any
-needed GitHub login inside their private temporary Environment and direct the
-Agent there.
+stop remain direct card controls. Starting a Session requires its first task;
+opening an idle machine uses the separate Environment tool. Harness does not
+clone a target repository or create commits and pull requests through a fixed
+pipeline. Users establish any needed GitHub login inside their private
+temporary Environment and direct the Agent there.

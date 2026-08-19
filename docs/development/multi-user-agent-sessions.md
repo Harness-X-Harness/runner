@@ -21,7 +21,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 9. A user authorizes the Harness GitHub App during MCP authorization. Harness derives an Environment token limited to the fixed Execution Repository and `Actions: write`; the base access token is not retained.
 10. The user authorizes `gh`, Git, or GitHub MCP independently inside each admitted Environment. Harness transports interactive login prompts and responses but does not issue, store, refresh, or inject the resulting Agent GitHub credential.
 11. GitHub App authorization requests no traditional OAuth repository scope. GitHub's scoped user-token exchange enforces `Harness-X-Harness/runner` plus `Actions: write`; Target Repository access remains outside this Environment authorization boundary.
-12. `start_session` expresses one user intent. If the Environment is offline, the control plane starts it and creates the Session after admission without requiring a separate user step.
+12. `start_session` expresses one user intent and requires the first task. If the Environment is offline, the control plane starts it, creates the Session, and delivers that task after admission without requiring a separate user step.
 13. Harness sets no application-level Session quota or resource scheduler. The user may run several Sessions concurrently and the runner or native CLI reports resource failure naturally.
 14. Native Agent approvals and questions become ordered Session events. The Session waits for one valid response instead of auto-approving or requiring T3.
 15. All MCP Grants for a Principal can list that Principal's Sessions. Each Session has one controlling Grant; another Grant can take control only through an explicit, atomic takeover.
@@ -52,7 +52,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 40. `interrupt_turn` interrupts one exact active turn while preserving its native Agent Session and queued turns. `stop_session` remains the whole-Session terminal operation.
 41. Agent GitHub Authorization is generation-local. Its credentials exist only inside the user's temporary Environment and are destroyed with it; users authenticate again in a replacement Environment.
 42. The first release supports only native browser URL or device-code flows for Agent GitHub Authorization. Harness does not accept PATs or GitHub tokens through a Widget, MCP tool, Session Event, or control-channel command.
-43. `start_session` accepts an optional `workingDirectory` and optional initial prompt. The default working directory is the Environment user's native home. Harness does not create a workspace or checkout a Target Repository; a Session without an initial prompt becomes `idle` after driver startup.
+43. `start_session` accepts an optional `workingDirectory` and requires an initial prompt. The default working directory is the Environment user's native home. Harness does not create a workspace or checkout a Target Repository. A user who only wants a ready machine calls `open_environment` instead of creating an empty Agent Session.
 44. Stopping the last Agent Session does not close the shared Environment. Only explicit `close_environment`, direct GitHub termination, or the platform run limit ends T3 and other user processes.
 45. Codex and Grok continue to use platform-managed shared Mini provider credentials. Every admitted Environment can use and potentially read those credentials; the product relies on trusted-organization membership rather than process-level secret isolation.
 46. Each Harness Agent Session owns one independent native stdio child process: `codex app-server` for Codex or `grok agent --no-leader stdio` for Grok. Processes still share the Environment user's home, credentials, and filesystem; this is lifecycle and fault separation, not a security boundary.
@@ -289,7 +289,7 @@ Final output is the final `agent_message_chunk` sequence followed by the termina
 The public tools use Harness IDs only:
 
 ```text
-start_session(executor, workingDirectory?, initialPrompt?)
+start_session(executor, initialPrompt, workingDirectory?)
 list_sessions()
 read_session(sessionId, afterCursor?, limit?)
 send_turn(sessionId, text, delivery = "steer")
@@ -341,7 +341,7 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `EnvironmentTerminates` and `TerminalIsSticky` | Exact Environment terminal and confirmed startup-failure paths make matching Sessions terminal; all later mutations fail until seven-day cleanup deletes the immutable record. |
 | `channelState` and `channelGeneration` | [`environment-channel.js`](../../apps/chatgpt-app/src/environment-channel.js) admits only the current generation, run ID, and run attempt; the WebSocket attachment survives Durable Object hibernation and stale socket close events cannot disconnect a replacement. |
 | `deliveryCount`, `processed`, and `effectCount` | The server redelivers unacknowledged stable command IDs. The generation-local [`session-runtime`](../../.github/actions/session-runtime/index.js) records a receipt before one native effect and acknowledges duplicate delivery without invoking that effect again. If the runtime process ends, the Environment run ends; receipts are never resumed in another generation. |
-| Driver admission and `StartTurn` | The runner starts exactly one [`codex app-server`](../../.github/actions/session-runtime/codex-driver.js) or [`grok agent --no-leader stdio`](../../.github/actions/session-runtime/grok-driver.js) child per Session. After native conversation creation, `admit` reaches modeled `idle`; an optional initial prompt then uses `begin_turn`, which refines to the model's `StartTurn`. |
+| Driver admission and `StartTurn` | The runner starts exactly one [`codex app-server`](../../.github/actions/session-runtime/codex-driver.js) or [`grok agent --no-leader stdio`](../../.github/actions/session-runtime/grok-driver.js) child per Session. After native conversation creation, `admit` reaches modeled `idle`; the required initial prompt then uses `begin_turn`, which refines to the model's `StartTurn`. |
 | Native completion and user requests | Each driver normalizes only bounded public events. Native completion sends an exact-turn `complete_turn`; server-initiated approval or input sends exact-turn `wait_for_user`. Reasoning, thought, raw protocol payloads, and native IDs do not cross the driver boundary. |
 
 `start_session` reaches one aggregate operation in `EnvironmentObject`. The same
@@ -352,7 +352,7 @@ is `closing` remains bound to the reserved replacement; authenticated Session
 reads reconcile the old run and dispatch that replacement without a second user
 request.
 
-The implementation adds `preparing` before the model's admitted `idle` initial state. It permits one generation-bound driver-start command to create the native conversation, but no model turn begins before runner admission. The `admit` transition is the refinement mapping into the model's initial `idle`; `begin_turn` maps an optional initial prompt to `StartTurn`. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
+The implementation adds `preparing` before the model's admitted `idle` initial state. It permits one generation-bound driver-start command to create the native conversation, but no model turn begins before runner admission. The `admit` transition is the refinement mapping into the model's initial `idle`; `begin_turn` maps the required public initial prompt to `StartTurn`. Internal state still has a valid idle transition between admission and turn start. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
 
 [`SessionWidgetTakeover.tla`](../../formal/SessionWidgetTakeover.tla) checks a
 separate adapter obligation for two MCP clients. It models host approval,
