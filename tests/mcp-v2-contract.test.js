@@ -228,7 +228,7 @@ test("MCP v2 serves credential-free Environment and Session widget resources", a
     listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
     [
       { uri: "ui://environment/v4.html", mimeType: "text/html;profile=mcp-app" },
-      { uri: "ui://session/v1.html", mimeType: "text/html;profile=mcp-app" },
+      { uri: "ui://session/v2.html", mimeType: "text/html;profile=mcp-app" },
     ],
   );
 
@@ -257,7 +257,7 @@ test("MCP v2 serves credential-free Environment and Session widget resources", a
   assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
   assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
 
-  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v1.html" });
+  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v2.html" });
   const sessionResource = sessionRead.result.contents[0];
   assert.deepEqual(sessionResource._meta.ui.csp, {
     connectDomains: ["https://runner.example"],

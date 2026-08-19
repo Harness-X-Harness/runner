@@ -138,10 +138,14 @@ establishes any needed GitHub login inside it.
 
 ## Session Widget and private stream
 
-The versioned `ui://session/v1.html` resource is a consumer and command
+The versioned `ui://session/v2.html` resource is a consumer and command
 surface, never a state authority. It renders the authoritative Session snapshot
 and ordered event timeline. Every mutation calls the same MCP tool used by
-natural-language clients.
+natural-language clients. A client can observe a newer snapshot through the
+stream before an older tool response arrives. The Widget therefore applies
+Session snapshots by monotonic `latestCursor`; a lower-cursor response cannot
+replace a newer view. The displayed controller is the client's latest
+observation, not a lock or a second authority.
 
 Single-Session tool results put a ten-minute encrypted Session stream
 capability only in private `_meta`. It is bound to owner, Session, and Grant.

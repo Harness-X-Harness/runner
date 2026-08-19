@@ -1,4 +1,4 @@
-export const SESSION_WIDGET_URI = "ui://session/v1.html";
+export const SESSION_WIDGET_URI = "ui://session/v2.html";
 export const SESSION_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 export function sessionWidgetHtml(controlPlaneUrl) {
@@ -116,6 +116,9 @@ export function sessionWidgetHtml(controlPlaneUrl) {
 
     function renderSession(value) {
       if (!value || typeof value !== "object") return;
+      if (Number.isSafeInteger(current.latestCursor) &&
+          Number.isSafeInteger(value.latestCursor) &&
+          value.latestCursor < current.latestCursor) return;
       current = { ...current, ...value };
       const phase = ["preparing","idle","running","waiting_for_user","stopping","terminal"].includes(current.phase) ? current.phase : "preparing";
       el.badge.dataset.phase = phase;
