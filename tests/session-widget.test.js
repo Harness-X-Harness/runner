@@ -330,3 +330,122 @@ test("Session Widget accepts early initialization data and refreshes an expired 
   }]);
   assert.equal(elements.get("phase").textContent, "terminal");
 });
+
+test("Session Widget does not let a delayed tool response replace a newer stream snapshot", async () => {
+  const ids = ["title","badge","phase","executor","channel","controller","cwd","environment","timeline","requestPanel","requestTitle","requestDetail","requestChoices","requestFields","respond","queuePanel","queuedTurns","cancelQueued","composer","steer","queue","interrupt","takeover","stop","openEnvironment","viewRun","message"];
+  const elements = new Map(ids.map((id) => [id, new Element()]));
+  const listeners = [];
+  let pendingToolCall;
+  let releaseStream;
+  const base = {
+    sessionId: "session-race",
+    executor: "codex",
+    phase: "idle",
+    channelState: "connected",
+    controller: { clientName: "VS Code", currentGrant: false },
+    workingDirectory: "/home/runner",
+    queuedTurns: [],
+    pendingRequests: [],
+    latestCursor: 9,
+    environment: { status: "ready", entryUrl: "https://runner.example/environment" },
+    createdAt: "2026-08-19T00:00:00.000Z",
+    updatedAt: "2026-08-19T00:00:09.000Z",
+  };
+  const parent = {
+    postMessage(message) {
+      if (message.method === "ui/initialize") {
+        queueMicrotask(() => deliver({ jsonrpc: "2.0", id: message.id, result: {} }));
+      }
+      if (message.method === "ui/notifications/initialized") {
+        queueMicrotask(() => deliver({
+          jsonrpc: "2.0",
+          method: "ui/notifications/tool-result",
+          params: {
+            structuredContent: base,
+            _meta: {
+              sessionStream: {
+                url: "https://runner.example/session-stream/session-race",
+                token: "private-capability",
+              },
+            },
+          },
+        }));
+      }
+      if (message.method === "tools/call") pendingToolCall = message;
+    },
+  };
+  const deliver = (data) => listeners.forEach((listener) => listener({ source: parent, data }));
+  let streamReads = 0;
+  const streamPayload = new TextEncoder().encode(`${JSON.stringify({
+    type: "snapshot",
+    session: {
+      ...base,
+      controller: { clientName: "Cursor 11 Client", currentGrant: false },
+      latestCursor: 11,
+      updatedAt: "2026-08-19T00:00:11.000Z",
+    },
+    events: [{
+      cursor: 11,
+      sessionId: "session-race",
+      type: "status",
+      createdAt: "2026-08-19T00:00:11.000Z",
+      data: { controllerName: "Cursor 11 Client" },
+    }],
+    nextCursor: 11,
+    hasMore: false,
+  })}\n`);
+  const firstStreamRead = new Promise((resolve) => { releaseStream = resolve; });
+  vm.runInNewContext(script(sessionWidgetHtml("https://runner.example")), {
+    console,
+    document: {
+      getElementById: (id) => elements.get(id),
+      createElement: () => new Element(),
+    },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => streamReads++ === 0
+            ? firstStreamRead
+            : new Promise(() => {}),
+        }),
+      },
+    }),
+    Map,
+    Object,
+    Promise,
+    queueMicrotask,
+    setTimeout,
+    TextDecoder,
+    URL,
+    window: {
+      parent,
+      addEventListener(name, listener) { if (name === "message") listeners.push(listener); },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const takeover = elements.get("takeover").click();
+  assert.equal(pendingToolCall.params.name, "take_over_session");
+  releaseStream({ done: false, value: streamPayload });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get("controller").textContent, "Cursor 11 Client");
+
+  deliver({
+    jsonrpc: "2.0",
+    id: pendingToolCall.id,
+    result: {
+      structuredContent: {
+        ...base,
+        controller: { clientName: "Delayed Cursor 10 Client", currentGrant: true },
+        latestCursor: 10,
+        updatedAt: "2026-08-19T00:00:10.000Z",
+      },
+    },
+  });
+  await takeover;
+
+  assert.equal(elements.get("controller").textContent, "Cursor 11 Client");
+  assert.equal(elements.get("takeover").hidden, false);
+});

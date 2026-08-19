@@ -350,6 +350,25 @@ request.
 
 The implementation adds `preparing` before the model's admitted `idle` initial state. It permits one generation-bound driver-start command to create the native conversation, but no model turn begins before runner admission. The `admit` transition is the refinement mapping into the model's initial `idle`; `begin_turn` maps an optional initial prompt to `StartTurn`. Retention deletion occurs after the modeled terminal history and is outside the model. The HTTP request adapter, Durable Object storage, pagination, timestamps, text, and event schemas do not add state transitions to the focused obligation.
 
+[`SessionWidgetTakeover.tla`](../../formal/SessionWidgetTakeover.tla) checks a
+separate adapter obligation for two MCP clients. It models host approval,
+denial, Durable Object commit or rejection, a delayed or lost tool response,
+and a newer stream observation. Arbitrary delay is stuttering; the model adds
+no clock, timeout, lease, or progress claim. It is not a refinement of the
+complete Agent Session model.
+
+The positive configuration uses two clients and two controller changes. It
+uses no state constraints, symmetry set, or semantic overrides. TLC generated
+958 states, found 330 distinct states, reached depth 12, and found no invariant
+violation. Deadlock checking is disabled because a pending approval, a lost
+response, and a quiescent Session are legal without a liveness assumption. The
+negative configuration applies a delayed tool response unconditionally and
+violates `ViewCursorNeverRegresses` at depth 9 after one client has already
+observed the other client's newer takeover. The implementation obligation is
+the `renderSession` cursor gate in
+[`session-widget.js`](../../apps/chatgpt-app/src/session-widget.js); the
+controlled Widget test reproduces that exact event order.
+
 ## Primary references
 
 - [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
