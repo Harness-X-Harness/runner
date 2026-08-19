@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { channelAllowsSessionAction } from "../apps/chatgpt-app/src/environment-channel.js";
+import { issueEnvironmentIdentity } from "../apps/chatgpt-app/src/environment-identity.js";
 import { handleMcpRequest } from "../apps/chatgpt-app/src/mcp.js";
 import {
   handleSessionRequest,
@@ -258,6 +259,34 @@ test("offline and closing Environment starts keep one stable preparing Session i
   assert.equal(waiting.phase, "preparing");
   assert.equal(waiting.environment.status, "closing");
   assert.equal(harness.environment(OWNER).replacementGeneration, "generation-replacement");
+});
+
+test("a real signed Environment generation can own a Session", async () => {
+  const harness = fakeHarness();
+  const ownerId = "490285";
+  const generation = await issueEnvironmentIdentity(
+    ownerId,
+    harness.env.ENVIRONMENT_SESSION_SECRET,
+  );
+  assert.ok(generation.length > 128);
+  harness.setEnvironment(ownerId, {
+    ownerId,
+    generation,
+    status: "ready",
+    channelState: "connected",
+  });
+
+  const started = await startAgentSession(
+    harness.env,
+    ownerId,
+    { grantId: "grant-a", clientName: "Codex" },
+    { executor: "codex" },
+    async () => { throw new Error("active Environment must not dispatch"); },
+    async () => {},
+  );
+
+  assert.equal(started.phase, "preparing");
+  assert.equal(started.environment.status, "ready");
 });
 
 async function listTools(env, props) {
