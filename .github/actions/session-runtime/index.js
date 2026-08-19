@@ -3,13 +3,27 @@ const path = require("node:path");
 const { DriverRegistry } = require("./drivers.js");
 
 const ENVIRONMENT_CHANNEL_PROTOCOL = "harness.environment.v1";
+const MAX_OUTBOX_MESSAGES_PER_SESSION = 64;
+const MAX_RECEIPTS_PER_SESSION = 256;
 
 class SessionRuntime {
-  constructor({ generation, send, execute }) {
+  constructor({
+    generation,
+    send,
+    execute,
+    terminate = () => {},
+    maxOutboxMessages = MAX_OUTBOX_MESSAGES_PER_SESSION,
+    maxReceipts = MAX_RECEIPTS_PER_SESSION,
+  }) {
     this.generation = generation;
     this.send = send;
     this.execute = execute;
+    this.terminate = terminate;
+    this.maxOutboxMessages = maxOutboxMessages;
+    this.maxReceipts = maxReceipts;
     this.receipts = new Set();
+    this.receiptCounts = new Map();
+    this.terminatedSessions = new Set();
     this.outbox = [];
   }
 
@@ -25,16 +39,54 @@ class SessionRuntime {
   }
 
   deliver(message) {
+    if (this.terminatedSessions.has(message.sessionId) && !resourceTerminal(message)) return;
     if (!this.send) {
-      this.outbox.push(message);
+      this.buffer(message);
       return;
     }
     try {
       this.send(message);
     } catch {
       this.send = undefined;
-      this.outbox.push(message);
+      this.buffer(message);
     }
+  }
+
+  buffer(message) {
+    const sessionId = message.sessionId;
+    if (!validId(sessionId) ||
+        (this.terminatedSessions.has(sessionId) && !resourceTerminal(message))) return;
+    const sessionMessages = this.outbox.filter((candidate) => candidate.sessionId === sessionId).length;
+    if (sessionMessages >= this.maxOutboxMessages) {
+      const recoverableIndex = this.outbox.findIndex((candidate) =>
+        candidate.sessionId === sessionId && recoverable(candidate));
+      if (recoverableIndex >= 0) {
+        this.outbox.splice(recoverableIndex, 1);
+      } else if (recoverable(message)) {
+        return;
+      } else {
+        this.exhaust(sessionId);
+        return;
+      }
+    }
+    this.outbox.push(message);
+  }
+
+  exhaust(sessionId) {
+    if (this.terminatedSessions.has(sessionId)) return;
+    this.terminatedSessions.add(sessionId);
+    this.outbox = this.outbox.filter((message) => message.sessionId !== sessionId);
+    try {
+      this.terminate(sessionId);
+    } catch {
+      // The stable terminal transition below remains the transport authority.
+    }
+    this.deliver({
+      type: "transition",
+      generation: this.generation,
+      sessionId,
+      action: { type: "terminate", reason: "resource_exhausted" },
+    });
   }
 
   async receive(raw) {
@@ -58,9 +110,16 @@ class SessionRuntime {
 
   async command(sessionId, command) {
     if (!validId(sessionId) || !validId(command?.commandId)) return;
+    if (this.terminatedSessions.has(sessionId)) return;
     const receipt = `${sessionId}\0${command.commandId}`;
     if (!this.receipts.has(receipt)) {
+      const receiptCount = this.receiptCounts.get(sessionId) ?? 0;
+      if (receiptCount >= this.maxReceipts) {
+        this.exhaust(sessionId);
+        return;
+      }
       this.receipts.add(receipt);
+      this.receiptCounts.set(sessionId, receiptCount + 1);
       try {
         await this.execute(sessionId, command);
       } catch {
@@ -79,6 +138,7 @@ class SessionRuntime {
         });
       }
     }
+    if (this.terminatedSessions.has(sessionId)) return;
     this.deliver({
       type: "ack",
       generation: this.generation,
@@ -116,6 +176,7 @@ async function main() {
     generation: environmentId,
     send: () => {},
     execute: (sessionId, command) => drivers.execute(sessionId, command),
+    terminate: (sessionId) => drivers.stop(sessionId),
   });
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -209,8 +270,19 @@ function validId(value) {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
+function recoverable(message) {
+  return message?.type === "event" && message.event?.type === "agent_message_chunk";
+}
+
+function resourceTerminal(message) {
+  return message?.type === "transition" && message.action?.type === "terminate" &&
+    message.action.reason === "resource_exhausted";
+}
+
 module.exports = {
   ENVIRONMENT_CHANNEL_PROTOCOL,
+  MAX_OUTBOX_MESSAGES_PER_SESSION,
+  MAX_RECEIPTS_PER_SESSION,
   SessionRuntime,
   channelProtocols,
 };

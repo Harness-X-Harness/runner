@@ -12,6 +12,7 @@ import {
 import {
   ENVIRONMENT_CHANNEL_PROTOCOL,
   channelAllowsSessionAction,
+  channelResponseIsFatal,
   connectEnvironmentChannel as connectChannelState,
   disconnectEnvironmentChannel,
   parseEnvironmentChannelMessage,
@@ -62,8 +63,11 @@ export class EnvironmentObject extends DurableObject {
         return Response.json({ error: "Environment channel is disconnected" }, { status: 409 });
       }
       let response = await handleSessionRequest(this.ctx.storage, request);
-      if (request.method === "POST" && response.ok && action?.generation) {
-        if (action.type === "queue_turn" && environment?.channelState === "connected") {
+      const committedResourceTerminal = response.status === 429;
+      if (request.method === "POST" &&
+          (response.ok || committedResourceTerminal) && action?.generation) {
+        if (response.ok && action.type === "queue_turn" &&
+            environment?.channelState === "connected") {
           const started = await startGenerationQueuedTurns(
             this.ctx.storage,
             String(action.generation),
@@ -75,7 +79,7 @@ export class EnvironmentObject extends DurableObject {
             );
           }
         }
-        await this.sendPendingCommands(String(action.generation));
+        if (response.ok) await this.sendPendingCommands(String(action.generation));
         await this.broadcastSession(path.split("/")[2]);
       }
       return response;
@@ -521,8 +525,9 @@ export class EnvironmentObject extends DurableObject {
         body: JSON.stringify(action),
       }),
     );
-    if (!response.ok) socket.close(1008, "rejected Environment channel message");
-    else {
+    if (channelResponseIsFatal(response)) {
+      socket.close(1008, "rejected Environment channel message");
+    } else {
       if (incoming.type === "transition" && incoming.action.type === "complete_turn") {
         await this.sendPendingCommands(incoming.generation, socket);
       }

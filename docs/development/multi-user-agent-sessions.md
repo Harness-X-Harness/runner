@@ -22,7 +22,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 10. The user authorizes `gh`, Git, or GitHub MCP independently inside each admitted Environment. Harness transports interactive login prompts and responses but does not issue, store, refresh, or inject the resulting Agent GitHub credential.
 11. GitHub App authorization requests no traditional OAuth repository scope. GitHub's scoped user-token exchange enforces `Harness-X-Harness/runner` plus `Actions: write`; Target Repository access remains outside this Environment authorization boundary.
 12. `start_session` expresses one user intent and requires the first task. If the Environment is offline, the control plane starts it, creates the Session, and delivers that task after admission without requiring a separate user step.
-13. Harness sets no application-level Session quota or resource scheduler. The user may run several Sessions concurrently and the runner or native CLI reports resource failure naturally.
+13. Harness has no resource scheduler, but it enforces hard safety limits per Environment and Session. Excess input is rejected; recoverable Agent text chunks may be discarded; a non-recoverable overflow terminates only the affected Session with `resource_exhausted`.
 14. Native Agent approvals and questions become ordered Session events. The Session waits for one valid response instead of auto-approving or requiring T3.
 15. All MCP Grants for a Principal can list that Principal's Sessions. Each Session has one controlling Grant; another Grant can take control only through an explicit, atomic takeover.
 16. A Durable Object retains private, ordered Session Events with monotonic cursors. Standard tool reads are the authority; Widget streaming is an optional live view.
@@ -36,7 +36,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 24. Reconnect restores coalesced partial Agent output as well as completed semantic events. Runner-side drivers combine high-frequency native deltas into bounded text chunks before appending Durable Object events; Harness does not persist one event per token.
 25. The MCP surface has nine Session tools: `start_session`, `list_sessions`, `read_session`, `send_turn`, `cancel_queued_turn`, `interrupt_turn`, `respond_to_session`, `take_over_session`, and `stop_session`. The existing `open_environment` and `close_environment` remain for direct T3 use. Harness does not replace these with a generic action-dispatch tool.
 26. `start_session` atomically creates and returns a stable Session ID in `preparing` state before Environment startup completes. Environment allocation, admission, and native driver startup advance that same Session through ordered events; the MCP request does not wait for runner readiness.
-27. Session lifecycle uses the small phase set `preparing`, `idle`, `running`, `waiting_for_user`, `stopping`, and `terminal`. A separate `terminalReason` records explicit stop, Environment termination, startup failure, driver failure, or retention expiry instead of multiplying terminal phases.
+27. Session lifecycle uses the small phase set `preparing`, `idle`, `running`, `waiting_for_user`, `stopping`, and `terminal`. A separate `terminalReason` records explicit stop, Environment termination, startup failure, driver failure, or resource exhaustion instead of multiplying terminal phases.
 28. `send_turn` supports `delivery: steer | queue`. `steer` adds input to the current native turn; `queue` persists a later turn in the EnvironmentObject and starts it after the current turn completes. Harness is queue authority for both executors; it does not delegate product ordering to Grok's optional native queue extension.
 29. `send_turn` defaults to `steer`: it starts a new turn when the Session is idle and steers the exact active turn when it is running. Queueing occurs only when the caller explicitly selects `delivery: queue`.
 30. MCP OAuth exposes only `sessions:manage` and `environments:manage`. Harness does not duplicate GitHub repository capabilities as `repos:*`, `issues:*`, or pull-request scopes; GitHub user authorization remains authority for those actions.
@@ -231,7 +231,7 @@ enhancement and are not required by other MCP Clients.
 preparing -> idle -> running -> idle
                          \-> waiting_for_user -> running
 any non-terminal phase -> stopping -> terminal
-Environment terminal or unrecoverable startup/driver failure -> terminal
+Environment terminal or unrecoverable startup/driver/resource failure -> terminal
 ```
 
 `terminalReason` carries the cause without changing the lifecycle phase model. Terminal Sessions are immutable except for retention cleanup.
@@ -245,7 +245,7 @@ type SessionSnapshot = {
   sessionId: string;
   executor: "codex" | "grok";
   phase: "preparing" | "idle" | "running" | "waiting_for_user" | "stopping" | "terminal";
-  terminalReason?: "stopped" | "environment_ended" | "startup_failed" | "driver_failed";
+  terminalReason?: "stopped" | "environment_ended" | "startup_failed" | "driver_failed" | "resource_exhausted";
   channelState: "connected" | "disconnected";
   controller: { clientName: string; currentGrant: boolean };
   workingDirectory: string;
@@ -311,6 +311,26 @@ contract fail closed.
 
 `list_sessions` returns metadata only. Reading a transcript always requires `read_session`. All Session tools require `sessions:manage`; Environment tools require `environments:manage`.
 
+## Resource containment
+
+Resource safety is local to one Environment generation and one Session. It is
+not a CPU or memory scheduler and does not isolate files or provider
+credentials.
+
+| Boundary | Limit | Overflow behavior |
+| --- | ---: | --- |
+| Active Sessions and native drivers per Environment | 8 | Reject creation before a ninth Session is admitted; runner-side driver admission independently fails the new Session only. |
+| Explicit queued turns per Session | 16 | Reject the new turn with HTTP 429 and terminate that Session as `resource_exhausted`. |
+| Accepted command identities per Session | 256 | Reject another command before a native effect and terminate that Session. Duplicate delivery of an existing ID remains idempotent. |
+| Retained Session Events | 512 | Keep one terminal-event slot. At the normal limit, remove the oldest recoverable `agent_message_chunk` before appending newer output or control state. If only non-recoverable events remain, terminate the Session. Event cursors remain monotonic and are not reused. |
+| Disconnected runner outbox per Session | 64 messages | Replace the oldest recoverable Agent chunk with newer output. If a non-recoverable control message cannot fit, stop that Session driver, discard its pending outbox, and retain one terminal transition. Other Sessions keep the shared channel. |
+
+The owner-scoped Durable Object is still the serialization authority. A local
+resource terminal returns 429 to the rejected operation but does not close the
+multiplexed Environment Control Channel. Identity, generation, protocol, and
+state mismatches remain channel-fatal because they invalidate the shared
+transport authority.
+
 ## Explicit exclusions
 
 - no cross-Environment native Session resume;
@@ -326,6 +346,60 @@ contract fail closed.
 - Decide whether orphaned Environment runs need a separate organization-owned scavenger. A possible admin PAT would be a platform authority, not the Principal's Execution Authorization. Before adoption, define its least possible permissions, orphan proof, exact-run targeting, audit trail, rotation, revocation, and protection against cancelling a live run still owned by a valid Principal. It is not part of the first OAuth-only command path and must not act as an inline retry or fallback.
 
 ## Formal evidence
+
+Three focused obligation models cover the concurrency boundaries that the
+single-Session model deliberately omits. They are independent models, not one
+`AllSystem` model and not a claim of full implementation refinement.
+
+[`PrincipalIsolation.tla`](../../formal/PrincipalIsolation.tla) uses two
+Principals, two owner-indexed Environments, and two unique GitHub run
+identities. It checks `NoCrossOwnerMutation`, `ExactOwnerCancel`, and
+`OneActiveRunPerOwner`. Ready and terminal evidence are external actions with
+no fairness. Weak fairness applies only to a local commit after relevant
+evidence exists. A concurrent Close may supersede ready evidence; Offline then
+still requires terminal evidence from GitHub. The positive finite
+configuration generated 5,617 states, found 1,377 distinct states, and reached
+depth 15. Three negative configurations route a callback to the wrong owner,
+cancel another owner's run, or create a second active run; each violates its
+target invariant at depth 3.
+
+[`MultiSessionTransport.tla`](../../formal/MultiSessionTransport.tla) uses one
+Environment generation, two Sessions, two Clients, two commands, and one
+possible disconnect. It checks `NoCrossSessionEffect`,
+`AtMostOncePerSessionCommand`, `SessionFailureIsLocal`, and `GenerationGate`.
+The conditional progress property requires explicit channel-availability and
+driver-response evidence before it requires an accepted command to reach ACK
+or a terminal Session. The positive configuration generated 110,941 states,
+found 33,300 distinct states, and reached depth 18. Wrong-session failure,
+duplicate effect, and stale-generation negative configurations violate their
+target invariants at depths 2, 6, and 4.
+
+[`BoundedSessionResources.tla`](../../formal/BoundedSessionResources.tla) uses
+two Sessions with queue capacity 1, outbox capacity 2, event capacity 3, one
+driver slot, and two input identities. These are discriminating model values,
+not production limits. It checks every resource bound, stable terminal state
+after overflow, and FIFO delivery of retained control messages after
+reconnect. Recoverable chunks may be dropped. The positive configuration
+generated 3,493,602 states, found 456,964 distinct states, and reached depth
+19. Negative configurations grow the outbox past its limit, revive an
+overflowed Session, or deliver retained controls out of order; they violate
+their target invariants at depths 5, 4, and 7.
+
+All three positive configurations were exhaustively checked with TLA+ Tools
+1.7.4 / TLC 2.19. They use no state constraints, symmetry sets, or semantic
+overrides. Deadlock checking is disabled because offline, terminal, waiting,
+and externally blocked states are valid quiescent states. The checks prove only
+the declared finite abstractions. They do not prove Cloudflare delivery,
+GitHub evidence arrival, driver response, or real-time availability.
+
+The controlled implementation traces use the same ownership and failure
+boundaries:
+
+| Obligation | Implementation and test evidence |
+| --- | --- |
+| Principal isolation | Every Environment and Session request routes through `ENVIRONMENTS.idFromName("github-" + ownerId)`. Callback identity selects that same owner key, and the exact generation/run gates reject a mismatched callback or cancellation. Owner-scoped store tests use two owners and prove that neither Session list contains the other owner's records. |
+| Multi-Session transport | One `SessionRuntime` multiplexes two Session IDs while its driver registry keeps one child per ID. Controlled tests deliver commands for both Sessions, reject stale generation, suppress duplicate native effects, and prove one Session's outbox or driver-capacity failure leaves the other driver and queued message intact. |
+| Resource containment | Tests force small runner outbox, receipt, and driver limits and production-sized control-plane queue, command, and event limits. They prove input rejection, recoverable chunk eviction, stable `resource_exhausted`, and a non-fatal shared-channel 429. |
 
 [`AgentSessions.tla`](../../formal/AgentSessions.tla) is a focused requirements model for one representative Agent Session. It checks controller authority, exact Environment generation, FIFO queued turns, cancellation before start, terminal monotonicity, and at-most-once native effects over at-least-once command delivery. OAuth, GitHub dispatch, T3, Tailscale, text content, driver payloads, and eventual external progress are outside this obligation.
 

@@ -70,6 +70,10 @@ export function channelAllowsSessionAction(environment, action) {
     environment?.channelState === "connected";
 }
 
+export function channelResponseIsFatal(response) {
+  return !response.ok && response.status !== 429;
+}
+
 function sameDescriptor(current, descriptor) {
   return descriptor &&
     current.pairingUrl === descriptor.pairingUrl &&
@@ -99,7 +103,7 @@ function validRunnerAction(action) {
         action.request && typeof action.request === "object" && !Array.isArray(action.request);
     case "terminate":
       return exactKeys(action, ["type", "reason"]) &&
-        new Set(["stopped", "driver_failed"]).has(action.reason);
+        new Set(["stopped", "driver_failed", "resource_exhausted"]).has(action.reason);
     default:
       return false;
   }

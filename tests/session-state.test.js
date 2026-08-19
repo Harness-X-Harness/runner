@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_ACTIVE_SESSIONS,
+  MAX_QUEUED_TURNS,
+  MAX_SESSION_COMMANDS,
+  MAX_SESSION_EVENTS,
   SESSION_RETENTION_MS,
   environmentTerminalReason,
   expireSessions,
@@ -138,6 +142,31 @@ test("owner-scoped stores isolate Sessions while one owner can list several", as
   assert.deepEqual(ownerBSessions.map(({ sessionId }) => sessionId), ["session-b1"]);
 });
 
+test("Environment rejects a Session beyond the active driver budget", async () => {
+  const storage = fakeStorage();
+  for (let index = 0; index < MAX_ACTIVE_SESSIONS; index += 1) {
+    assert.equal((await sessionRequest(storage, "POST", "/sessions", {
+      sessionId: `session-${index}`,
+      generation: "generation-1",
+      controllerGrantId: "grant-a",
+      controllerClientName: "Client A",
+      executor: "codex",
+      workingDirectory: "/home/runner",
+    })).status, 201);
+  }
+  const rejected = await sessionRequest(storage, "POST", "/sessions", {
+    sessionId: "session-overflow",
+    generation: "generation-1",
+    controllerGrantId: "grant-a",
+    controllerClientName: "Client A",
+    executor: "codex",
+    workingDirectory: "/home/runner",
+  });
+  assert.equal(rejected.status, 429);
+  assert.equal((await (await sessionRequest(storage, "GET", "/sessions")).json()).sessions.length,
+    MAX_ACTIVE_SESSIONS);
+});
+
 test("explicit queued turns remain FIFO and cancel only before start", async () => {
   const storage = await admittedSession();
   for (const [turnId, text] of [["turn-a", "first"], ["turn-b", "second"]]) {
@@ -174,6 +203,112 @@ test("explicit queued turns remain FIFO and cancel only before start", async () 
     turnId: "turn-a",
   });
   assert.equal(tooLate.status, 409);
+});
+
+test("a queued-input overflow is rejected and terminates only that Session", async () => {
+  const storage = await admittedSession();
+  for (let index = 0; index < MAX_QUEUED_TURNS; index += 1) {
+    assert.equal((await sessionAction(storage, {
+      type: "queue_turn",
+      generation: "generation-1",
+      grantId: "grant-a",
+      turnId: `turn-${index}`,
+      text: `queued ${index}`,
+    })).status, 200);
+  }
+  const rejected = await sessionAction(storage, {
+    type: "queue_turn",
+    generation: "generation-1",
+    grantId: "grant-a",
+    turnId: "turn-overflow",
+    text: "must be rejected",
+  });
+  const body = await rejected.json();
+  assert.equal(rejected.status, 429);
+  assert.equal(body.session.phase, "terminal");
+  assert.equal(body.session.terminalReason, "resource_exhausted");
+  assert.deepEqual(body.session.queuedTurns, []);
+});
+
+test("a command-receipt overflow cannot create another native effect", async () => {
+  const storage = await admittedSession();
+  assert.equal((await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-start",
+    kind: "start",
+    turnId: "turn-active",
+    text: "start",
+  })).status, 200);
+  for (let index = 1; index < MAX_SESSION_COMMANDS; index += 1) {
+    assert.equal((await sessionAction(storage, {
+      type: "accept_command",
+      generation: "generation-1",
+      grantId: "grant-a",
+      commandId: `command-interrupt-${index}`,
+      kind: "interrupt",
+      turnId: "turn-active",
+    })).status, 200);
+  }
+  const rejected = await sessionAction(storage, {
+    type: "accept_command",
+    generation: "generation-1",
+    grantId: "grant-a",
+    commandId: "command-overflow",
+    kind: "interrupt",
+    turnId: "turn-active",
+  });
+  assert.equal(rejected.status, 429);
+  assert.equal((await rejected.json()).session.terminalReason, "resource_exhausted");
+});
+
+test("event retention drops old Agent chunks but terminalizes non-recoverable overflow", async () => {
+  const storage = await admittedSession();
+  for (let index = 0; index < MAX_SESSION_EVENTS - 2; index += 1) {
+    assert.equal((await sessionAction(storage, {
+      type: "append_event",
+      generation: "generation-1",
+      event: {
+        type: "agent_message_chunk",
+        data: { turnId: "turn-output", text: `chunk-${index}` },
+      },
+    })).status, 200);
+  }
+  const retained = await sessionAction(storage, {
+    type: "append_event",
+    generation: "generation-1",
+    event: {
+      type: "agent_message_chunk",
+      data: { turnId: "turn-output", text: "latest-chunk" },
+    },
+  });
+  assert.equal(retained.status, 200);
+  const latest = await sessionRequest(
+    storage,
+    "GET",
+    `/sessions/session-1?after=${MAX_SESSION_EVENTS - 1}&limit=2`,
+  );
+  assert.equal((await latest.json()).events.at(-1).data.text, "latest-chunk");
+
+  const controls = await admittedSession();
+  for (let index = 0; index < MAX_SESSION_EVENTS - 3; index += 1) {
+    assert.equal((await sessionAction(controls, {
+      type: "append_event",
+      generation: "generation-1",
+      event: {
+        type: "activity",
+        data: { label: `control-${index}`, status: "completed" },
+      },
+    })).status, 200);
+  }
+  const exhausted = await sessionAction(controls, {
+    type: "append_event",
+    generation: "generation-1",
+    event: { type: "error", data: { scope: "driver", code: "late", message: "critical" } },
+  });
+  assert.equal(exhausted.status, 429);
+  assert.equal((await exhausted.json()).session.terminalReason, "resource_exhausted");
 });
 
 test("duplicate command delivery records one native effect", async () => {
