@@ -7,14 +7,15 @@ entry, or cleanup. Do not convert it into CI automation.
 ## User story
 
 As the authenticated owner, I can ask ChatGPT to open one temporary development
-machine, use one stable private entry to complete native T3 pairing, connect by
-Tailscale SSH, and close the same runner without publishing pairing credentials.
+machine, use one stable private entry to complete native T3 pairing, and close
+the same runner without publishing pairing credentials. When the optional
+Headscale attachment succeeds, a trusted administrator can also use Tailscale SSH.
 
 ## Preconditions
 
 - The change is merged to `main` and the Worker is deployed.
 - `gh` is authenticated for `Harness-X-Harness/runner`.
-- The Agent machine is in the same Tailscale network.
+- For the optional SSH gate, the Agent machine is in the same Tailscale network.
 - The user can refresh and reconnect the ChatGPT MCP connection.
 - No pairing URL, token, private address, provider endpoint, or secret is copied
   into chat, issues, Actions output, summaries, artifacts, or tracked files.
@@ -34,7 +35,7 @@ single Environment-management permission. The user starts a new conversation.
 
 ### 2. Open one Environment
 
-The user calls `open_environment` without arguments. Confirm that it returns:
+The user calls `open_environment` with `operation: "open"`. Confirm that it returns:
 
 - status Starting or Ready;
 - the stable `https://runners.trustedtunnel.app/environment` entry;
@@ -58,8 +59,11 @@ user does not copy the destination or token into ChatGPT.
 ### 4. Probe the private machine
 
 The Agent observes the exact GitHub run until **Keep environment running** is
-active. It finds `gha-<run-id>-<run-attempt>` in Tailscale, connects as `runner`,
-and verifies without changing the workspace:
+active. A failed optional Tailscale step must not prevent T3 or Session runtime
+from reaching this phase.
+
+If `gha-<run-id>-<run-attempt>` is online in Tailscale, connect as `runner` and
+verify without changing the workspace:
 
 - peer online and Tailscale SSH succeeds;
 - `$HOME/workspace` is empty, owned by `runner`, and mode `0700`;
@@ -76,7 +80,7 @@ a token, and the pairing route returns HTTP 200. Never print either URL.
 The user calls `close_environment` without arguments. The Agent confirms:
 
 - the exact run becomes `completed` with conclusion `cancelled`;
-- the matching Tailscale peer becomes offline;
+- the matching Tailscale peer becomes offline, if one joined;
 - the stable Environment entry reports Offline;
 - a repeated close stays Offline and does not affect another run;
 - the run has zero artifacts;
@@ -85,10 +89,15 @@ The user calls `close_environment` without arguments. The Agent confirms:
 
 For a change that affects reopen convergence, call `open_environment` before
 the cancelled run becomes terminal. Confirm that the card shows Closing,
-repeats the Open intent without another user action, then changes to Starting
-with one new exact run and later Ready. Confirm that no second replacement run
-is dispatched, then close the replacement run and repeat the cleanup checks
-above.
+observes the old run without another user action, then changes to Starting with
+one new exact run and later Ready. Confirm that the timed observation calls are
+read-only and that no second replacement run is dispatched.
+
+For a change that affects startup failure, let one non-ready test run become
+terminal. Confirm that its card changes from Starting to Offline, its Sessions
+end with `startup_failed`, and no replacement run appears after two observation
+intervals. Start again only through a new explicit user Open, then close it and
+repeat the cleanup checks above.
 
 If ChatGPT is unavailable, cancel the exact GitHub run directly and confirm the
 same terminal and Offline state.
@@ -96,9 +105,10 @@ same terminal and Offline state.
 ## Stop conditions
 
 Cancel the run before more diagnosis if a pairing credential is exposed, T3
-pairing uses loopback or a different origin, startup fails before keep-alive,
-or the user cannot complete the current manual gate. Do not add a fallback
-tunnel, fixed sleep, heartbeat, or second lifecycle owner.
+pairing uses loopback or a different origin, core startup fails before
+keep-alive, or the user cannot complete the current manual gate. An optional
+Tailscale failure is not a core startup failure. Do not add a fallback tunnel,
+fixed sleep, heartbeat, or second lifecycle owner.
 
 ## Acceptance record
 
@@ -109,7 +119,7 @@ Worker and MCP contracts: passed | failed | not tested
 ChatGPT refresh and permission: passed | failed | not tested
 Stable Environment entry and ownership: passed | failed | not tested
 Native T3 pairing: passed | failed | not tested
-Tailscale SSH and workspace: passed | failed | not tested
+Optional Tailscale SSH and workspace: passed | failed | not tested
 Installed CLIs: passed | failed | not tested
 Private descriptor: passed | failed | not tested
 Close, terminal run, and peer offline: passed | failed | not tested

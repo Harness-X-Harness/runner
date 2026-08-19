@@ -39,7 +39,7 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   const messageListeners = [];
   const hostListeners = new Map();
   const timers = [];
-  let openCalls = 0;
+  let observationCalls = 0;
   const parent = {
     postMessage(message) {
       outbound.push(message);
@@ -63,7 +63,7 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
             method: "ui/notifications/tool-result",
             params: {
               structuredContent: {
-                status: "ready",
+                status: "closing",
                 environmentUrl: "https://runner.example/environment",
                 runUrl: "https://github.com/example/runner/actions/runs/123",
               },
@@ -72,7 +72,9 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
         );
       }
       if (message.method === "tools/call") {
-        if (message.params.name === "open_environment") openCalls += 1;
+        const observing = message.params.name === "open_environment" &&
+          message.params.arguments.operation === "observe";
+        if (observing) observationCalls += 1;
         queueMicrotask(() =>
           deliver({
             jsonrpc: "2.0",
@@ -87,14 +89,18 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
                     },
                   },
                 }
-              : openCalls === 1
+              : observing && observationCalls === 1
                 ? { error: { code: -32603, message: "temporary failure" } }
                 : {
                   result: {
                     structuredContent: {
-                      status: openCalls === 2 ? "starting" : "ready",
-                      environmentUrl: "https://runner.example/environment",
-                      runUrl: "https://github.com/example/runner/actions/runs/456",
+                      status: observing
+                        ? new Set([2, 4]).has(observationCalls) ? "offline" : "ready"
+                        : "starting",
+                      ...(observing && observationCalls === 2 ? {} : {
+                        environmentUrl: "https://runner.example/environment",
+                        runUrl: "https://github.com/example/runner/actions/runs/456",
+                      }),
                     },
                   },
                 }),
@@ -145,28 +151,6 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   assert.equal(document.documentElement.dataset.theme, "dark");
   hostListeners.get("openai:set_globals")({ detail: { globals: { theme: "light" } } });
   assert.equal(document.documentElement.dataset.theme, "light");
-  assert.equal(elements.get("primary").dataset.href, "https://runner.example/environment");
-  assert.equal(elements.get("secondary").dataset.action, "close_environment");
-
-  elements.get("primary").click();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(
-    outbound.filter(({ method }) => method === "ui/open-link").map(({ params }) => params.url),
-    ["https://runner.example/environment"],
-  );
-
-  deliver({
-    jsonrpc: "2.0",
-    method: "ui/notifications/tool-result",
-    params: {
-      structuredContent: {
-        status: "closing",
-        environmentUrl: "https://runner.example/environment",
-        runUrl: "https://github.com/example/runner/actions/runs/123",
-      },
-    },
-  });
   assert.equal(elements.get("status").textContent, "Closing");
   assert.equal(
     elements.get("description").textContent,
@@ -190,6 +174,10 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
     outbound.filter(({ method }) => method === "tools/call").at(-1)?.params?.name,
     "open_environment",
   );
+  assert.equal(
+    JSON.stringify(outbound.filter(({ method }) => method === "tools/call").at(-1)?.params?.arguments),
+    JSON.stringify({ operation: "observe" }),
+  );
   assert.equal(elements.get("status").textContent, "Closing");
   assert.equal(elements.get("message").textContent, "Still waiting. Retrying…");
   assert.equal(timers.length, 2);
@@ -198,6 +186,11 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("status").textContent, "Starting");
+  assert.equal(
+    JSON.stringify(outbound.filter(({ method }) => method === "tools/call").slice(-2).map(({ params }) => params.arguments)),
+    JSON.stringify([{ operation: "observe" }, { operation: "open" }]),
+    "one terminal observation may start exactly one replacement",
+  );
   assert.equal(elements.get("primary").dataset.href, "https://github.com/example/runner/actions/runs/456");
   assert.equal(elements.get("secondary").dataset.action, "close_environment");
   assert.equal(timers.length, 3, "Starting must continue observing until the Environment is Ready");
@@ -213,4 +206,26 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   assert.equal(elements.get("status").textContent, "Closing");
   assert.equal(elements.get("description").textContent, "The runner is stopping.");
   assert.equal(timers.length, 3, "an explicit Close must not schedule a replacement Open");
+
+  deliver({
+    jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: { structuredContent: { status: "offline" } },
+  });
+  elements.get("primary").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get("status").textContent, "Starting");
+  assert.equal(timers.length, 4);
+
+  timers[3].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(elements.get("status").textContent, "Offline");
+  assert.equal(timers.length, 4, "a failed initial Starting run must stop observing");
+  assert.equal(
+    outbound.filter(({ method, params }) =>
+      method === "tools/call" && params.name === "open_environment" &&
+      params.arguments.operation === "open").length,
+    2,
+    "one user Start and one Closing replacement are the only mutating Open calls",
+  );
 });

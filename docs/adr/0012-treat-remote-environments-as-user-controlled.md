@@ -1,6 +1,6 @@
 # Treat remote environments as user-controlled
 
-A Remote Development Environment is a user-owned general development machine, not a repository publication workflow. The platform supplies one temporary GitHub-hosted runner, current official tools, T3, Tailscale connectivity, and current connection discovery. It can contain zero or many repositories. Commits, pushes, pull requests, and external commands are ordinary user or tool effects, not control-plane lifecycle states.
+A Remote Development Environment is a user-owned general development machine, not a repository publication workflow. The platform supplies one temporary GitHub-hosted runner, current official tools, T3, current connection discovery, and best-effort Tailscale connectivity for administrators. It can contain zero or many repositories. Commits, pushes, pull requests, and external commands are ordinary user or tool effects, not control-plane lifecycle states.
 
 Users may authenticate tools such as `gh` inside the Environment. Credentials remain ephemeral runner state and disappear with the workflow. The control plane does not receive, interpret, persist, or recover them.
 

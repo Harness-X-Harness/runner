@@ -6,7 +6,7 @@
 
 `private-runner-session.yml` 创建一次性 GitHub-hosted Ubuntu runner。它可以：
 
-- 通过 Headscale/Tailscale SSH 提供私有 shell；
+- Headscale 可用时，通过 Tailscale SSH 为可信管理员提供可选私有 shell；
 - 运行 Codex、Grok Build 和 T3 Code；
 - 通过 Cloudflare Quick Tunnel 提供带 T3 应用层认证的临时入口；
 - 通过 GitHub OIDC 认领一个精确 Environment run；
@@ -69,8 +69,8 @@ Remote Development Environment 固定使用受保护的 `session--none` GitHub E
 
 | 配置 | 范围 | 用途 |
 | --- | --- | --- |
-| `HEADSCALE_AUTHKEY` | `session--none` Environment secret | tagged ephemeral auth key |
-| `HEADSCALE_URL` | repository secret | Headscale control server |
+| `HEADSCALE_AUTHKEY` | optional `session--none` Environment secret | tagged ephemeral auth key |
+| `HEADSCALE_URL` | optional repository secret | Headscale control server |
 | `MINI_END_USER_KEY` | repository secret | Codex 与 Grok 共用 scoped bearer key |
 | `MINI_CODEX_BASE_URL` | repository secret | 私有 Codex provider endpoint |
 | `MINI_GROK_BASE_URL` | repository secret | 私有 Grok provider endpoint |
@@ -82,7 +82,7 @@ Codex 与 Grok 在默认 user home 中使用各自原生 `config.toml`，并通�
 
 ## 网络与 T3
 
-runner 通过 Headscale 加入 tailnet 并使用 Tailscale SSH；workflow 不启动 OpenSSH。Headscale policy 应默认拒绝，只允许可信管理员连接 tagged runner 的 TCP 22，不允许 runner 横向访问管理设备或内部网络。
+runner 会 best-effort 尝试通过 Headscale 加入 tailnet；失败只移除可选的管理员 Tailscale SSH，不影响 T3、Environment Control Channel 或 Agent Sessions。workflow 不启动 OpenSSH。Headscale policy 应默认拒绝，只允许可信管理员连接 tagged runner 的 TCP 22，不允许 runner 横向访问管理设备或内部网络。Tailscale hostname 不进入 Environment Ready descriptor。
 
 Quick Tunnel URL 是公网地址，不是认证凭证。访问控制依赖 T3 pairing/session。workflow 不持有 Cloudflare tunnel token、DNS 权限或长期 tunnel credential。
 
@@ -98,6 +98,7 @@ workflow 等待 Quick Tunnel URL，再调用 T3 原生 `auth pairing create --ba
 [ ] workflow 只由 workflow_dispatch 触发
 [ ] 外部 Actions 固定完整 SHA
 [ ] admission 早于 credential、Tailscale 和 T3
+[ ] Tailscale 失败不阻断 T3 或 Session runtime
 [ ] 默认分支与 session--none 均受保护
 [ ] Headscale policy 不允许横向访问
 [ ] pairing material 不进入 MCP、日志、summary 或 artifact

@@ -21,8 +21,9 @@ interface.
 3. Call `start_session` with Codex or Grok and the user's first task. If the
    user has no active Environment, the same operation reserves one Session,
    starts one Environment, and delivers that task after admission.
-4. The admitted workflow starts Tailscale, T3, and one multiplexed Session
-   runtime. The Session becomes `idle` or `running` without another open call.
+4. The admitted workflow starts T3 and one multiplexed Session runtime, and
+   separately attempts the optional Tailscale attachment. The Session becomes
+   `idle` or `running` without another open call even if Tailscale is unavailable.
 5. Send ordinary turns through the MCP client's conversation. The Session
    Widget streams recent output and exposes only the current structured request
    or lifecycle action. All nine Session tools remain available to natural-
@@ -47,7 +48,7 @@ an Agent Session.
 | `respond_to_session` | Answer one declared approval, question, or authorization request |
 | `take_over_session` | Transfer future writes to the caller's MCP Grant |
 | `stop_session` | Stop one native conversation |
-| `open_environment` | Open or resume the user's private Environment |
+| `open_environment` | Explicitly open, or safely observe, the user's private Environment |
 | `close_environment` | Close the Environment and every Session in its generation |
 
 All Session tools require `sessions:manage`. Environment tools require
@@ -182,6 +183,12 @@ An unknown dispatch outcome does not release ownership or dispatch again. An
 early OIDC claim can recover a run whose dispatch response was lost. Close
 revokes an unclaimed generation or cancels the exact known run. Late callbacks
 and old channels cannot revive a closed generation.
+
+Widget refresh is observation, not lifecycle authority. Timed refresh calls
+`open_environment` in read-only mode and cannot dispatch. Only a user Open, or
+the single replacement reserved when that Open first encounters Closing, can
+start a run. Startup failure converges to Offline and terminates its Sessions as
+`startup_failed`; it does not create another replacement.
 
 ## Deployment and checks
 

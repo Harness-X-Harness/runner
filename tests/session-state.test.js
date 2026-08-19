@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   SESSION_RETENTION_MS,
+  environmentTerminalReason,
   expireSessions,
   handleSessionRequest,
   pendingGenerationCommands,
@@ -11,6 +12,12 @@ import {
 } from "../apps/chatgpt-app/src/session-state.js";
 
 const CREATED_AT = "2026-08-18T00:00:00.000Z";
+
+test("Environment terminal reason distinguishes startup failure, normal end, and explicit stop", () => {
+  assert.equal(environmentTerminalReason({ status: "starting", closeRequested: false }), "startup_failed");
+  assert.equal(environmentTerminalReason({ status: "ready", closeRequested: false }), "environment_ended");
+  assert.equal(environmentTerminalReason({ status: "closing", closeRequested: true }), "stopped");
+});
 
 test("EnvironmentObject Session store creates, lists, and reads private ordered events", async () => {
   const storage = fakeStorage();

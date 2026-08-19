@@ -12,7 +12,6 @@ import { webSocketRunnerToken } from "../apps/chatgpt-app/src/runner-identity.js
 const DESCRIPTOR = {
   pairingUrl: "https://quick.example/pair#token=private",
   t3Url: "https://quick.example",
-  tailscaleHost: "gha-123-1",
 };
 
 test("exact admitted channel atomically publishes Ready and connected", () => {

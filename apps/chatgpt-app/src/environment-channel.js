@@ -73,8 +73,7 @@ export function channelAllowsSessionAction(environment, action) {
 function sameDescriptor(current, descriptor) {
   return descriptor &&
     current.pairingUrl === descriptor.pairingUrl &&
-    current.t3Url === descriptor.t3Url &&
-    current.tailscaleHost === descriptor.tailscaleHost;
+    current.t3Url === descriptor.t3Url;
 }
 
 function exactKeys(value, keys) {

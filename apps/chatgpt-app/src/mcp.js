@@ -385,10 +385,14 @@ export function createServer(env, props) {
     {
       title: "Open private development environment",
       description: "Use this when the user wants to open their temporary private development environment.",
-      inputSchema: z.object({}),
+      inputSchema: z.object({
+        operation: z.enum(["open", "observe"]).describe(
+          "Use open for an explicit user request. The Environment Widget uses observe for side-effect-free refresh.",
+        ),
+      }),
       outputSchema: z.object({
-        status: z.enum(["starting", "ready", "closing"]),
-        environmentUrl: z.string(),
+        status: z.enum(["offline", "starting", "ready", "closing"]),
+        environmentUrl: z.string().optional(),
         runUrl: z.string().optional(),
       }),
       securitySchemes: SECURITY_SCHEMES.open_environment,
@@ -400,10 +404,14 @@ export function createServer(env, props) {
         "openai/toolInvocation/invoked": "Environment opened.",
       },
     },
-    async () => {
+    async ({ operation }) => {
       const requestProps = currentProps(props);
       requireScopes(requestProps, SECURITY_SCHEMES.open_environment[0].scopes);
-      const environment = await openAuthorizedEnvironment(env, requestProps);
+      const environment = await openAuthorizedEnvironment(
+        env,
+        requestProps,
+        operation === "observe",
+      );
       return result(environment, `Environment is ${environment.status}.`);
     },
   );
@@ -622,7 +630,7 @@ function requiredSessionController(props) {
   };
 }
 
-function openAuthorizedEnvironment(env, props) {
+function openAuthorizedEnvironment(env, props, observeOnly = false) {
   const githubAccessToken = requiredGitHubAccessToken(props);
   return openEnvironment(
     env,
@@ -634,6 +642,7 @@ function openAuthorizedEnvironment(env, props) {
       cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
     (workerEnv, runId) =>
       getEnvironmentWorkflowRun(workerEnv, githubAccessToken, runId),
+    observeOnly,
   );
 }
 

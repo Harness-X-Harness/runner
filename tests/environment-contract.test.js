@@ -475,13 +475,11 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
   const ready = await publishEnvironmentReady(env, generation, "123456", {
     t3Url: "https://quick-tunnel.example",
     pairingUrl: "https://quick-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-123456-1",
   });
   assert.equal(ready.status, 200);
   const invalidDescriptor = await publishEnvironmentReady(env, generation, "123456", {
     t3Url: "https://quick-tunnel.example",
     pairingUrl: "javascript:alert(1)",
-    tailscaleHost: "gha-123456-1",
   });
   assert.equal(invalidDescriptor.status, 400);
   const publicReady = await openEnvironment(
@@ -551,7 +549,6 @@ test("the stable Environment entry verifies GitHub identity before showing Prepa
   assert.equal((await publishEnvironmentReady(env, directGeneration, "840000", {
     t3Url: "https://second-tunnel.example",
     pairingUrl: "https://second-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-840000-1",
   })).status, 200);
   const directTerminal = await reconcileEnvironment(
     env,
@@ -592,7 +589,6 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   const wrongRun = await publishEnvironmentReady(env, generation, "999999", {
     t3Url: "https://quick-tunnel.example",
     pairingUrl: "https://quick-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-999999-1",
   });
   assert.equal(wrongRun.status, 409);
   const cancellations = [];
@@ -619,7 +615,6 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   const late = await publishEnvironmentReady(env, generation, "123456", {
     t3Url: "https://quick-tunnel.example",
     pairingUrl: "https://quick-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-123456-1",
   });
   assert.equal(late.status, 409);
   assert.equal(environments.get("github-42").status, "offline");
@@ -633,7 +628,6 @@ test("closing cancels one exact run and a late ready callback cannot revive it",
   const staleGeneration = await publishEnvironmentReady(env, oldGeneration, "123456", {
     t3Url: "https://old-tunnel.example",
     pairingUrl: "https://old-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-123456-1",
   });
   assert.equal(staleGeneration.status, 409);
   assert.deepEqual(await closeEnvironment(env, "43", async () => {}), {
@@ -728,7 +722,6 @@ test("open reconciles one terminal ready run before dispatching its replacement"
   assert.equal((await publishEnvironmentReady(env, generation, "123456", {
     t3Url: "https://quick-tunnel.example",
     pairingUrl: "https://quick-tunnel.example/pair#token=private",
-    tailscaleHost: "gha-123456-1",
   })).status, 200);
 
   const observed = [];
@@ -756,6 +749,31 @@ test("open reconciles one terminal ready run before dispatching its replacement"
   assert.equal(reopened.status, "starting");
   assert.equal(environments.get("github-42").generation, "generation-two");
   assert.equal(environments.get("github-42").pairingUrl, undefined);
+});
+
+test("Widget observation of one failed Starting run returns Offline without dispatching a replacement", async () => {
+  const environments = fakeEnvironments();
+  const env = {
+    ENVIRONMENTS: environments.binding,
+    TASK_CONTROL_PLANE_URL: "https://runner.example",
+  };
+  await openEnvironment(env, "42", async () => ({
+    runId: "123456",
+    runUrl: "https://github.com/Harness-X-Harness/runner/actions/runs/123456",
+  }), () => "generation-one");
+
+  const observed = await openEnvironment(
+    env,
+    "42",
+    async () => { throw new Error("observation must not dispatch a replacement"); },
+    () => "generation-two",
+    async () => {},
+    async () => ({ status: "completed", conclusion: "failure" }),
+    true,
+  );
+
+  assert.deepEqual(observed, { status: "offline" });
+  assert.equal(environments.get("github-42").generation, "generation-one");
 });
 
 test("concurrent open after terminal evidence dispatches one replacement generation", async () => {
@@ -1025,7 +1043,6 @@ function fakeEnvironments() {
               ...current,
               pairingUrl: body.pairingUrl,
               t3Url: body.t3Url,
-              tailscaleHost: body.tailscaleHost,
               status: "ready",
               channelState: "connected",
               connectionId: "fake-connection",
@@ -1066,7 +1083,6 @@ function fakeEnvironments() {
               cancelPending: Boolean(current.runId),
               pairingUrl: undefined,
               t3Url: undefined,
-              tailscaleHost: undefined,
             };
             records.set(ownerId, environment);
             return Response.json({ environment, cancel: environment.cancelPending });
