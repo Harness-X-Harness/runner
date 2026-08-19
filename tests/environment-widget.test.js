@@ -30,13 +30,14 @@ function widgetScript(html) {
 
 test("Environment Widget converges an Open intent to Ready and explicit Close stops it", async () => {
   const elements = new Map(
-    ["badge", "status", "description", "actions", "primary", "run", "stop", "message"].map((id) => [
+    ["badge", "status", "description", "actions", "primary", "secondary", "message"].map((id) => [
       id,
       new Element(),
     ]),
   );
   const outbound = [];
   const messageListeners = [];
+  const hostListeners = new Map();
   const timers = [];
   let openCalls = 0;
   const parent = {
@@ -107,11 +108,14 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   };
   const window = {
     parent,
+    openai: { theme: "dark" },
     addEventListener(name, listener) {
       if (name === "message") messageListeners.push(listener);
+      else hostListeners.set(name, listener);
     },
   };
   const document = {
+    documentElement: { dataset: {} },
     getElementById(id) {
       return elements.get(id);
     },
@@ -138,19 +142,18 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
 
   assert.equal(outbound[0]?.method, "ui/initialize");
   assert.ok(outbound.some(({ method }) => method === "ui/notifications/initialized"));
+  assert.equal(document.documentElement.dataset.theme, "dark");
+  hostListeners.get("openai:set_globals")({ detail: { globals: { theme: "light" } } });
+  assert.equal(document.documentElement.dataset.theme, "light");
   assert.equal(elements.get("primary").dataset.href, "https://runner.example/environment");
-  assert.equal(elements.get("run").hidden, false);
+  assert.equal(elements.get("secondary").dataset.action, "close_environment");
 
   elements.get("primary").click();
-  elements.get("run").click();
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(
     outbound.filter(({ method }) => method === "ui/open-link").map(({ params }) => params.url),
-    [
-      "https://runner.example/environment",
-      "https://github.com/example/runner/actions/runs/123",
-    ],
+    ["https://runner.example/environment"],
   );
 
   deliver({
@@ -171,6 +174,14 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   );
   assert.equal(timers.length, 1);
   assert.equal(timers[0].delay, 10_000);
+  assert.equal(elements.get("primary").dataset.href, "https://github.com/example/runner/actions/runs/123");
+  assert.equal(elements.get("secondary").hidden, true);
+  elements.get("primary").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    outbound.filter(({ method }) => method === "ui/open-link").at(-1)?.params.url,
+    "https://github.com/example/runner/actions/runs/123",
+  );
 
   timers[0].callback();
   await new Promise((resolve) => setImmediate(resolve));
@@ -187,7 +198,8 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("status").textContent, "Starting");
-  assert.equal(elements.get("run").dataset.href, "https://github.com/example/runner/actions/runs/456");
+  assert.equal(elements.get("primary").dataset.href, "https://github.com/example/runner/actions/runs/456");
+  assert.equal(elements.get("secondary").dataset.action, "close_environment");
   assert.equal(timers.length, 3, "Starting must continue observing until the Environment is Ready");
 
   timers[2].callback();
@@ -195,7 +207,7 @@ test("Environment Widget converges an Open intent to Ready and explicit Close st
 
   assert.equal(elements.get("status").textContent, "Ready");
 
-  elements.get("stop").click();
+  elements.get("secondary").click();
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(elements.get("status").textContent, "Closing");
