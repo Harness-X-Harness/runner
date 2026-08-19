@@ -36,8 +36,12 @@ test("nine Session tools expose one executor-neutral OAuth contract", async () =
   }
   for (const name of names.filter((name) => name !== "list_sessions")) {
     const tool = tools.find((candidate) => candidate.name === name);
-    assert.equal(tool._meta.ui.resourceUri, "ui://session/v1.html");
+    assert.deepEqual(tool._meta.ui, {
+      resourceUri: "ui://session/v1.html",
+      visibility: ["model", "app"],
+    });
     assert.equal(tool._meta["openai/outputTemplate"], "ui://session/v1.html");
+    assert.equal(tool._meta["openai/widgetAccessible"], true);
   }
   assert.equal(tools.find(({ name }) => name === "send_turn")
     .inputSchema.properties.delivery.default, undefined);

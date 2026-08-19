@@ -477,8 +477,9 @@ function registerSessionMutationTool(server, env, fallbackProps, name, config, m
 
 function sessionWidgetToolMeta(invoking, invoked) {
   return {
-    ui: { resourceUri: SESSION_WIDGET_URI },
+    ui: { resourceUri: SESSION_WIDGET_URI, visibility: ["model", "app"] },
     "openai/outputTemplate": SESSION_WIDGET_URI,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": invoking,
     "openai/toolInvocation/invoked": invoked,
   };
