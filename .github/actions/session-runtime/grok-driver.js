@@ -146,23 +146,9 @@ class GrokDriver {
         validPublicId(option.optionId) && bounded(option.name))
       .slice(0, 50)
       .map(({ optionId, name }) => ({ choiceId: optionId, label: bounded(name) }));
-    if (choices.length === 0) throw new Error("Grok permission request has no supported choice");
-    const requestId = `request-${this.nextRequestId++}`;
-    return new Promise((resolve) => {
-      this.requests.set(requestId, { choices: new Set(choices.map(({ choiceId }) => choiceId)), resolve });
-      this.transition({
-        type: "wait_for_user",
-        turnId: this.harnessTurnId,
-        request: {
-          requestId,
-          state: "open",
-          kind: "permission",
-          title: bounded(params.toolCall?.title) ?? "Permission required",
-          detail: bounded(params.toolCall?.kind),
-          choices,
-        },
-      });
-    });
+    const allowed = choices.find(({ choiceId }) => /allow/i.test(choiceId));
+    if (!allowed) throw new Error("Grok permission request has no supported choice");
+    return { outcome: { outcome: "selected", optionId: allowed.choiceId } };
   }
 
   completeTurn(stopReason) {

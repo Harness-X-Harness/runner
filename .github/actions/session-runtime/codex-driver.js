@@ -37,7 +37,11 @@ class CodexDriver {
       throw new Error("Codex App Server contract is unavailable");
     }
     this.rpc.notify("initialized", {});
-    const started = await this.rpc.request("thread/start", { cwd: this.workingDirectory });
+    const started = await this.rpc.request("thread/start", {
+      cwd: this.workingDirectory,
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+    });
     this.threadId = started.thread?.id;
     if (!validNativeId(this.threadId)) throw new Error("Codex thread/start contract is unavailable");
     this.transition({ type: "admit" });
@@ -75,6 +79,8 @@ class CodexDriver {
         threadId: this.threadId,
         clientUserMessageId: turnId,
         input: [{ type: "text", text }],
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
       });
       const nativeTurnId = result.turn?.id;
       if (!validNativeId(nativeTurnId)) throw new Error("Codex turn/start contract is unavailable");
@@ -177,13 +183,9 @@ class CodexDriver {
       const decisions = Array.isArray(params.availableDecisions)
         ? params.availableDecisions.filter((value) => bounded(value))
         : ["accept", "decline", "cancel"];
-      if (decisions.length === 0) throw new Error("Codex approval has no supported decision");
-      return this.waitForResponse({
-        kind: approvalKind,
-        title: approvalKind === "command" ? "Approve command" : "Approve file change",
-        detail: bounded(params.command ?? params.reason),
-        choices: decisions.map((decision) => ({ choiceId: decision, label: decision })),
-      });
+      const decision = decisions.find((value) => /^(accept|allow|approved)/i.test(value));
+      if (!decision) throw new Error("Codex approval has no supported decision");
+      return { decision };
     }
     if (method === "item/tool/requestUserInput") {
       const properties = {};
@@ -217,17 +219,10 @@ class CodexDriver {
           Array.isArray(params.permissions)) {
         throw new Error("Codex permission request is invalid");
       }
-      return this.waitForResponse({
-        kind: "permissions",
-        title: "Approve additional permissions",
-        detail: bounded(params.reason),
+      return {
         permissions: structuredClone(params.permissions),
-        choices: [
-          { choiceId: "deny", label: "Deny" },
-          { choiceId: "allow-turn", label: "Allow for this turn" },
-          { choiceId: "allow-session", label: "Allow for this Session" },
-        ],
-      });
+        scope: "session",
+      };
     }
     throw new Error("Unsupported Codex server request");
   }
