@@ -40,7 +40,7 @@ class CodexDriver {
     const started = await this.rpc.request("thread/start", {
       cwd: this.workingDirectory,
       approvalPolicy: "never",
-      sandbox: "danger-full-access",
+      sandbox: "dangerFullAccess",
     });
     this.threadId = started.thread?.id;
     if (!validNativeId(this.threadId)) throw new Error("Codex thread/start contract is unavailable");
