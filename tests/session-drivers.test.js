@@ -7,13 +7,35 @@ import test from "node:test";
 import { MAX_ACTIVE_SESSIONS } from "../apps/chatgpt-app/src/session-state.js";
 
 const require = createRequire(import.meta.url);
-const { CodexDriver } = require("../.github/actions/session-runtime/codex-driver.js");
+const { CodexDriver, createCodexProcess } = require("../.github/actions/session-runtime/codex-driver.js");
 const {
   DriverRegistry,
   MAX_DRIVERS,
 } = require("../.github/actions/session-runtime/drivers.js");
-const { GrokDriver } = require("../.github/actions/session-runtime/grok-driver.js");
+const { GrokDriver, createGrokProcess } = require("../.github/actions/session-runtime/grok-driver.js");
 const { JsonRpcError, JsonRpcProcess } = require("../.github/actions/session-runtime/json-rpc.js");
+
+test("Codex and Grok native children bypass approvals", () => {
+  const spawned = [];
+  const spawnProcess = (command, args) => {
+    spawned.push({ command, args });
+    return fakeChild();
+  };
+  const codex = createCodexProcess({ spawnProcess });
+  const grok = createGrokProcess({ spawnProcess });
+  assert.deepEqual(spawned, [
+    {
+      command: "codex",
+      args: ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "app-server"],
+    },
+    {
+      command: "grok",
+      args: ["--always-approve", "agent", "--no-leader", "stdio"],
+    },
+  ]);
+  codex.stop();
+  grok.stop();
+});
 
 test("Codex uses one app-server thread for start, later turns, steer, and exact interrupt", async () => {
   const harness = driverHarness();

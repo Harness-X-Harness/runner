@@ -291,7 +291,11 @@ class CodexDriver {
 }
 
 function createCodexProcess(options) {
-  return new JsonRpcProcess({ command: "codex", args: ["app-server"], ...options });
+  return new JsonRpcProcess({
+    command: "codex",
+    args: ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "app-server"],
+    ...options,
+  });
 }
 
 function codexTurnStatus(status) {

@@ -226,7 +226,7 @@ class GrokDriver {
 function createGrokProcess(options) {
   return new JsonRpcProcess({
     command: "grok",
-    args: ["agent", "--no-leader", "stdio"],
+    args: ["--always-approve", "agent", "--no-leader", "stdio"],
     ...options,
   });
 }
