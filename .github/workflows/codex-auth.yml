@@ -22,8 +22,16 @@ jobs:
           MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
         run: |
           install -d -m 0700 "$HOME/.codex"
-          printf 'model = "gpt-5.6-sol"\nmodel_provider = "mini_codex"\n\n[model_providers.mini_codex]\nname = "Mini Codex"\nbase_url = "%s"\nwire_api = "responses"\nenv_key = "MINI_END_USER_KEY"\n' \
-            "$MINI_CODEX_BASE_URL" > "$HOME/.codex/config.toml"
+          cat > "$HOME/.codex/config.toml" <<EOF
+          model = "gpt-5.6-sol"
+          model_provider = "mini_codex"
+
+          [model_providers.mini_codex]
+          name = "Mini Codex"
+          base_url = "$MINI_CODEX_BASE_URL"
+          wire_api = "responses"
+          env_key = "MINI_END_USER_KEY"
+          EOF
           chmod 600 "$HOME/.codex/config.toml"
 
       - name: Verify Codex authentication
