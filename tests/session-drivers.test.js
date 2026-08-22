@@ -49,6 +49,18 @@ test("Codex uses one app-server thread for start, later turns, steer, and exact 
 
   await driver.start({ initial: true, turnId: "turn-1", text: "private prompt one" });
   assert.deepEqual(protocol.methods(), ["initialize", "initialized", "thread/start", "turn/start"]);
+  assert.deepEqual(protocol.requests.find(({ method }) => method === "thread/start").params, {
+    cwd: "/workspace",
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
+  });
+  assert.deepEqual(protocol.requests.find(({ method }) => method === "turn/start").params, {
+    threadId: "native-thread",
+    clientUserMessageId: "turn-1",
+    input: [{ type: "text", text: "private prompt one" }],
+    approvalPolicy: "never",
+    sandboxPolicy: { type: "dangerFullAccess" },
+  });
   assert.deepEqual(harness.transitions.slice(0, 2), [
     { type: "admit" },
     { type: "begin_turn", turnId: "turn-1" },
@@ -102,7 +114,7 @@ test("Codex uses one app-server thread for start, later turns, steer, and exact 
   assert.deepEqual(harness.transitions.at(-1), { type: "terminate", reason: "stopped" });
 });
 
-test("Codex converts approvals and user input to exact bounded Session requests", async () => {
+test("Codex auto-approves permission commands and still waits for user input", async () => {
   const harness = driverHarness();
   const protocol = new CodexProtocolFixture();
   const driver = new CodexDriver({
@@ -118,16 +130,11 @@ test("Codex converts approvals and user input to exact bounded Session requests"
     turnId: null,
     itemId: "item-1",
     startedAtMs: 1,
-    command: "npm test",
+    command: "/bin/bash -lc \"sed -n '1,260p' /home/runner/.codex/skills/.system/openai-docs/SKILL.md\"",
     availableDecisions: ["accept", "decline"],
   });
-  assert.equal(harness.transitions.at(-1).type, "wait_for_user");
-  assert.deepEqual(harness.transitions.at(-1).request.choices, [
-    { choiceId: "accept", label: "accept" },
-    { choiceId: "decline", label: "decline" },
-  ]);
-  await driver.execute(command("response", { requestId: "request-1", choiceId: "accept" }));
   assert.deepEqual(await approval, { decision: "accept" });
+  assert.equal(harness.transitions.some(({ type }) => type === "wait_for_user"), false);
 
   const input = protocol.requestFromServer("item/tool/requestUserInput", {
     threadId: "native-thread",
@@ -136,8 +143,9 @@ test("Codex converts approvals and user input to exact bounded Session requests"
     isBlocking: true,
     questions: [{ id: "branch", header: "Branch", question: "Which branch?" }],
   });
+  assert.equal(harness.transitions.at(-1).type, "wait_for_user");
   await driver.execute(command("response", {
-    requestId: "request-2",
+    requestId: "request-1",
     answers: { branch: ["main"] },
   }));
   assert.deepEqual(await input, { answers: { branch: ["main"] } });
@@ -150,13 +158,11 @@ test("Codex converts approvals and user input to exact bounded Session requests"
     reason: "Reach the package registry",
     permissions,
   });
-  assert.equal(harness.transitions.at(-1).request.kind, "permissions");
-  assert.doesNotMatch(JSON.stringify(harness.transitions.at(-1)), /enabled/);
-  await driver.execute(command("response", {
-    requestId: "request-3",
-    choiceId: "allow-turn",
-  }));
-  assert.deepEqual(await permission, { permissions, scope: "turn" });
+  assert.deepEqual(await permission, { permissions, scope: "session" });
+  assert.equal(
+    harness.transitions.filter(({ type }) => type === "wait_for_user").length,
+    1,
+  );
 
   assert.throws(() => protocol.requestFromServer("item/commandExecution/requestApproval", {
     threadId: "native-thread",
@@ -266,13 +272,10 @@ test("Grok maps exact ACP permissions and fails closed when interject is absent"
       { optionId: "reject-once", name: "Reject", kind: "reject_once" },
     ],
   });
-  await driver.execute(command("response", {
-    requestId: "request-1",
-    choiceId: "allow-once",
-  }));
   assert.deepEqual(await permission, {
     outcome: { outcome: "selected", optionId: "allow-once" },
   });
+  assert.equal(harness.transitions.some(({ type }) => type === "wait_for_user"), false);
 
   const missing = new GrokProtocolFixture({ missingInterject: true });
   const missingDriver = new GrokDriver({

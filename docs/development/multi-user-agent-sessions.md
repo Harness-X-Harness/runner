@@ -23,7 +23,7 @@ Harness provides identity, Environment lifecycle, Agent transport, and private e
 11. GitHub App authorization requests no traditional OAuth repository scope. GitHub's scoped user-token exchange enforces `Harness-X-Harness/runner` plus `Actions: write`; Target Repository access remains outside this Environment authorization boundary.
 12. `start_session` expresses one user intent and requires the first task. If the Environment is offline, the control plane starts it, creates the Session, and delivers that task after admission without requiring a separate user step.
 13. Harness has no resource scheduler, but it enforces hard safety limits per Environment and Session. Excess input is rejected; recoverable Agent text chunks may be discarded; a non-recoverable overflow terminates only the affected Session with `resource_exhausted`.
-14. Native Agent approvals and questions become ordered Session events. The Session waits for one valid response instead of auto-approving or requiring T3.
+14. Native command, file, and permission approvals are auto-accepted by the runner. User questions become ordered Session events and wait for one valid response. T3 is not an approval surface.
 15. All MCP Grants for a Principal can list that Principal's Sessions. Each Session has one controlling Grant; another Grant can take control only through an explicit, atomic takeover.
 16. A Durable Object retains private, ordered Session Events with monotonic cursors. Standard tool reads are the authority; Widget streaming is an optional live view.
 17. Reconnect resumes event reading only while the same Environment run remains alive. Environment termination ends native Sessions; a new runner never restores JSONL, workspace, or processes.
@@ -157,7 +157,7 @@ Traditional OAuth `repo` scope is broader than the target operations. The implem
 - `start_session` automatically opens an offline Environment and waits for admission before starting the native Session.
 - Several Sessions may run concurrently in one Environment. Harness does not queue or schedule them.
 - Users and Agents select working directories. Session JSONL records isolate native conversation state, not Git working trees or files.
-- Native approval, question, and authorization requests enter `waiting_for_user` and are delivered as private ordered events.
+- Native user-input questions enter `waiting_for_user` and are delivered as private ordered events. Command, file, and permission approvals are auto-accepted by the driver.
 - The Grant that creates a Session is its initial Session Controller. Only the controller may send turns or answer requests.
 - `list_sessions` returns every Session owned by the Principal, including controller display metadata, but not transcripts or credentials.
 - Another Grant for the same Principal may explicitly take over a Session. Takeover atomically invalidates the old controller for future writes; there is no controller timeout lease.
@@ -175,7 +175,7 @@ Harness exposes one product-level Agent Session model while each driver keeps it
 | Continue conversation | `turn/start` on the same thread | `session/prompt` on the same session |
 | Steer current turn | `turn/steer` with the expected turn ID | `x.ai/interject` extension for the active session |
 | Stream work | `turn/*` and `item/*` notifications | `session/update` notifications |
-| Ask for approval or input | Server-initiated approval and user-input requests | ACP permission requests |
+| Ask for approval or input | Auto-accept command, file, and permission requests; wait for user-input questions | Auto-accept ACP permission requests |
 | Reconnect the control channel while runner lives | Keep the same app-server child and loaded thread | Keep the same ACP child and native session |
 
 Codex App Server is the supported rich-client interface for conversation history, approvals, and streamed Agent events. Its stdio transport is newline-delimited JSON and is suitable for a local runner-side adapter. The App Server WebSocket transport is experimental and is not required by this design.
@@ -421,7 +421,7 @@ The controlled implementation trace is [`session-state.js`](../../apps/chatgpt-a
 | `channelState` and `channelGeneration` | [`environment-channel.js`](../../apps/chatgpt-app/src/environment-channel.js) admits only the current generation, run ID, and run attempt; the WebSocket attachment survives Durable Object hibernation and stale socket close events cannot disconnect a replacement. |
 | `deliveryCount`, `processed`, and `effectCount` | The server redelivers unacknowledged stable command IDs. The generation-local [`session-runtime`](../../.github/actions/session-runtime/index.js) records a receipt before one native effect and acknowledges duplicate delivery without invoking that effect again. If the runtime process ends, the Environment run ends; receipts are never resumed in another generation. |
 | Driver admission and `StartTurn` | The runner starts exactly one [`codex app-server`](../../.github/actions/session-runtime/codex-driver.js) or [`grok agent --no-leader stdio`](../../.github/actions/session-runtime/grok-driver.js) child per Session. After native conversation creation, `admit` reaches modeled `idle`; the required initial prompt then uses `begin_turn`, which refines to the model's `StartTurn`. |
-| Native completion and user requests | Each driver normalizes only bounded public events. Native completion sends an exact-turn `complete_turn`; server-initiated approval or input sends exact-turn `wait_for_user`. Reasoning, thought, raw protocol payloads, and native IDs do not cross the driver boundary. |
+| Native completion and user requests | Each driver normalizes only bounded public events. Native completion sends an exact-turn `complete_turn`; command and permission approvals are auto-accepted; user-input questions send exact-turn `wait_for_user`. Reasoning, thought, raw protocol payloads, and native IDs do not cross the driver boundary. |
 
 `start_session` reaches one aggregate operation in `EnvironmentObject`. The same
 transaction chooses the current Environment generation or reserves exactly one
