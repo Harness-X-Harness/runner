@@ -52,7 +52,7 @@ test("Codex uses one app-server thread for start, later turns, steer, and exact 
   assert.deepEqual(protocol.requests.find(({ method }) => method === "thread/start").params, {
     cwd: "/workspace",
     approvalPolicy: "never",
-    sandbox: "danger-full-access",
+    sandbox: "dangerFullAccess",
   });
   assert.deepEqual(protocol.requests.find(({ method }) => method === "turn/start").params, {
     threadId: "native-thread",
