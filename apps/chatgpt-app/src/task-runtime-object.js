@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { TaskError } from "../../../shared/task-errors.js";
 import { TaskStore } from "./task-state.js";
+import { taskErrorResponse } from "./task-request.js";
 
 export class TaskRuntimeObject extends DurableObject {
   constructor(ctx, env) {
@@ -33,10 +34,4 @@ export class TaskRuntimeObject extends DurableObject {
   }
 
   async alarm() { await this.tasks.alarm(); }
-}
-
-export function taskErrorResponse(error) {
-  const status = error.code === "TASK_NOT_FOUND" ? 404 :
-    error.code === "CLAIM_REJECTED" ? 409 : error.code === "INVALID_TASK_INPUT" ? 400 : 500;
-  return Response.json({ error: error.toJSON() }, { status, headers: { "cache-control": "no-store" } });
 }
