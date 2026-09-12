@@ -26,14 +26,15 @@ test("control plane uses one fixed Custom Domain without workers.dev", async () 
     configuration.durable_objects.bindings.find(({ name }) => name === "ENVIRONMENTS"),
     { name: "ENVIRONMENTS", class_name: "EnvironmentObject" },
   );
-  assert.deepEqual(configuration.migrations.at(-1), {
+  assert.deepEqual(configuration.migrations.find(({ tag }) => tag === "v4"), {
     tag: "v4",
     deleted_classes: ["TaskObject"],
   });
-  assert.equal(
-    configuration.durable_objects.bindings.some(({ name }) => name === "TASKS"),
-    false,
-  );
+  assert.deepEqual(configuration.migrations.at(-1), {
+    tag: "v5", new_sqlite_classes: ["TaskRuntimeObject"],
+  });
+  assert.deepEqual(configuration.durable_objects.bindings.find(({ name }) => name === "TASKS"),
+    { name: "TASKS", class_name: "TaskRuntimeObject" });
   assert.equal(
     configuration.vars.GITHUB_ENVIRONMENT_WORKFLOW_ID,
     "private-runner-session.yml",
