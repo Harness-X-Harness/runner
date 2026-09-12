@@ -127,7 +127,9 @@ NODE
 Remove `--dry-run` only for an authorized deployment. The configured Worker,
 route, bindings and variables are owned by
 [wrangler.jsonc](../apps/chatgpt-app/wrangler.jsonc); secret usage is owned by
-the code and workflow, not a second configuration list in this runbook.
+the [Worker source](../apps/chatgpt-app/src/) and
+[Environment workflow](../.github/workflows/private-runner-session.yml),
+not a second configuration list in this runbook.
 
 ## Task acceptance preparation
 
