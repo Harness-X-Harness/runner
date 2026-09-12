@@ -1,10 +1,7 @@
 const { EventSink, bounded } = require("./events.js");
-const { JsonRpcProcess } = require("./json-rpc.js");
+const { CodexClient, createCodexProcess } = require("../agent-runtime/codex-client.js");
 
-const APPROVAL_METHODS = new Map([
-  ["item/commandExecution/requestApproval", "command"],
-  ["item/fileChange/requestApproval", "file_change"],
-]);
+const { codexApproval } = require("../agent-runtime/approvals.js");
 
 class CodexDriver {
   constructor({ sessionId, workingDirectory, emit, transition, createProcess = createCodexProcess }) {
@@ -19,31 +16,14 @@ class CodexDriver {
   }
 
   async start(payload) {
-    this.rpc = this.createProcess({
-      cwd: this.workingDirectory,
+    this.client = new CodexClient({
+      workingDirectory: this.workingDirectory,
+      createProcess: this.createProcess,
       onNotification: (method, params) => this.notification(method, params),
       onRequest: (method, params) => this.nativeRequest(method, params),
       onExit: () => this.failed(),
     });
-    const initialized = await this.rpc.request("initialize", {
-      clientInfo: {
-        name: "harness-runner",
-        title: "Harness Runner",
-        version: "1.0.0",
-      },
-      capabilities: {},
-    });
-    if (typeof initialized.userAgent !== "string" || initialized.userAgent.length === 0) {
-      throw new Error("Codex App Server contract is unavailable");
-    }
-    this.rpc.notify("initialized", {});
-    const started = await this.rpc.request("thread/start", {
-      cwd: this.workingDirectory,
-      approvalPolicy: "never",
-      sandbox: "dangerFullAccess",
-    });
-    this.threadId = started.thread?.id;
-    if (!validNativeId(this.threadId)) throw new Error("Codex thread/start contract is unavailable");
+    await this.client.initialize();
     this.transition({ type: "admit" });
     if (payload.turnId && payload.text) {
       this.transition({ type: "begin_turn", turnId: payload.turnId });
@@ -75,24 +55,11 @@ class CodexDriver {
     if (this.harnessTurnId) throw new Error("Codex turn is already active");
     this.harnessTurnId = turnId;
     try {
-      const result = await this.rpc.request("turn/start", {
-        threadId: this.threadId,
-        clientUserMessageId: turnId,
-        input: [{ type: "text", text }],
-        approvalPolicy: "never",
-        sandboxPolicy: { type: "dangerFullAccess" },
-      });
-      const nativeTurnId = result.turn?.id;
-      if (!validNativeId(nativeTurnId)) throw new Error("Codex turn/start contract is unavailable");
-      if (this.nativeTurnId && this.nativeTurnId !== nativeTurnId) {
-        throw new Error("Codex active turn identity changed");
-      }
-      this.nativeTurnId = nativeTurnId;
+      await this.client.startTurn(text, turnId);
     } catch {
       if (this.terminated) return;
       const failedTurnId = this.harnessTurnId;
       this.harnessTurnId = undefined;
-      this.nativeTurnId = undefined;
       this.emit({
         type: "error",
         data: { scope: "driver", code: "turn_failed", message: "The Codex turn failed." },
@@ -103,22 +70,13 @@ class CodexDriver {
 
   async steer(turnId, text) {
     this.requireActive(turnId);
-    const result = await this.rpc.request("turn/steer", {
-      threadId: this.threadId,
-      expectedTurnId: this.nativeTurnId,
-      clientUserMessageId: `${turnId}:steer`,
-      input: [{ type: "text", text }],
-    });
-    if (result.turnId !== this.nativeTurnId) throw new Error("Codex steer targeted another turn");
+    await this.client.steer(text, `${turnId}:steer`);
   }
 
   async interrupt(turnId) {
     this.requireActive(turnId);
     this.cancelRequests();
-    await this.rpc.request("turn/interrupt", {
-      threadId: this.threadId,
-      turnId: this.nativeTurnId,
-    });
+    await this.client.interrupt();
   }
 
   async respond(payload) {
@@ -143,21 +101,11 @@ class CodexDriver {
   }
 
   notification(method, params) {
-    if (method === "turn/started" && this.harnessTurnId && params.threadId === this.threadId) {
-      const turnId = params.turn?.id;
-      if (validNativeId(turnId)) {
-        if (this.nativeTurnId && this.nativeTurnId !== turnId) {
-          throw new Error("Codex active turn identity changed");
-        }
-        this.nativeTurnId = turnId;
-      }
-      return;
-    }
-    if (method === "item/agentMessage/delta" && this.matchesTurn(params)) {
+    if (method === "item/agentMessage/delta" && this.harnessTurnId) {
       this.events.text(this.harnessTurnId, params.delta);
       return;
     }
-    if ((method === "item/started" || method === "item/completed") && this.matchesTurn(params)) {
+    if ((method === "item/started" || method === "item/completed") && this.harnessTurnId) {
       const activity = codexActivity(params.item, method === "item/started" ? "running" : "completed");
       if (activity) this.events.event({
         type: "activity",
@@ -165,28 +113,19 @@ class CodexDriver {
       });
       return;
     }
-    if (method === "turn/completed" && this.matchesTurn({ ...params, turnId: params.turn?.id })) {
+    if (method === "turn/completed" && this.harnessTurnId) {
       const harnessTurnId = this.harnessTurnId;
       const status = codexTurnStatus(params.turn?.status);
       this.events.flush(harnessTurnId);
       this.harnessTurnId = undefined;
-      this.nativeTurnId = undefined;
       this.cancelRequests();
       this.transition({ type: "complete_turn", turnId: harnessTurnId, status });
     }
   }
 
   nativeRequest(method, params) {
-    if (!this.matchesTurn(params, true)) throw new Error("Codex request targets a stale turn");
-    const approvalKind = APPROVAL_METHODS.get(method);
-    if (approvalKind) {
-      const decisions = Array.isArray(params.availableDecisions)
-        ? params.availableDecisions.filter((value) => bounded(value))
-        : ["accept", "decline", "cancel"];
-      const decision = decisions.find((value) => /^(accept|allow|approved)/i.test(value));
-      if (!decision) throw new Error("Codex approval has no supported decision");
-      return { decision };
-    }
+    const approval = codexApproval(method, params);
+    if (approval) return approval;
     if (method === "item/tool/requestUserInput") {
       const properties = {};
       const required = [];
@@ -213,16 +152,6 @@ class CodexDriver {
         title: "Input required",
         inputSchema: { type: "object", properties, required },
       });
-    }
-    if (method === "item/permissions/requestApproval") {
-      if (!params.permissions || typeof params.permissions !== "object" ||
-          Array.isArray(params.permissions)) {
-        throw new Error("Codex permission request is invalid");
-      }
-      return {
-        permissions: structuredClone(params.permissions),
-        scope: "session",
-      };
     }
     throw new Error("Unsupported Codex server request");
   }
@@ -254,14 +183,8 @@ class CodexDriver {
     this.requests.clear();
   }
 
-  matchesTurn(params, allowMissingTurnId = false) {
-    return Boolean(this.harnessTurnId) && params.threadId === this.threadId &&
-      (!this.nativeTurnId || (allowMissingTurnId && params.turnId == null) ||
-        params.turnId === this.nativeTurnId);
-  }
-
   requireActive(turnId) {
-    if (!this.harnessTurnId || this.harnessTurnId !== turnId || !this.nativeTurnId) {
+    if (!this.harnessTurnId || this.harnessTurnId !== turnId) {
       throw new Error("Codex active turn mismatch");
     }
   }
@@ -281,16 +204,8 @@ class CodexDriver {
     this.terminated = true;
     this.events.close();
     this.cancelRequests();
-    this.rpc?.stop();
+    this.client?.stop();
   }
-}
-
-function createCodexProcess(options) {
-  return new JsonRpcProcess({
-    command: "codex",
-    args: ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "app-server"],
-    ...options,
-  });
 }
 
 function codexTurnStatus(status) {
@@ -310,12 +225,8 @@ function codexActivity(item, status) {
   return undefined;
 }
 
-function validNativeId(value) {
-  return typeof value === "string" && value.length > 0 && value.length <= 512;
-}
-
 function validPublicId(value) {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
-module.exports = { CodexDriver, createCodexProcess };
+module.exports = { CodexDriver };

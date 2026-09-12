@@ -1,5 +1,6 @@
 const { EventSink, bounded } = require("./events.js");
-const { JsonRpcError, JsonRpcProcess } = require("./json-rpc.js");
+const { GrokClient, createGrokProcess } = require("../agent-runtime/grok-client.js");
+const { grokApproval } = require("../agent-runtime/approvals.js");
 
 class GrokDriver {
   constructor({ sessionId, workingDirectory, emit, transition, createProcess = createGrokProcess }) {
@@ -14,44 +15,18 @@ class GrokDriver {
   }
 
   async start(payload) {
-    this.rpc = this.createProcess({
-      cwd: this.workingDirectory,
+    this.client = new GrokClient({
+      workingDirectory: this.workingDirectory,
+      createProcess: this.createProcess,
       onNotification: (method, params) => this.notification(method, params),
       onRequest: (method, params) => this.nativeRequest(method, params),
       onExit: () => this.failed(),
     });
-    const initialized = await this.rpc.request("initialize", {
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false,
-      },
-      clientInfo: { name: "harness-runner", title: "Harness Runner", version: "1.0.0" },
-    });
-    if (initialized.protocolVersion !== 1) throw new Error("Grok ACP v1 is unavailable");
-    await this.requireInterject();
-    const started = await this.rpc.request("session/new", {
-      cwd: this.workingDirectory,
-      mcpServers: [],
-    });
-    this.nativeSessionId = started.sessionId;
-    if (!validNativeId(this.nativeSessionId)) throw new Error("Grok session/new contract is unavailable");
+    await this.client.initialize({ interject: true });
     this.transition({ type: "admit" });
     if (payload.turnId && payload.text) {
       this.transition({ type: "begin_turn", turnId: payload.turnId });
       this.startTurn(payload.turnId, payload.text);
-    }
-  }
-
-  async requireInterject() {
-    try {
-      await this.rpc.request("_x.ai/interject", {
-        // Invalid parameters probe method availability without targeting a Session.
-      });
-    } catch (error) {
-      if (!(error instanceof JsonRpcError) || error.code === -32601) {
-        throw new Error("Grok x.ai/interject capability is unavailable");
-      }
     }
   }
 
@@ -79,10 +54,7 @@ class GrokDriver {
   startTurn(turnId, text) {
     if (this.harnessTurnId) throw new Error("Grok turn is already active");
     this.harnessTurnId = turnId;
-    this.rpc.request("session/prompt", {
-      sessionId: this.nativeSessionId,
-      prompt: [{ type: "text", text }],
-    }).then(
+    this.client.startTurn(text).then(
       (result) => this.completeTurn(result.stopReason),
       () => this.failTurn(),
     );
@@ -90,18 +62,13 @@ class GrokDriver {
 
   async steer(turnId, text) {
     this.requireActive(turnId);
-    const result = await this.rpc.request("_x.ai/interject", {
-      sessionId: this.nativeSessionId,
-      text,
-      interjectionId: `${this.sessionId}:${turnId}`,
-    });
-    if (result.status !== "queued") throw new Error("Grok interject contract is unavailable");
+    await this.client.steer(text, `${this.sessionId}:${turnId}`);
   }
 
   interrupt(turnId) {
     this.requireActive(turnId);
     this.cancelRequests();
-    this.rpc.notify("session/cancel", { sessionId: this.nativeSessionId });
+    this.client.interrupt();
   }
 
   respond(payload) {
@@ -114,7 +81,7 @@ class GrokDriver {
   }
 
   notification(method, params) {
-    if (method !== "session/update" || params.sessionId !== this.nativeSessionId || !this.harnessTurnId) {
+    if (method !== "session/update" || !this.harnessTurnId) {
       return;
     }
     const update = params.update;
@@ -138,17 +105,10 @@ class GrokDriver {
 
   nativeRequest(method, params) {
     if (method !== "session/request_permission" ||
-        params.sessionId !== this.nativeSessionId || !this.harnessTurnId) {
+        !this.harnessTurnId) {
       throw new Error("Unsupported Grok client request");
     }
-    const choices = (Array.isArray(params.options) ? params.options : [])
-      .filter((option) => option && typeof option === "object" &&
-        validPublicId(option.optionId) && bounded(option.name))
-      .slice(0, 50)
-      .map(({ optionId, name }) => ({ choiceId: optionId, label: bounded(name) }));
-    const allowed = choices.find(({ choiceId }) => /allow/i.test(choiceId));
-    if (!allowed) throw new Error("Grok permission request has no supported choice");
-    return { outcome: { outcome: "selected", optionId: allowed.choiceId } };
+    return grokApproval(params);
   }
 
   completeTurn(stopReason) {
@@ -205,24 +165,8 @@ class GrokDriver {
     this.terminated = true;
     this.events.close();
     this.cancelRequests();
-    this.rpc?.stop();
+    this.client?.stop();
   }
-}
-
-function createGrokProcess(options) {
-  return new JsonRpcProcess({
-    command: "grok",
-    args: ["--always-approve", "agent", "--no-leader", "stdio"],
-    ...options,
-  });
-}
-
-function validNativeId(value) {
-  return typeof value === "string" && value.length > 0 && value.length <= 512;
-}
-
-function validPublicId(value) {
-  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
 function grokTurnStatus(stopReason) {
@@ -231,4 +175,4 @@ function grokTurnStatus(stopReason) {
   return "failed";
 }
 
-module.exports = { GrokDriver, createGrokProcess };
+module.exports = { GrokDriver };

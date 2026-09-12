@@ -1,5 +1,6 @@
 const readline = require("node:readline");
 const { spawn } = require("node:child_process");
+const { TaskError } = require("../../../shared/task-errors.js");
 
 class JsonRpcError extends Error {
   constructor(code) {
@@ -9,7 +10,7 @@ class JsonRpcError extends Error {
 }
 
 class JsonRpcProcess {
-  constructor({ command, args, cwd, onNotification, onRequest, onExit, spawnProcess = spawn }) {
+  constructor({ command, args, cwd, env, onNotification, onRequest, onExit, spawnProcess = spawn }) {
     this.nextId = 1;
     this.pending = new Map();
     this.onNotification = onNotification;
@@ -18,12 +19,18 @@ class JsonRpcProcess {
     this.stopping = false;
     this.child = spawnProcess(command, args, {
       cwd,
+      env,
       stdio: ["pipe", "pipe", "ignore"],
+    });
+    this.exited = new Promise((resolve) => {
+      const done = () => { this.hasExited = true; resolve(); };
+      this.child.once("exit", done);
+      this.child.once("error", done);
     });
     this.lines = readline.createInterface({ input: this.child.stdout });
     this.lines.on("line", (line) => this.receive(line));
     this.child.stdin.on("error", () => this.ended());
-    this.child.once("error", () => this.ended());
+    this.child.once("error", () => this.ended(new TaskError("PROVIDER_UNAVAILABLE")));
     this.child.once("exit", () => this.ended());
   }
 
@@ -51,8 +58,23 @@ class JsonRpcProcess {
     this.child.kill("SIGTERM");
   }
 
+  async close({ graceMs = 1000 } = {}) {
+    this.stop();
+    let timer;
+    try {
+      await Promise.race([this.exited, new Promise((resolve) => { timer = setTimeout(resolve, graceMs); })]);
+      if (!this.hasExited) this.child.kill("SIGKILL");
+    } finally {
+      clearTimeout(timer);
+      this.lines.close();
+      this.child.stdin.destroy();
+      this.child.stdout.destroy();
+      this.ended();
+    }
+  }
+
   write(message) {
-    if (!this.child.stdin.writable) throw new Error("Native JSON-RPC process is unavailable");
+    if (!this.child.stdin.writable || this.endedOnce) throw new TaskError("PROVIDER_UNAVAILABLE");
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
@@ -61,23 +83,30 @@ class JsonRpcProcess {
     try {
       message = JSON.parse(line);
     } catch {
+      this.ended(new TaskError("PROVIDER_PROTOCOL_ERROR"));
       this.child.kill("SIGTERM");
       return;
     }
-    if (!message || typeof message !== "object" || Array.isArray(message)) return;
+    if (!message || typeof message !== "object" || Array.isArray(message) || message.jsonrpc !== "2.0") {
+      this.ended(new TaskError("PROVIDER_PROTOCOL_ERROR"));
+      this.child.kill("SIGTERM");
+      return;
+    }
     if (Object.hasOwn(message, "id") && !message.method) {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
       if (message.error) pending.reject(new JsonRpcError(message.error.code));
-      else pending.resolve(message.result ?? {});
+      else if (Object.hasOwn(message, "result")) pending.resolve(message.result);
+      else pending.reject(new TaskError("PROVIDER_PROTOCOL_ERROR"));
       return;
     }
     if (typeof message.method !== "string") return;
     if (!Object.hasOwn(message, "id")) {
       try {
         this.onNotification?.(message.method, message.params ?? {});
-      } catch {
+      } catch (error) {
+        this.ended(error instanceof TaskError ? error : new TaskError("PROVIDER_PROTOCOL_ERROR"));
         this.child.kill("SIGTERM");
       }
       return;
@@ -89,7 +118,7 @@ class JsonRpcProcess {
       () => this.respond({
         jsonrpc: "2.0",
         id: message.id,
-        error: { code: -32603, message: "Session request failed" },
+        error: { code: -32603, message: "Native request failed" },
       }),
     );
   }
@@ -102,14 +131,14 @@ class JsonRpcProcess {
     }
   }
 
-  ended() {
+  ended(error = new TaskError("PROVIDER_EXECUTION_ERROR")) {
     if (this.endedOnce) return;
     this.endedOnce = true;
     for (const { reject } of this.pending.values()) {
-      reject(new Error("Native JSON-RPC process ended"));
+      reject(error);
     }
     this.pending.clear();
-    if (!this.stopping) this.onExit?.();
+    if (!this.stopping) this.onExit?.(error);
   }
 }
 
