@@ -143,6 +143,15 @@ test("safe canonical errors and terminal deletion cover dispatch, provider, time
   }
 });
 
+test("a runner-bounded result retains its explicit truncation flag", async () => {
+  const { store } = await setup();
+  await store.claim(execution);
+  const input = { status: "completed", result: { finalResponse: "retained prefix", truncated: true } };
+  assert.deepEqual((await store.finish(execution, input)).result, input.result);
+  assert.deepEqual((await store.finish(execution, input)).result, input.result);
+  await assert.rejects(store.finish(execution, final("retained prefix")), code("CLAIM_REJECTED"));
+});
+
 test("bounded wait returns on changes or timeout and removes subscriptions", async () => {
   const { store } = await setup();
   assert.equal((await store.wait(ownerId, 0)).status, "queued");

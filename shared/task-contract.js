@@ -1,3 +1,5 @@
+const { TaskError } = require("./task-errors.js");
+
 const TASK_LIMITS = Object.freeze({
   promptBytes: 64 * 1024,
   resultBytes: 64 * 1024,
@@ -14,4 +16,19 @@ const newTaskId = () => `task_${[...crypto.getRandomValues(new Uint8Array(16))]
   .map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 
 const TASK_WORKFLOW = "run-task.yml";
-module.exports = { TASK_LIMITS, TASK_WORKFLOW, isTaskId, isTerminalTask, newTaskId };
+
+function boundedTaskResult(text, alreadyTruncated = false) {
+  if (typeof text !== "string" || !text.trim() || typeof alreadyTruncated !== "boolean") {
+    throw new TaskError("INVALID_TASK_INPUT");
+  }
+  const bytes = new TextEncoder().encode(text);
+  const truncated = alreadyTruncated || bytes.length > TASK_LIMITS.resultBytes;
+  const finalResponse = bytes.length > TASK_LIMITS.resultBytes
+    ? new TextDecoder().decode(bytes.subarray(0, TASK_LIMITS.resultBytes), { stream: true }) : text;
+  if (!finalResponse.trim()) {
+    throw new TaskError("INVALID_TASK_INPUT");
+  }
+  return { finalResponse, ...(truncated && { truncated: true }) };
+}
+
+module.exports = { TASK_LIMITS, TASK_WORKFLOW, isTaskId, isTerminalTask, newTaskId, boundedTaskResult };
