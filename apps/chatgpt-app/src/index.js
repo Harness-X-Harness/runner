@@ -20,6 +20,7 @@ import {
 } from "./oauth-resource.js";
 import { AuthorizationStateObject } from "./authorization-state-object.js";
 import { EnvironmentObject } from "./environment-object.js";
+import { TaskRuntimeObject } from "./task-runtime-object.js";
 import { environmentEntry } from "./environment-page.js";
 import {
   claimEnvironmentRun,
@@ -29,7 +30,7 @@ import {
 import { trustedRunnerClaims, webSocketRunnerToken } from "./runner-identity.js";
 import { sessionStreamFetch } from "./session-stream.js";
 
-export { AuthorizationStateObject, EnvironmentObject };
+export { AuthorizationStateObject, EnvironmentObject, TaskRuntimeObject };
 
 export class McpApi extends WorkerEntrypoint {
   fetch(request) {
