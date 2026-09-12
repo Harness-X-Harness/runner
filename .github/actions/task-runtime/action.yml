@@ -1,0 +1,12 @@
+name: Task runtime protocol
+description: Claim private Task data, run the native Agent, or publish a terminal result.
+inputs:
+  phase:
+    description: claim, execute, or finish
+    required: true
+outputs:
+  executor:
+    description: Validated provider name from an admitted claim
+runs:
+  using: node24
+  main: index.js

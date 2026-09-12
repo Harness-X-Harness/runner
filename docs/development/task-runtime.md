@@ -127,3 +127,36 @@ headers or response data. The shared callback envelope bound is 1 MiB. A runner
 must bound its final text before upload; the state layer also independently
 enforces its 64 KiB retained-result limit. There is no callback secret, URL token
 or WebSocket in this path.
+
+## One workflow per Task
+
+[run-task.yml](../../.github/workflows/run-task.yml) accepts only `task_id`.
+It checks out the trusted runtime with credential persistence disabled, claims
+the Task, installs the selected provider through its official current installer,
+runs the Agent, then publishes a terminal result. GitHub bounds the job to sixty
+minutes. There is no target-repository checkout or built-in branch/PR pipeline.
+The Agent receives a private empty workspace and performs the prompt's work.
+
+Only the execution step receives the `MINI_*` Repository Secrets and
+`AGENT_GITHUB_TOKEN` as `GH_TOKEN`. It writes the selected CLI's native
+`~/.codex/config.toml` or `~/.grok/config.toml`; the key remains an environment
+reference. The child environment omits both Actions OIDC request variables and
+the job's `GITHUB_TOKEN`. This is non-inheritance, not isolation from another
+process running as the same user. The Agent intentionally has the fixed token's
+repository rights; user OAuth authority is only for controlling the runner.
+
+The [small Node Action](../../.github/actions/task-runtime/) handles private
+protocol data, not installation orchestration. Its claim and result files use
+0600 permissions inside a 0700 directory under `RUNNER_TEMP`. The workspace is
+inside that directory; tool homes are not relocated. Only the validated provider
+name is an Action output. Prompts, final text, credentials and protocol payloads
+are not printed, placed in artifacts or added to run metadata.
+
+Final text is bounded before upload using the same shared helper as the domain.
+Finish uses a fresh OIDC assertion for each of at most three attempts. Each
+attempt has a ten-second combined identity/delivery bound, with a one-second gap
+between attempts. Only uncertain delivery is retried; a definitive rejection
+stops it. The workflow's narrow finalizer runs only after a successful claim and
+does not replace an earlier failing step. If setup never reached the Agent, it
+reports `PROVIDER_UNAVAILABLE`. If delivery never succeeds, GitHub's eventual
+terminal state is the evidence for later Task reconciliation, not log scraping.

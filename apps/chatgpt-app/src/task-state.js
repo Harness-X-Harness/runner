@@ -1,4 +1,4 @@
-import { TASK_LIMITS, isTaskId, isTerminalTask } from "../../../shared/task-contract.js";
+import { TASK_LIMITS, isTaskId, isTerminalTask, boundedTaskResult } from "../../../shared/task-contract.js";
 import { TaskError } from "../../../shared/task-errors.js";
 
 /** @typedef {{ownerId: string, runId: string, runAttempt: string}} TaskExecution */
@@ -40,16 +40,7 @@ function validateExecution(value) {
 async function normalizedFinish(input) {
   let outcome;
   if (input?.status === "completed") {
-    const text = input.result?.finalResponse;
-    if (typeof text !== "string" || !text.trim()) fail();
-    const bytes = encoder.encode(text);
-    const truncated = bytes.length > TASK_LIMITS.resultBytes;
-    // Streaming decode omits an incomplete UTF-8 code point at the byte limit.
-    const finalResponse = truncated
-      ? new TextDecoder().decode(bytes.subarray(0, TASK_LIMITS.resultBytes), { stream: true })
-      : text;
-    if (!finalResponse.trim()) fail();
-    outcome = { status: "completed", result: { finalResponse, ...(truncated && { truncated: true }) } };
+    outcome = { status: "completed", result: boundedTaskResult(input.result?.finalResponse, input.result?.truncated) };
   } else if (input?.status === "failed") {
     let error;
     try { error = new TaskError(input.error?.code).toJSON(); } catch { fail(); }
@@ -58,7 +49,7 @@ async function normalizedFinish(input) {
   } else fail();
   // Include the complete semantic input: different truncated tails are not identical replays.
   const canonical = JSON.stringify(input.status === "completed"
-    ? { status: "completed", finalResponse: input.result.finalResponse }
+    ? { status: "completed", finalResponse: input.result.finalResponse, truncated: input.result.truncated === true }
     : { status: "failed", code: outcome.error.code });
   const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(canonical)))]
     .map((byte) => byte.toString(16).padStart(2, "0")).join("");

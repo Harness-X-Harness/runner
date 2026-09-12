@@ -1,0 +1,61 @@
+name: Code Task
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Opaque Task identity
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  task:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TASK_ID: ${{ inputs.task_id }}
+      TASK_CONTROL_PLANE_URL: ${{ vars.TASK_CONTROL_PLANE_URL }}
+    steps:
+      - name: Check out trusted runtime
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Claim Task
+        id: claim
+        uses: ./.github/actions/task-runtime
+        with:
+          phase: claim
+
+      - name: Install Codex
+        if: steps.claim.outputs.executor == 'codex'
+        shell: bash
+        run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+      - name: Install Grok
+        if: steps.claim.outputs.executor == 'grok'
+        shell: bash
+        run: curl -fsSL https://x.ai/cli/install.sh | bash
+
+      - name: Execute Task
+        id: agent
+        uses: ./.github/actions/task-runtime
+        env:
+          MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
+          MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
+          MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
+          GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
+        with:
+          phase: execute
+
+      - name: Finish Task
+        if: ${{ always() && steps.claim.outcome == 'success' }}
+        uses: ./.github/actions/task-runtime
+        env:
+          TASK_AGENT_OUTCOME: ${{ steps.agent.outcome }}
+        with:
+          phase: finish
