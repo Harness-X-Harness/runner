@@ -3,17 +3,20 @@ import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import { CodexProtocolFixture, GrokProtocolFixture } from "./helpers/native-protocol.js";
 
 import { MAX_ACTIVE_SESSIONS } from "../apps/chatgpt-app/src/session-state.js";
 
 const require = createRequire(import.meta.url);
-const { CodexDriver, createCodexProcess } = require("../.github/actions/session-runtime/codex-driver.js");
+const { CodexDriver } = require("../.github/actions/session-runtime/codex-driver.js");
+const { createCodexProcess } = require("../.github/actions/agent-runtime/codex-client.js");
 const {
   DriverRegistry,
   MAX_DRIVERS,
 } = require("../.github/actions/session-runtime/drivers.js");
-const { GrokDriver, createGrokProcess } = require("../.github/actions/session-runtime/grok-driver.js");
-const { JsonRpcError, JsonRpcProcess } = require("../.github/actions/session-runtime/json-rpc.js");
+const { GrokDriver } = require("../.github/actions/session-runtime/grok-driver.js");
+const { createGrokProcess } = require("../.github/actions/agent-runtime/grok-client.js");
+const { JsonRpcProcess } = require("../.github/actions/agent-runtime/json-rpc.js");
 
 test("Codex and Grok native children bypass approvals", () => {
   const spawned = [];
@@ -180,7 +183,7 @@ test("Codex fails closed on protocol drift and reports a failed turn without a f
     ...harness,
     createProcess: (options) => missing.connect(options),
   });
-  await assert.rejects(() => driver.start({ initial: true }), /contract is unavailable/);
+  await assert.rejects(() => driver.start({ initial: true }), { code: "PROVIDER_PROTOCOL_ERROR" });
 
   const workingHarness = driverHarness();
   const failing = new CodexProtocolFixture({ failTurn: true });
@@ -284,7 +287,7 @@ test("Grok maps exact ACP permissions and fails closed when interject is absent"
     ...driverHarness(),
     createProcess: (options) => missing.connect(options),
   });
-  await assert.rejects(() => missingDriver.start({ initial: true }), /capability is unavailable/);
+  await assert.rejects(() => missingDriver.start({ initial: true }), { code: "PROVIDER_PROTOCOL_ERROR" });
   assert.equal(missing.methods().includes("session/new"), false);
 
   assert.throws(() => protocol.requestFromServer("session/request_permission", {
@@ -318,7 +321,7 @@ test("JSON-RPC fails closed when a request or server response cannot be written"
     spawnProcess: () => requestChild,
   });
   requestChild.stdin.destroy();
-  await assert.rejects(() => requestRpc.request("method", {}), /unavailable/);
+  await assert.rejects(() => requestRpc.request("method", {}), (error) => error.code === "PROVIDER_UNAVAILABLE");
   assert.equal(requestRpc.pending.size, 0);
 
   const responseChild = fakeChild();
@@ -350,7 +353,7 @@ test("JSON-RPC fails closed when a request or server response cannot be written"
   assert.deepEqual(JSON.parse(rejectedResponse), {
     jsonrpc: "2.0",
     id: 2,
-    error: { code: -32603, message: "Session request failed" },
+    error: { code: -32603, message: "Native request failed" },
   });
   assert.doesNotMatch(rejectedResponse, /private request failure/);
   rejectedRpc.stop();
@@ -443,109 +446,6 @@ test("registry capacity rejects only the new Session driver", async () => {
     action: { type: "terminate", reason: "resource_exhausted" },
   }]);
 });
-
-class CodexProtocolFixture {
-  constructor({ userAgent = "codex-test", failTurn = false } = {}) {
-    this.userAgent = userAgent;
-    this.failTurn = failTurn;
-    this.nextTurnId = "native-turn-1";
-    this.requests = [];
-  }
-
-  connect(options) {
-    this.options = options;
-    return this;
-  }
-
-  async request(method, params) {
-    this.requests.push({ method, params });
-    if (method === "initialize") return { userAgent: this.userAgent };
-    if (method === "thread/start") return { thread: { id: "native-thread" } };
-    if (method === "turn/start") {
-      if (this.failTurn) throw new JsonRpcError(-32601);
-      return { turn: { id: this.nextTurnId } };
-    }
-    if (method === "turn/steer") return { turnId: this.nextTurnId };
-    return {};
-  }
-
-  notify(method, params) {
-    this.requests.push({ method, params });
-  }
-
-  pushNotification(method, params) {
-    this.options.onNotification(method, params);
-  }
-
-  requestFromServer(method, params) {
-    return this.options.onRequest(method, params, 100);
-  }
-
-  methods() {
-    return this.requests.map(({ method }) => method);
-  }
-
-  stop() {
-    this.stopped = true;
-  }
-}
-
-class GrokProtocolFixture {
-  constructor({ missingInterject = false } = {}) {
-    this.missingInterject = missingInterject;
-    this.requests = [];
-    this.promptResolvers = [];
-  }
-
-  connect(options) {
-    this.options = options;
-    return this;
-  }
-
-  request(method, params) {
-    this.requests.push({ method, params });
-    if (method === "initialize") return Promise.resolve({ protocolVersion: 1 });
-    if (method === "_x.ai/interject" && !params.sessionId) {
-      return Promise.reject(new JsonRpcError(this.missingInterject ? -32601 : -32602));
-    }
-    if (method === "session/new") return Promise.resolve({ sessionId: "native-session" });
-    if (method === "session/prompt") {
-      return new Promise((resolve, reject) => this.promptResolvers.push({ resolve, reject }));
-    }
-    if (method === "_x.ai/interject") return Promise.resolve({ status: "queued" });
-    return Promise.resolve({});
-  }
-
-  notify(method, params) {
-    this.requests.push({ method, params });
-  }
-
-  pushNotification(method, params) {
-    this.options.onNotification(method, params);
-  }
-
-  requestFromServer(method, params) {
-    return this.options.onRequest(method, params, 100);
-  }
-
-  finishPrompt(result) {
-    this.promptResolvers.shift().resolve(result);
-  }
-
-  failPrompt() {
-    this.promptResolvers.shift().reject(new Error("private native failure"));
-  }
-
-  methods() {
-    return this.requests.map(({ method }) => method);
-  }
-
-  stop() {
-    this.stopped = true;
-    for (const { reject } of this.promptResolvers) reject(new Error("fixture stopped"));
-    this.promptResolvers = [];
-  }
-}
 
 function driverHarness() {
   const events = [];
