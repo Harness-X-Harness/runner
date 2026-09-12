@@ -2,7 +2,9 @@
 const ERRORS = Object.freeze({
   INVALID_TASK_INPUT: ["The task input is invalid or exceeds a supported limit.", false],
   TASK_NOT_FOUND: ["The task was not found or is no longer available.", false],
-  DISPATCH_FAILED: ["The task workflow could not be started.", true],
+  TASK_AUTH_REQUIRED: ["Reconnect with tasks:manage and valid GitHub runner authorization.", false],
+  GITHUB_UNAVAILABLE: ["GitHub could not confirm this runner operation. Check repository access and try again.", true],
+  DISPATCH_FAILED: ["The task workflow could not be started. Check GitHub runner access before submitting a new task.", true],
   CLAIM_REJECTED: ["This execution cannot claim or finish the task.", false],
   PROVIDER_UNAVAILABLE: ["The selected provider could not start.", true],
   PROVIDER_PROTOCOL_ERROR: ["The provider returned an unsupported or invalid response.", false],

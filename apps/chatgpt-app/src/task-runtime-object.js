@@ -19,7 +19,7 @@ export class TaskRuntimeObject extends DurableObject {
         case "/create": result = await this.tasks.create(input); break;
         case "/read": result = await this.tasks.read(input.ownerId); break;
         case "/control": result = await this.tasks.control(input.ownerId); break;
-        case "/wait": result = await this.tasks.wait(input.ownerId, input.timeoutSeconds); break;
+        case "/wait": result = await this.tasks.wait(input.ownerId, input.timeoutSeconds, input.observedStatus); break;
         case "/cancel": result = await this.tasks.cancel(input.ownerId); break;
         case "/claim": result = await this.tasks.claim(input); break;
         case "/finish": result = await this.tasks.finish(input.execution, input.finish); break;

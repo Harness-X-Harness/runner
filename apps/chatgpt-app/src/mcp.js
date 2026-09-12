@@ -20,6 +20,7 @@ import {
 } from "./session-widget.js";
 import { createSessionStreamCapability } from "./session-stream.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
+import { TASK_SECURITY_SCHEMES, registerTaskTools } from "./task-tools.js";
 import {
   cancelAgentQueuedTurn,
   interruptAgentTurn,
@@ -33,6 +34,7 @@ import {
 } from "./session.js";
 
 const SECURITY_SCHEMES = Object.freeze({
+  ...TASK_SECURITY_SCHEMES,
   start_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
   list_sessions: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
   read_session: Object.freeze([{ type: "oauth2", scopes: ["sessions:manage"] }]),
@@ -109,9 +111,10 @@ export function createServer(env, props) {
     { name: "harness-x-harness", version: "1.0.0" },
     {
       instructions:
-        "Use Agent Sessions for interactive coding: start_session includes the first task; use read_session and send_turn for later turns.",
+        "Use run_task and wait_task for autonomous code tasks. Agent Sessions remain available for interactive coding during the transition.",
     },
   );
+  registerTaskTools(server, env, () => currentProps(props));
   const controlPlaneOrigin = new URL(env.TASK_CONTROL_PLANE_URL).origin;
   server.registerResource(
     "environment-widget",

@@ -144,7 +144,7 @@ out of public documents. Close test Issues and draft PRs, delete only the exact
 temporary branches created by the check, and leave `main` unchanged. Do not use
 the execution repository as a substitute write-test target.
 
-The operator supplies `AGENT_GITHUB_TOKEN` privately for the future Task
+The operator supplies `AGENT_GITHUB_TOKEN` privately for the Task
 execution step. It represents a fixed GitHub identity, not each Task caller.
 Its target rights must be explicitly approved. Keep the value in ignored local
 configuration or use GitHub CLI's private input prompt; do not put it in command
@@ -156,7 +156,7 @@ gh secret set AGENT_GITHUB_TOKEN --repo Harness-X-Harness/runner
 
 Run this only for an authorized initial setup or rotation; it replaces the
 same-named Secret. Secret-name readback proves configuration exists, not that
-the future runner consumed the correct value. Read-only API success is not
+the runner consumed the correct value. Read-only API success is not
 write acceptance. Never put token values or private acceptance output in logs,
 Issues, artifacts or this runbook.
 
@@ -164,6 +164,27 @@ Fresh `tasks:manage` consent belongs to
 [#123](https://github.com/Harness-X-Harness/runner/issues/123), after the new
 scope/tools are deployed. Provide the authorization link and wait for the user.
 Do not require another consent when the existing grant is already valid.
+
+## Task operation
+
+After authorizing `tasks:manage`, use `run_task` with executor and prompt, then
+`wait_task` with its returned Task ID. No target repository, branch, mode or
+token is a separate tool input. `cancel_task` commits intent first and cancels
+only its exact known GitHub run. A `cancelling` response is not an offline or
+rollback guarantee; query again to observe the terminal result.
+
+Unclaimed work expires after ten minutes even if a dispatch reply was lost.
+The claim gate rejects late startup; there is no automatic second dispatch.
+After an admitted run loses its finish callback, a nonzero `wait_task` or
+`cancel_task` can reconcile the exact run/attempt using the owner's current
+scoped GitHub authority. A zero-second wait returns stored state only. Revoked
+authorization or unavailable GitHub evidence leaves execution status uncertain;
+reconnect or query later, not with an alternate identity.
+
+There is no unattended running-Task observer. With no later authorized query,
+Task state can remain active after GitHub ends the run. GitHub's sixty-minute
+job limit still bounds execution. Terminal results expire seven days after the
+original terminal commit. Do not recover results from logs or artifacts.
 
 ## Local checks
 

@@ -9,8 +9,18 @@ https://runners.trustedtunnel.app/mcp
 ```
 
 The Cloudflare Worker is the control plane. GitHub-hosted runners are the
-temporary execution plane. Agent Sessions are the only code-agent execution
-interface.
+temporary execution plane. Autonomous Tasks and interactive Agent Sessions
+use separate state and execution lifecycles.
+
+## Autonomous Task flow
+
+Authorize `tasks:manage`, then call `run_task` with `executor` and `prompt`.
+The prompt defines the repository and work. The response is a Task snapshot
+with a Task ID; use `wait_task` to get the semantic final response or
+`cancel_task` to request a stop. Tasks use a fixed platform GitHub token inside
+their runner. They have no interactive continuation, widget or stream. The
+[Task runtime contract](development/task-runtime.md) defines deadlines,
+retention, credential boundaries and conditional lost-finish reconciliation.
 
 ## User flow
 
@@ -39,6 +49,9 @@ an Agent Session.
 
 | Tool | Purpose |
 | --- | --- |
+| `run_task` | Run one autonomous Codex or Grok task with the configured Agent credentials |
+| `wait_task` | Read or briefly wait for an owned Task and its final response |
+| `cancel_task` | Request cancellation of an owned Task and its exact known run |
 | `start_session` | Start one Codex or Grok Session and send its required first task |
 | `list_sessions` | List the user's Sessions without transcript events |
 | `read_session` | Read one snapshot and ordered events after a cursor |
@@ -51,11 +64,14 @@ an Agent Session.
 | `open_environment` | Explicitly open, or safely observe, the user's private Environment |
 | `close_environment` | Close the Environment and every Session in its generation |
 
-All Session tools require `sessions:manage`. Environment tools require
+Task tools require `tasks:manage`; an older grant does not gain this scope on
+refresh. Session tools require `sessions:manage`. Environment tools require
 `environments:manage`. Harness does not duplicate GitHub repository, issue, or
 pull-request scopes. A user authenticates `gh`, Git, or another GitHub client
 inside the private Environment when an Agent needs repository authority.
-Harness does not receive that credential.
+Harness does not receive that in-Environment credential. Autonomous Tasks instead
+use `AGENT_GITHUB_TOKEN` from repository secrets; that fixed identity is not
+filtered to each caller's target repositories.
 
 ## Identity and authority
 
@@ -75,6 +91,8 @@ Harness does not receive that credential.
 One `EnvironmentObject` Durable Object serializes Environment and Session state
 for one GitHub Principal. `AuthorizationStateObject` stores one-time consent and
 GitHub callback state. `OAUTH_KV` is used only by the OAuth provider.
+Each Task has its own `TaskRuntimeObject` in `TASKS`, with owner checks, a single
+execution binding and immutable terminal state. There is no global Task index.
 
 ## OAuth and GitHub App
 
@@ -96,7 +114,9 @@ The base access token is not retained. The encrypted OAuth grant stores only
 the refresh token, its expiry, the scoped Environment token, its expiry, the
 GitHub Principal, Harness scopes, and MCP controller identity. Refresh derives
 a new scoped token. There is no App JWT, installation token, PAT, OAuth `repo`
-scope, or fallback execution authority.
+scope, or fallback for control-plane workflow authority. The separate fixed
+Agent PAT is injected only into the Task's execution step, never into OAuth
+grants or Worker callback payloads.
 
 Required Worker configuration:
 
@@ -110,9 +130,9 @@ Required Worker configuration:
 | `GITHUB_RUNNER_REF` | variable | protected dispatch ref |
 | `TASK_CONTROL_PLANE_URL` | variable | canonical Worker origin and OIDC audience |
 
-The historical `TASK_` prefix in `TASK_CONTROL_PLANE_URL` and the deployed
-Worker service name are stable infrastructure identifiers. They do not expose
-a Code Task product.
+`TASK_CONTROL_PLANE_URL` is shared by the Task and Environment workflows. The
+Task workflow filename is defined in the shared Task contract, not another
+deployment variable.
 
 ## Runtime channel and drivers
 

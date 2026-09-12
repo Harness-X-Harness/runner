@@ -7,6 +7,7 @@ const TASK_LIMITS = Object.freeze({
   callbackBytes: 1024 * 1024,
   waitSeconds: 25,
   retentionMs: 7 * 24 * 60 * 60 * 1000,
+  startupMs: 10 * 60 * 1000,
 });
 const TERMINAL_STATUSES = Object.freeze(["completed", "failed", "cancelled"]);
 const isTerminalTask = (status) => TERMINAL_STATUSES.includes(status);
