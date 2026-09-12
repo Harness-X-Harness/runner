@@ -6,7 +6,7 @@ import test from "node:test";
 import { CodexProtocolFixture, GrokProtocolFixture } from "./helpers/native-protocol.js";
 
 const require = createRequire(import.meta.url);
-const { CodexClient } = require("../.github/actions/agent-runtime/codex-client.js");
+const { CodexClient, createCodexProcess } = require("../.github/actions/agent-runtime/codex-client.js");
 const { GrokClient } = require("../.github/actions/agent-runtime/grok-client.js");
 const { JsonRpcProcess } = require("../.github/actions/agent-runtime/json-rpc.js");
 
@@ -88,6 +88,52 @@ function child() {
   process.kill = (signal) => { process.signals.push(signal); return true; };
   return process;
 }
+
+test("Codex uses its native headerless envelope through the real process transport", async (t) => {
+  const process = child(), sent = [], events = [];
+  process.kill = () => { process.emit("exit"); return true; };
+  const emit = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
+  process.stdin.on("data", (line) => {
+    const message = JSON.parse(line);
+    sent.push(message);
+    queueMicrotask(() => {
+      if (message.method === "initialize") emit({ id: message.id, result: { userAgent: "codex/0.154.0" } });
+      if (message.method === "thread/start") {
+        if (message.params.sandbox !== "danger-full-access") emit({ id: message.id, error: { code: -32600, message: "Invalid sandbox mode" } });
+        else emit({ id: message.id, result: { thread: { id: "thread-1" } } });
+      }
+      if (message.method === "turn/start") emit({ id: message.id, result: { turn: { id: "turn-1" } } });
+    });
+  });
+  const client = new CodexClient({ workingDirectory: "/workspace",
+    createProcess: (options) => createCodexProcess({ ...options, spawnProcess: () => process }),
+    onNotification: (method) => events.push(method), onRequest: () => ({ decision: "accept" }),
+  });
+  t.after(() => client.close());
+  await client.initialize();
+  await client.startTurn("private", "message-1");
+  emit({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-1" } });
+  emit({ id: 90, method: "item/commandExecution/requestApproval", params: { threadId: "thread-1", turnId: "turn-1" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["item/completed"]);
+  assert.deepEqual(sent.at(-1), { id: 90, result: { decision: "accept" } });
+  assert.ok(sent.every((message) => !Object.hasOwn(message, "jsonrpc")));
+});
+
+test("native envelope choice does not relax Grok JSON-RPC or accept wrong versions", async () => {
+  for (const [create, envelope] of [
+    [(options) => new JsonRpcProcess({ command: "grok", args: [], ...options }), {}],
+    [createCodexProcess, { jsonrpc: "1.0" }],
+  ]) {
+    const process = child();
+    process.kill = () => { process.emit("exit"); return true; };
+    const rpc = create({ spawnProcess: () => process });
+    const rejected = assert.rejects(rpc.request("initialize", {}), { code: "PROVIDER_PROTOCOL_ERROR" });
+    process.stdout.write(`${JSON.stringify({ ...envelope, id: 1, result: {} })}\n`);
+    await rejected;
+    await rpc.close();
+  }
+});
 
 test("JSON-RPC process failures are typed, reject pending operations and report one exit", async () => {
   for (const [event, code] of [["error", "PROVIDER_UNAVAILABLE"], ["exit", "PROVIDER_EXECUTION_ERROR"], ["malformed", "PROVIDER_PROTOCOL_ERROR"]]) {

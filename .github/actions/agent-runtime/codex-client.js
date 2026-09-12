@@ -31,7 +31,7 @@ class CodexClient {
     }
     this.rpc.notify("initialized", {});
     const started = await this.rpc.request("thread/start", {
-      cwd: this.workingDirectory, approvalPolicy: "never", sandbox: "dangerFullAccess",
+      cwd: this.workingDirectory, approvalPolicy: "never", sandbox: "danger-full-access",
     });
     this.threadId = started.thread?.id;
     if (!validNativeId(this.threadId)) throw new TaskError("PROVIDER_PROTOCOL_ERROR");
@@ -104,6 +104,8 @@ function createCodexProcess(options) {
     command: "codex",
     args: ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "app-server"],
     ...options,
+    // Codex App Server omits the JSON-RPC version field on the wire.
+    omitVersion: true,
   });
 }
 

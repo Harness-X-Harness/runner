@@ -10,13 +10,14 @@ class JsonRpcError extends Error {
 }
 
 class JsonRpcProcess {
-  constructor({ command, args, cwd, env, onNotification, onRequest, onExit, spawnProcess = spawn }) {
+  constructor({ command, args, cwd, env, onNotification, onRequest, onExit, omitVersion = false, spawnProcess = spawn }) {
     this.nextId = 1;
     this.pending = new Map();
     this.onNotification = onNotification;
     this.onRequest = onRequest;
     this.onExit = onExit;
     this.stopping = false;
+    this.version = omitVersion ? undefined : "2.0";
     this.child = spawnProcess(command, args, {
       cwd,
       env,
@@ -75,7 +76,7 @@ class JsonRpcProcess {
 
   write(message) {
     if (!this.child.stdin.writable || this.endedOnce) throw new TaskError("PROVIDER_UNAVAILABLE");
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    this.child.stdin.write(`${JSON.stringify({ ...message, jsonrpc: this.version })}\n`);
   }
 
   receive(line) {
@@ -87,7 +88,7 @@ class JsonRpcProcess {
       this.child.kill("SIGTERM");
       return;
     }
-    if (!message || typeof message !== "object" || Array.isArray(message) || message.jsonrpc !== "2.0") {
+    if (!message || typeof message !== "object" || Array.isArray(message) || message.jsonrpc !== this.version) {
       this.ended(new TaskError("PROVIDER_PROTOCOL_ERROR"));
       this.child.kill("SIGTERM");
       return;
