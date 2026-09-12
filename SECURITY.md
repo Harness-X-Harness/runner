@@ -18,18 +18,19 @@ runner 会在 job 结束后销毁，但它不是进程级沙箱。用户代码�
 
 ## MCP 与 GitHub 身份
 
-固定 Worker `https://runners.trustedtunnel.app` 是 MCP、OAuth 和状态控制面。它只公开两类 Harness scope：
+固定 Worker `https://runners.trustedtunnel.app` 是 MCP、OAuth 和状态控制面。它公开三类 Harness scope：
 
 ```text
 environments:manage
 sessions:manage
+tasks:manage
 ```
 
 Worker consent 与 GitHub App 用户授权是两个独立边界。consent 必须校验 client、redirect URI 和 canonical resource，允许显式拒绝，并使用 `frame-ancestors 'none'`、`no-store` 和 `no-referrer`。GitHub 授权使用 S256 PKCE 和同时绑定浏览器 cookie 的一次性 state。
 
 GitHub 返回用户 token 后，Worker 只派生一个限于 `Harness-X-Harness/runner` 和 `Actions: write` 的 scoped user token。OAuth grant 不保留 base access token，只保留 refresh token、scoped token、到期时间、Principal、Harness scopes 和 MCP controller identity。
 
-以下路径禁止出现：
+控制面 workflow 授权中禁止出现：
 
 - App JWT 或 installation token；
 - PAT 或 GitHub OAuth `repo` scope；
@@ -37,7 +38,17 @@ GitHub 返回用户 token 后，Worker 只派生一个限于 `Harness-X-Harness/
 - target repository installation continuation；
 - 未授权、宽权限或匿名 fallback。
 
-用户如需 issue、代码、PR 或 workflow 权限，应在自己的 Environment 内通过 GitHub 官方浏览器或 device flow 登录 `gh`、Git 或 GitHub MCP。Harness 可以传输交互请求，但不能取得、存储或刷新该凭证。
+交互式 Environment 用户如需 issue、代码、PR 或 workflow 权限，应在环境内通过 GitHub 官方浏览器或 device flow 登录 `gh`、Git 或 GitHub MCP。Harness 可以传输交互请求，但不能取得、存储或刷新该凭证。
+
+## Autonomous Task 边界
+
+`run-task.yml` 只接收 opaque task_id，使用受保护默认分支的可信 runtime。Task claim 验证 GitHub OIDC 签名、issuer、canonical audience、repository、workflow/ref、ref_protected、actor_id、run ID 和 attempt。取消先于领取时不得释放 prompt；一个 Task 只接纳一个执行身份。
+
+Task Agent 使用 Repository Secret `AGENT_GITHUB_TOKEN`，以 `GH_TOKEN` 注入执行步骤。这是固定平台身份，不是 MCP 用户的目标仓库授权，也不是控制面 token 的 fallback。取得 Task 权限和 runner 调度权限的可信用户，可以让 Agent 使用该固定身份的全部已配置权限。不得把它描述为逐用户目标仓库隔离。
+
+模型 secrets 和 Agent PAT 只进入执行步骤；claim/finish 不接收它们。原生 Agent 子进程去除 Actions OIDC request URL/token 及 job GITHUB_TOKEN，但相同 runner 用户下的进程并非安全隔离。Task 不使用 T3、Tailscale 或 WebSocket；没有平台 clone/commit/PR 流水线。
+
+Task prompt 只在私有状态和 0600 handoff 文件中传递，终态提交时从 Worker 状态删除。最终文本经过共享长度边界，只有 owner 能读取；七天后清理结果、元数据和 alarm。状态和回传不得写普通日志、summary 或 artifacts。MCP 只公开 Task snapshot，不公开 owner、prompt 字段、原生 ID 或 credentials。最终语义文本由 Agent 产生，不代表业务目标已被平台验证。
 
 ## 状态与控制通道
 
@@ -55,7 +66,7 @@ Agent Session 输出只保留以下 bounded 语义：
 - 声明过的 approval、question 或 authorization request；
 - 用户可见错误。
 
-不得保留或返回 raw reasoning、thought、完整 stdout/stderr、native payload、provider endpoint、prompt、credential 或 T3 descriptor。
+Session Events 不得保留或返回 raw reasoning、thought、完整 stdout/stderr、native payload、provider endpoint、prompt、credential 或 T3 descriptor。
 
 ## Widget 与私有流
 
@@ -74,6 +85,7 @@ Remote Development Environment 固定使用受保护的 `session--none` GitHub E
 | `MINI_END_USER_KEY` | repository secret | Codex 与 Grok 共用 scoped bearer key |
 | `MINI_CODEX_BASE_URL` | repository secret | 私有 Codex provider endpoint |
 | `MINI_GROK_BASE_URL` | repository secret | 私有 Grok provider endpoint |
+| `AGENT_GITHUB_TOKEN` | repository secret，仅 Task Agent step | 固定身份的目标仓库权限，映射到 GH_TOKEN |
 | `GITHUB_APP_CLIENT_ID` | Worker variable | GitHub App user authorization |
 | `GITHUB_APP_CLIENT_SECRET` | Worker secret | code exchange、refresh、token scoping |
 | `ENVIRONMENT_SESSION_SECRET` | Worker secret | Environment browser state 与 Session stream capability |
@@ -102,10 +114,12 @@ workflow 等待 Quick Tunnel URL，再调用 T3 原生 `auth pairing create --ba
 [ ] 默认分支与 session--none 均受保护
 [ ] Headscale policy 不允许横向访问
 [ ] pairing material 不进入 MCP、日志、summary 或 artifact
-[ ] MCP 只发布 environments:manage 与 sessions:manage
+[ ] Task 使用 tasks:manage，旧 Session/Environment scope 不隐式升级
 [ ] GitHub 用户授权仍使用 S256 PKCE 和 browser-bound one-time state
 [ ] scoped user token 只限 runner repository 与 Actions write
-[ ] 没有 App JWT、installation token、PAT、repo scope 或 fallback
+[ ] 控制面没有 App JWT、installation token、PAT、repo scope 或 fallback
+[ ] Task Agent PAT 只注入执行步骤，子进程不继承 OIDC request authority
+[ ] Task prompt 在终态删除，结果保留七天，普通日志没有私有 payload
 [ ] Session output 不包含 reasoning、raw log、prompt、provider endpoint 或 credential
 [ ] Widget capability 只在私有 _meta，短期且绑定 owner/Session/Grant
 [ ] GitHub Actions 仍是 Environment lifecycle authority

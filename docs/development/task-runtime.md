@@ -85,16 +85,19 @@ Session, event log or stream. It subscribes before its first read.
 not a proof of JavaScript refinement or external delivery. Its consistency
 boundary is each committed per-Task storage transaction. Three execution values
 distinguish another run and a new attempt of the same run; two principals
-distinguish the owner from another caller. Payloads and time are omitted because
-the checked lifecycle properties depend on release, binding and terminal order,
-not raw bytes or clock values. Bounds and expiry have separate fixed-clock tests.
+distinguish the owner from another caller. Payload bytes and numeric clock
+values are omitted. A deadline-passed flag distinguishes an eligible first
+claim from an expired one; an admitted execution can still repeat its claim
+after that startup deadline. Byte bounds and retention have fixed-clock tests.
 
 The model allows delayed, duplicate and absent claim/finish operations and
 stuttering. No fairness rule assumes that GitHub or a provider returns. It checks
 single execution admission, no prompt release after pre-claim cancellation,
 terminal immutability, prompt deletion and owner/binding gates. Fault configs
 deliberately permit a post-cancel claim or terminal overwrite; they must violate
-`NoPromptAfterCancel` or `TerminalImmutable`, respectively. There are no symmetry
+`NoPromptAfterCancel` or `TerminalImmutable`, respectively. A third fault permits
+the first claim after the startup deadline and must violate `NoLateFirstClaim`.
+There are no symmetry
 reductions or state constraints. Stuttering represents valid quiescence, not
 deadlock freedom of the external system.
 
@@ -103,6 +106,12 @@ and finish/cancel orders, foreign identities and identical/conflicting replay.
 They also check private serialization, Unicode bounds, wait subscription and
 seven-day expiry. These tests do not establish production OIDC, GitHub delivery,
 provider authorization or unattended convergence after a lost finish.
+
+The local workerd SQLite test checks the actual transaction/alarm API boundary.
+`deleteAll` cannot run inside an explicit transaction. Expiry is checked there,
+then the immutable expired terminal object is removed with `deleteAll` outside
+it. Prompt deletion and terminal/alarm writes remain atomic. No legal callback
+can change an expired terminal record in that interval.
 
 ## Runner callbacks
 
@@ -160,3 +169,42 @@ stops it. The workflow's narrow finalizer runs only after a successful claim and
 does not replace an earlier failing step. If setup never reached the Agent, it
 reports `PROVIDER_UNAVAILABLE`. If delivery never succeeds, GitHub's eventual
 terminal state is the evidence for later Task reconciliation, not log scraping.
+
+## MCP and convergence
+
+`run_task({executor, prompt})`, `wait_task({taskId, timeoutSeconds?})` and
+`cancel_task({taskId})` require `tasks:manage` and the owning GitHub Principal.
+The scoped GitHub App user token remains the only control-plane execution
+authority. It is not the fixed Agent token. Discovery marks arbitrary Agent
+work as destructive and open-world; wait is read-only. There is no Task widget,
+cursor, event stream, listing, interactive continuation or automatic rerun.
+
+Creation starts a ten-minute unclaimed deadline. One per-Task alarm expires
+unclaimed work without a caller, subject to storage and alarm availability.
+The claim gate also checks the deadline, so delayed alarms cannot release a
+late prompt. Expiry becomes `DISPATCH_FAILED`, or `cancelled` if cancellation
+intent was already committed. The same alarm handles seven-day terminal
+retention; claim removes the startup alarm. Neither cancellation nor a repeat
+read resets a deadline.
+
+Dispatch sends only Task ID. A definitive rejection fails that Task. A network
+failure, timeout or server error retains the queued Task for a late claim or
+expiry; it never restores a dispatch budget. A new `run_task` call creates new
+work and is not an idempotent retry of the previous call.
+
+A nonzero wait and each cancellation of a known active execution query only
+the bound GitHub repository/run/attempt using the caller's current authority.
+An exact terminal run without an accepted finish becomes `EXECUTION_ENDED`,
+`TASK_TIMEOUT` or `cancelled`; no provider result is reconstructed. Failed,
+revoked, missing or mismatched observations leave the Task active and return a
+safe actionable error. A native final response committed first remains final.
+GitHub's cancellation API targets a run ID, not an attempt-specific compare-and-
+swap; the request uses the bound run, while Task claim/finish reject all other
+attempts. It is not a rollback of earlier Agent effects.
+
+Wait holds the request for at most 25 seconds including its bounded GitHub
+observation budget. Zero requests a stored snapshot only. A snapshot status is
+passed internally into the wait gate so a transition between observation and
+subscription cannot be lost. With no later caller or no valid user authority,
+automatic running-Task convergence is not promised. GitHub still enforces the
+job lifetime; there is no permanent observer or alternate identity.

@@ -103,7 +103,27 @@ or cancel the authoritative GitHub run directly if ChatGPT is unavailable. The
 Quick Tunnel URL and all runner state disappear when the run ends or reaches
 the GitHub-hosted platform limit.
 
-## Failure behavior
+## Autonomous code tasks
+
+The same MCP endpoint exposes `run_task`, `wait_task` and `cancel_task`, with
+the separate `tasks:manage` scope. `run_task` takes only an executor (`codex` or
+`grok`) and a prompt. It starts one temporary runner and returns a Task ID.
+Put the repository and work in the prompt; the Agent handles clone, issues,
+code and PR operations itself. Use `wait_task` for the final text. There is no
+Task widget, stream, conversation or automatic resubmission.
+
+Tasks require the repository secret `AGENT_GITHUB_TOKEN` in addition to the
+provider secrets above, and the repository variable `TASK_CONTROL_PLANE_URL`.
+The Agent uses that fixed token as `GH_TOKEN`; it does not inherit each MCP
+user's target-repository rights. Only trusted users should receive Task access.
+The user's scoped GitHub App token controls the runner, not the target work.
+
+Tasks have a ten-minute unclaimed startup deadline and a sixty-minute GitHub
+job limit. Cancellation is not rollback. Results remain private to their owner
+and expire seven days after termination. See the
+[Task contract](docs/development/task-runtime.md) for bounds and failure behavior.
+
+## Environment failure behavior
 
 The workflow models the happy path. Commands keep their native output and exit
 status. Only the optional Tailscale step uses GitHub's native

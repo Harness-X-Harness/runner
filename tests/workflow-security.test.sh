@@ -39,7 +39,7 @@ for removed in \
   "$ROOT_DIR/apps/chatgpt-app/src/repository-authorization.js"; do
   [[ ! -e "$removed" ]] || fail "legacy Code Task surface still exists: $removed"
 done
-if rg -q 'submit_task|get_task_result|cancel_task|tasks:|repos:|pull_requests:' \
+if rg -q 'submit_task|get_task_result|tasks:(read|run|cancel)|repos:|pull_requests:' \
   "$ROOT_DIR/apps/chatgpt-app/src"; then
   fail 'MCP source still exposes legacy Code Task tools or scopes'
 fi

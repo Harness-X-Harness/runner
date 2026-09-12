@@ -6,7 +6,7 @@ import { TaskError } from "../shared/task-errors.js";
 import { taskStorage } from "./helpers/task-storage.js";
 
 const ownerId = "123";
-const execution = { ownerId, runId: "100", runAttempt: "1" };
+const execution = { ownerId, repository: "example/runner", runId: "100", runAttempt: "1" };
 const foreignRun = { ...execution, runId: "101" };
 const newAttempt = { ...execution, runAttempt: "2" };
 const otherOwner = { ...execution, ownerId: "456" };
@@ -194,4 +194,57 @@ test("seven-day expiry uses original terminal time; delayed alarms and late call
     assert.equal(await storage.get("task"), undefined);
     assert.equal(await storage.getAlarm(), undefined);
   }
+});
+
+test("startup expiry rejects a first claim even if its alarm has not run", async () => {
+  for (const cancelled of [true, false]) {
+    const { store, storage, advance } = await setup();
+    const deadline = await storage.getAlarm();
+    if (cancelled) await store.cancel(ownerId);
+    assert.equal(await storage.getAlarm(), deadline, "cancellation must not reset startup time");
+    advance(TASK_LIMITS.startupMs);
+    await assert.rejects(store.claim(execution), { code: "CLAIM_REJECTED" });
+    const stored = await storage.get("task");
+    assert.equal(stored.prompt, undefined, "late claim rejection must not roll back expiry");
+    assert.equal(stored.startupDeadline, undefined);
+    assert.equal(stored.status, cancelled ? "cancelled" : "failed");
+    assert.equal(stored.error.code, cancelled ? "CANCELLED" : "DISPATCH_FAILED");
+    assert.equal(await storage.getAlarm(), deadline + TASK_LIMITS.retentionMs);
+  }
+});
+
+test("startup and retention alarms coexist and do not expire an admitted execution", async () => {
+  const queued = await setup();
+  queued.advance(TASK_LIMITS.startupMs - 1);
+  await queued.store.alarm();
+  assert.equal((await queued.store.read(ownerId)).status, "queued");
+  queued.advance(1);
+  await queued.store.alarm();
+  const expiry = await queued.storage.getAlarm();
+  assert.equal((await queued.store.read(ownerId)).status, "failed");
+  await queued.store.alarm();
+  assert.equal(await queued.storage.getAlarm(), expiry);
+  queued.advance(TASK_LIMITS.retentionMs);
+  await queued.store.alarm();
+  assert.equal(await queued.storage.get("task"), undefined);
+  const active = await setup();
+  await active.store.claim(execution);
+  assert.equal(await active.storage.getAlarm(), undefined);
+  active.advance(TASK_LIMITS.startupMs + 1);
+  await active.store.alarm();
+  assert.equal((await active.store.read(ownerId)).status, "running");
+  assert.equal((await active.store.claim(execution)).prompt, "PRIVATE_PROMPT");
+  await active.store.finish(execution, final());
+  const retention = await active.storage.getAlarm();
+  await active.store.alarm();
+  assert.equal(await active.storage.getAlarm(), retention);
+});
+
+test("wait observes a status change committed before the wait handler subscribes", async () => {
+  const { store } = await setup();
+  const observed = await store.read(ownerId);
+  await store.claim(execution);
+  const waiting = store.wait(ownerId, 25, observed.status);
+  assert.equal((await waiting).status, "running");
+  assert.equal(store.waiters.size, 0);
 });

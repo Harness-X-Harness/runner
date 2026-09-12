@@ -1,4 +1,9 @@
 const SCOPE_DETAILS = Object.freeze({
+  "tasks:manage": Object.freeze({
+    group: "Task permissions",
+    title: "Run and control code tasks",
+    description: "Run autonomous Codex and Grok tasks, read their results and cancel them. Agents use the platform's configured GitHub credentials.",
+  }),
   "environments:manage": Object.freeze({
     group: "Environment permissions",
     title: "Manage private development environments",

@@ -97,6 +97,23 @@ test("initial consent displays and preserves every requested capability", async 
   ]);
 });
 
+test("Task consent names the fixed Agent authority and grants no legacy scope", async () => {
+  const states = fakeAuthorizationStates();
+  const response = await authorizePage(new Request("https://runner.example.com/authorize"), {
+    AUTHORIZATION_STATES: states.binding,
+    OAUTH_PROVIDER: {
+      parseAuthRequest: async () => ({ ...authRequest, scope: ["tasks:manage"] }),
+      lookupClient: async () => ({ clientName: "Task acceptance client" }),
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /Run and control code tasks/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.doesNotMatch(body, /Manage coding sessions|Manage private development environments/);
+  assert.deepEqual(states.values()[0].authRequest.scope, ["tasks:manage"]);
+});
+
 test("validated authorization errors return OAuth error state and issuer", async () => {
   const response = await authorizePage(
     new Request("https://runner.example.com/authorize"),
@@ -308,7 +325,7 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
   assert.match(completed.headers.get("set-cookie"), /Max-Age=0/);
 });
 
-test("authorization rejects scopes outside the Session and Environment product", () => {
+test("authorization rejects scopes outside the declared Harness products", () => {
   assert.throws(() => describeScopes(["unknown:scope"]), /Unknown OAuth scope/);
 });
 

@@ -41,7 +41,8 @@ export function taskExecutionClaims(payload, env) {
       !/^[1-9]\d*$/.test(String(payload.run_attempt ?? ""))) {
     throw new Error("task execution is not trusted");
   }
-  return { ownerId: String(payload.actor_id), runId: String(payload.run_id), runAttempt: String(payload.run_attempt) };
+  return { ownerId: String(payload.actor_id), repository: String(payload.repository),
+    runId: String(payload.run_id), runAttempt: String(payload.run_attempt) };
 }
 
 export function webSocketRunnerToken(request, protocol = "harness.environment.v1") {

@@ -83,7 +83,7 @@ test("MCP control plane declares the stateless SDK v2 boundary", async () => {
   assert.doesNotMatch(source, /sessionIdGenerator|enableJsonResponse|_requestHandlers/);
 });
 
-test("MCP v2 serves the same Session and Environment tools to modern and legacy clients", async () => {
+test("MCP v2 serves the same Task, Session and Environment tools to modern and legacy clients", async () => {
   const props = {
     githubUserId: "test-user",
     oauthScopes: ["sessions:manage", "environments:manage"],
@@ -116,21 +116,24 @@ test("MCP v2 serves the same Session and Environment tools to modern and legacy 
   );
   assert.equal(modernResponse.status, 200);
   const modernTools = (await modernResponse.json()).result.tools;
-  assert.equal(modernTools.length, 11);
+  assert.equal(modernTools.length, 14);
   assert.deepEqual(
     modernTools.map(({ name }) => name).sort(),
     [
       "cancel_queued_turn",
+      "cancel_task",
       "close_environment",
       "interrupt_turn",
       "list_sessions",
       "open_environment",
       "read_session",
       "respond_to_session",
+      "run_task",
       "send_turn",
       "start_session",
       "stop_session",
       "take_over_session",
+      "wait_task",
     ],
   );
   assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").securitySchemes, [
@@ -180,7 +183,7 @@ test("MCP v2 serves the same Session and Environment tools to modern and legacy 
   const eventData = (await legacyResponse.text()).match(/^data: (.+)$/m)?.[1];
   assert.ok(eventData);
   const legacyTools = JSON.parse(eventData).result.tools;
-  assert.equal(legacyTools.length, 11);
+  assert.equal(legacyTools.length, 14);
   assert.deepEqual(legacyTools.find(({ name }) => name === "read_session").annotations, {
     readOnlyHint: true,
     destructiveHint: false,
