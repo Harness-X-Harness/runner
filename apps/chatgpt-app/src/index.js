@@ -3,7 +3,6 @@ import {
   OAuthProvider,
 } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 
 import { githubGrantTokenExchange } from "./github-user-auth.js";
 import {
@@ -27,8 +26,9 @@ import {
   openEnvironmentChannel,
   prepareEnvironmentChannel,
 } from "./environment-callback.js";
-import { trustedRunnerClaims, webSocketRunnerToken } from "./runner-identity.js";
+import { verifyRunnerIdentity, webSocketRunnerToken } from "./runner-identity.js";
 import { sessionStreamFetch } from "./session-stream.js";
+import { internalTaskFetch } from "./task-callback.js";
 
 export { AuthorizationStateObject, EnvironmentObject, TaskRuntimeObject };
 
@@ -88,6 +88,8 @@ async function defaultFetch(request, env) {
   if (url.pathname.startsWith("/internal/environments/")) {
     return internalEnvironmentFetch(request, env, url);
   }
+
+  if (url.pathname.startsWith("/internal/tasks/")) return internalTaskFetch(request, env);
 
   if (url.pathname.startsWith("/session-stream/")) {
     if (request.method === "OPTIONS") {
@@ -162,25 +164,6 @@ function privateStreamCorsHeaders() {
     "access-control-allow-origin": "*",
     "cache-control": "no-store",
   });
-}
-
-const githubOidcKeys = createRemoteJWKSet(
-  new URL("https://token.actions.githubusercontent.com/.well-known/jwks"),
-);
-
-async function verifyRunnerIdentity(
-  request,
-  env,
-  workflowId,
-  suppliedToken,
-) {
-  const token = suppliedToken ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!token) throw new Error("runner identity required");
-  const { payload } = await jwtVerify(token, githubOidcKeys, {
-    issuer: "https://token.actions.githubusercontent.com",
-    audience: env.TASK_CONTROL_PLANE_URL,
-  });
-  return trustedRunnerClaims(payload, env, workflowId);
 }
 
 function json(value, status = 200) {

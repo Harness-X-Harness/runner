@@ -103,3 +103,27 @@ and finish/cancel orders, foreign identities and identical/conflicting replay.
 They also check private serialization, Unicode bounds, wait subscription and
 seven-day expiry. These tests do not establish production OIDC, GitHub delivery,
 provider authorization or unattended convergence after a lost finish.
+
+## Runner callbacks
+
+`POST /internal/tasks/:taskId/claim` and `/finish` accept a GitHub OIDC assertion
+only in the Authorization header. The shared verifier checks RS256 signature,
+issuer, canonical control-plane origin as audience and token lifetime. Task
+admission additionally requires the configured runner repository, exact
+`run-task.yml` workflow at the configured branch, `ref_protected: "true"`, a
+`workflow_dispatch` event and a GitHub-hosted runner. The signed `actor_id` must
+equal the Task owner. The domain then binds the exact run ID and attempt.
+
+The [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc)
+defines the identity claims. GitHub's
+[OIDC example](https://github.com/github/actions-oidc-debugger#how-to-use-this-action)
+also shows `ref_protected` as a string. This is a separate gate from the Task ID;
+a workflow body cannot substitute a different owner or execution identity.
+
+Claim returns only Task ID, executor and private prompt. Finish accepts final
+text or a canonical failure and returns only the terminal status. Responses use
+`Cache-Control: no-store`; endpoint code does not log request bodies, assertions,
+headers or response data. The shared callback envelope bound is 1 MiB. A runner
+must bound its final text before upload; the state layer also independently
+enforces its 64 KiB retained-result limit. There is no callback secret, URL token
+or WebSocket in this path.
