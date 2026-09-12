@@ -16,10 +16,9 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 ### Live stories
 
-Human-in-the-loop production acceptance for the Private Development
-Environment is defined in
-`docs/agents/live-stories/private-development-environment.md`. Use it after a
-merged change affects that user story; do not convert it into CI automation.
+After a merged change affects Task execution, authorization or results, use
+`docs/agents/live-stories/task-runtime.md` for bounded production acceptance.
+It is a development-time Live Story, not CI automation.
 
 ## 事实经验自动固化
 

@@ -63,7 +63,7 @@ The GitHub App user flow uses S256 PKCE and browser-bound, one-time callback
 state. After GitHub returns a base user token, Harness scopes it to the runner
 repository and `Actions: write`. The base access token is not retained. The
 encrypted OAuth grant stores the refresh token and expiry, scoped token and
-expiry, GitHub Principal and Harness grant metadata. Refresh derives a new
+expiry, GitHub Principal and Harness scopes. Refresh derives a new
 scoped token.
 
 There is no App JWT, installation token, PAT, OAuth `repo` scope or alternate
@@ -73,33 +73,13 @@ also stay out of MCP input/output, Actions logs and public configuration.
 
 The source of truth for Worker variables and bindings is
 [wrangler.jsonc](../apps/chatgpt-app/wrangler.jsonc). The required GitHub App
-client secret is loaded privately. The Task workflow filename is defined in
+client secret, `GITHUB_APP_CLIENT_SECRET`, is loaded privately. The Task workflow filename is defined in
 the shared Task contract, not a second deployment variable.
-
-## Legacy read and close window
-
-With `LEGACY_DRAIN_MODE=true`, new production execution is Task-only. Discovery
-also keeps `list_sessions`, `read_session` and `close_environment` for existing
-authorized clients until old terminal data can be retired. Session reads still
-require `sessions:manage`; close requires `environments:manage`. Neither scope
-confers Task authority. New authorization metadata advertises only
-`tasks:manage`.
-
-These retained tools cannot create generations, dispatch replacement runners,
-resume Sessions or accept turns. Read snapshots advertise no mutation actions
-or stream capability. No widget resource is registered. Old browser, stream
-and runner entry routes return Gone. `EnvironmentObject` remains bound so
-retained owner-authorized reads and exact-run close operations still work.
-
-The cutover is deployed only after admitted old runs have ended. An already
-issued dispatch request can still reach GitHub, but a late claim is rejected
-before the workflow receives execution credentials. Old storage stays intact
-for its terminal retention contract; no source rollback can restore data after
-a later destructive storage migration.
 
 ## Deployment and acceptance
 
-Use the [operations runbook](runner-operations-runbook.md) for secret-safe
+Use the [Task Live Story](agents/live-stories/task-runtime.md) for bounded
+production acceptance and the [operations runbook](runner-operations-runbook.md) for secret-safe
 deployment and local checks. After a Task change, validate the changed boundary
 through authenticated discovery and a representative real Task. Provider or
 GitHub write changes also need the affected native/provider or private-repository

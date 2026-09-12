@@ -1,33 +1,25 @@
 # Keep provider records in KV and application state in Durable Objects
 
-`@cloudflare/workers-oauth-provider` requires `OAUTH_KV` for registered
-clients, grants, authorization codes, access tokens, refresh tokens,
-expiration, and revocation. Harness keeps that binding and does not replace the
-provider persistence implementation.
+Status: accepted for Task Runtime and OAuth.
 
-Application-owned state needs immediate consistency. Consent POSTs and GitHub
-callbacks consume one-time state from `AuthorizationStateObject`. Environment
-lifecycle, Agent Sessions, controllers, commands, and event cursors use one
-owner-scoped `EnvironmentObject`. Each object serializes its own transitions
-with strongly consistent storage.
+The OAuth provider owns `OAUTH_KV` for its clients, grants, codes, tokens,
+expiry and revocation. Application state instead needs immediate consistency:
+one-time consent/callback state uses `AuthorizationStateObject`, and each
+opaque Task ID uses one `TaskRuntimeObject`.
 
 ## Considered options
 
-- Workers KV was rejected for application state because it does not guarantee
-  immediate read-after-write visibility.
-- Moving the OAuth provider to Durable Objects was rejected because the chosen
-  provider requires KV and exposes no Durable Object adapter.
-- D1 was rejected because these owner- or opaque-ID-scoped transitions do not
-  require relational queries.
-- Self-contained signed state was rejected because it adds signing-key,
-  payload-size, and replay rules to one-time browser flows.
-- One Durable Object per Agent Session was rejected because one owner object
-  already serializes Environment generation, Session controller, queue, and
-  channel state.
+- KV does not provide immediate read-after-write visibility for application
+  transitions.
+- Replacing OAuth provider persistence would require an unsupported adapter.
+- D1 adds no value to these opaque-ID-scoped transitions without relational
+  queries.
+- Self-contained signed browser state would add signing, payload and replay
+  rules to the one-time authorization flow.
 
 ## Consequences
 
-Deployment needs Workers KV and two SQLite-backed Durable Object classes:
-`AuthorizationStateObject` and `EnvironmentObject`. D1 is not used.
-Application code must not use `OAUTH_KV` for state that another request must
-read immediately.
+Preserve the OAuth KV binding. Use strongly consistent per-object transactions
+for Task identity, terminal state and one-time authorization decisions. D1 is
+not used. Environment/Session state ownership is superseded by the accepted
+[Task product](https://github.com/Harness-X-Harness/runner/issues/114).

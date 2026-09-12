@@ -4,16 +4,6 @@ const SCOPE_DETAILS = Object.freeze({
     title: "Run and control code tasks",
     description: "Run autonomous Codex and Grok tasks, read their results and cancel them. Agents use the platform's configured GitHub credentials.",
   }),
-  "environments:manage": Object.freeze({
-    group: "Environment permissions",
-    title: "Manage private development environments",
-    description: "Open and close your temporary private development environment.",
-  }),
-  "sessions:manage": Object.freeze({
-    group: "Session permissions",
-    title: "Manage coding sessions",
-    description: "Start and control your private Codex and Grok sessions.",
-  }),
 });
 
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));

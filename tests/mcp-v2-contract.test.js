@@ -83,199 +83,45 @@ test("MCP control plane declares the stateless SDK v2 boundary", async () => {
   assert.doesNotMatch(source, /sessionIdGenerator|enableJsonResponse|_requestHandlers/);
 });
 
-test("MCP v2 serves the same Task, Session and Environment tools to modern and legacy clients", async () => {
-  const props = {
-    githubUserId: "test-user",
-    oauthScopes: ["sessions:manage", "environments:manage"],
-  };
-  const modernBody = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/list",
-    params: {
-      _meta: {
-        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-        "io.modelcontextprotocol/clientCapabilities": {},
-        "io.modelcontextprotocol/clientInfo": { name: "contract-test", version: "1.0.0" },
+test("MCP serves only Task tools to modern and legacy stateless clients", async () => {
+  async function request(method, params = {}, modern = true) {
+    const props = { githubUserId: "test-user", oauthScopes: ["tasks:manage"] };
+    return handleMcpRequest(new Request("https://runner.example/mcp", {
+      method: "POST", headers: {
+        "content-type": "application/json", accept: "application/json, text/event-stream",
+        ...(modern ? { "mcp-method": method, "mcp-protocol-version": "2026-07-28" } : {}),
+        ...(modern && (params.name || params.uri) ? { "mcp-name": params.name || params.uri } : {}),
       },
-    },
-  };
-  const modernResponse = await handleMcpRequest(
-    new Request("https://runner.example/mcp", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "mcp-method": "tools/list",
-        "mcp-protocol-version": "2026-07-28",
-      },
-      body: JSON.stringify(modernBody),
-    }),
-    { TASK_CONTROL_PLANE_URL: "https://runner.example" },
-    props,
-    { props },
-  );
-  assert.equal(modernResponse.status, 200);
-  const modernTools = (await modernResponse.json()).result.tools;
-  assert.equal(modernTools.length, 14);
-  assert.deepEqual(
-    modernTools.map(({ name }) => name).sort(),
-    [
-      "cancel_queued_turn",
-      "cancel_task",
-      "close_environment",
-      "interrupt_turn",
-      "list_sessions",
-      "open_environment",
-      "read_session",
-      "respond_to_session",
-      "run_task",
-      "send_turn",
-      "start_session",
-      "stop_session",
-      "take_over_session",
-      "wait_task",
-    ],
-  );
-  assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").securitySchemes, [
-    { type: "oauth2", scopes: ["environments:manage"] },
-  ]);
-  assert.deepEqual(modernTools.find(({ name }) => name === "open_environment").annotations, {
-    readOnlyHint: false,
-    destructiveHint: false,
-    openWorldHint: true,
-  });
-  assert.deepEqual(
-    modernTools.find(({ name }) => name === "open_environment").inputSchema.required,
-    ["operation"],
-    "cached clients with the old empty input cannot mutate an Environment",
-  );
-  assert.deepEqual(
-    modernTools.find(({ name }) => name === "open_environment")._meta?.ui,
-    { resourceUri: "ui://environment/v6.html" },
-  );
-  assert.equal(
-    modernTools.find(({ name }) => name === "open_environment")._meta?.["openai/outputTemplate"],
-    "ui://environment/v6.html",
-  );
-  assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").securitySchemes, [
-    { type: "oauth2", scopes: ["environments:manage"] },
-  ]);
-  assert.deepEqual(modernTools.find(({ name }) => name === "close_environment").annotations, {
-    readOnlyHint: false,
-    destructiveHint: true,
-    openWorldHint: true,
-  });
-
-  const legacyResponse = await handleMcpRequest(
-    new Request("https://runner.example/mcp", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
-    }),
-    { TASK_CONTROL_PLANE_URL: "https://runner.example" },
-    props,
-    { props },
-  );
-  assert.equal(legacyResponse.status, 200);
-  const eventData = (await legacyResponse.text()).match(/^data: (.+)$/m)?.[1];
-  assert.ok(eventData);
-  const legacyTools = JSON.parse(eventData).result.tools;
-  assert.equal(legacyTools.length, 14);
-  assert.deepEqual(legacyTools.find(({ name }) => name === "read_session").annotations, {
-    readOnlyHint: true,
-    destructiveHint: false,
-    openWorldHint: false,
-  });
-});
-
-test("MCP v2 serves credential-free Environment and Session widget resources", async () => {
-  const props = {
-    githubUserId: "test-user",
-    oauthScopes: ["environments:manage"],
-  };
-  const request = async (id, method, params = {}) => {
-    const response = await handleMcpRequest(
-      new Request("https://runner.example/mcp", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "mcp-method": method,
-          "mcp-protocol-version": "2026-07-28",
-          ...(method === "resources/read" ? { "mcp-name": params.uri } : {}),
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          method,
-          params: {
-            ...params,
-            _meta: {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-              "io.modelcontextprotocol/clientInfo": {
-                name: "widget-contract-test",
-                version: "1.0.0",
-              },
-            },
-          },
-        }),
-      }),
-      { TASK_CONTROL_PLANE_URL: "https://runner.example" },
-      props,
-      { props },
-    );
-    assert.equal(response.status, 200);
-    return response.json();
-  };
-
-  const listed = await request(1, "resources/list");
-  assert.deepEqual(
-    listed.result.resources.map(({ uri, mimeType }) => ({ uri, mimeType })),
-    [
-      { uri: "ui://environment/v6.html", mimeType: "text/html;profile=mcp-app" },
-      { uri: "ui://session/v3.html", mimeType: "text/html;profile=mcp-app" },
-    ],
-  );
-
-  const read = await request(2, "resources/read", {
-    uri: "ui://environment/v6.html",
-  });
-  assert.equal(read.result.contents.length, 1);
-  const resource = read.result.contents[0];
-  assert.equal(resource.uri, "ui://environment/v6.html");
-  assert.equal(resource.mimeType, "text/html;profile=mcp-app");
-  assert.deepEqual(resource._meta.ui, {
-    prefersBorder: true,
-    domain: "https://runner.example",
-    csp: { connectDomains: [], resourceDomains: [] },
-  });
-  assert.deepEqual(resource._meta["openai/widgetCSP"], {
-    redirect_domains: ["https://runner.example", "https://github.com"],
-  });
-  assert.match(resource.text, /Private development environment/);
-  assert.match(resource.text, /tools\/call/);
-  assert.match(resource.text, /open_environment/);
-  assert.match(resource.text, /close_environment/);
-  assert.match(resource.text, /ui\/initialize/);
-  assert.match(resource.text, /ui\/open-link/);
-  assert.match(resource.text, /openai:set_globals/);
-  assert.doesNotMatch(resource.text, /window\.open\(/);
-  assert.doesNotMatch(resource.text, /fetch\(|setInterval|localStorage/);
-  assert.doesNotMatch(resource.text, /trycloudflare|pairingUrl|t3Url|tailscaleHost/i);
-
-  const sessionRead = await request(3, "resources/read", { uri: "ui://session/v3.html" });
-  const sessionResource = sessionRead.result.contents[0];
-  assert.deepEqual(sessionResource._meta.ui.csp, {
-    connectDomains: ["https://runner.example"],
-    resourceDomains: [],
-  });
-  assert.match(sessionResource.text, /Coding session/i);
-  assert.match(sessionResource.text, /session-stream/);
-  assert.match(sessionResource.text, /allowedActions/);
-  assert.match(sessionResource.text, /take_over_session/);
-  assert.doesNotMatch(sessionResource.text, /<textarea|overflow:\s*auto/);
-  assert.doesNotMatch(sessionResource.text, /MINI_END_USER_KEY|pairingUrl|tailscaleHost/);
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: {
+        ...params,
+        ...(modern ? { _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities": {},
+          "io.modelcontextprotocol/clientInfo": { name: "contract-test", version: "1" },
+        } } : {}),
+      } }),
+    }), { TASK_CONTROL_PLANE_URL: "https://runner.example" }, props, { props });
+  }
+  const modern = await request("tools/list");
+  assert.equal(modern.status, 200);
+  const tools = (await modern.json()).result.tools;
+  assert.deepEqual(tools.map(t=>t.name), ["run_task", "wait_task", "cancel_task"]);
+  for (const tool of tools) {
+    assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["tasks:manage"] }]);
+    assert.equal(tool._meta.ui, undefined);
+    assert.equal(tool._meta["openai/outputTemplate"], undefined);
+  }
+  const legacy = await request("tools/list", {}, false);
+  assert.equal(legacy.status, 200);
+  const event = (await legacy.text()).split("\n").find(line=>line.startsWith("data: "));
+  assert.deepEqual(JSON.parse(event.slice(6)).result.tools, tools);
+  for (const method of ["resources/list", "resources/read"]) {
+    const response = await request(method, method === "resources/read" ? { uri: "ui://session/v3.html" } : {});
+    assert.equal((await response.json()).error.code, -32601);
+  }
+  for (const name of ["open_environment", "close_environment", "start_session", "list_sessions", "read_session", "send_turn"]) {
+    const response = await request("tools/call", { name, arguments: {} });
+    const body = await response.json();
+    assert.ok(body.error || body.result?.isError);
+  }
 });

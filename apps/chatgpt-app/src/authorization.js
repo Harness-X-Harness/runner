@@ -10,7 +10,6 @@ import {
 } from "./authorization-state.js";
 import { completeGitHubUserAuthorization } from "./github-user-auth.js";
 import { consentScopes, describeScopes } from "./oauth-scopes.js";
-import { completeEnvironmentAuthorization } from "./environment-page.js";
 
 const CONSENT_TTL = 600;
 const CONSENT_COOKIE = "__Host-RUNNER_CSRF";
@@ -46,7 +45,6 @@ export async function authorizePage(request, env) {
     `oauth:consent:${csrf}`,
     {
       authRequest,
-      clientName: boundedClientName(client.clientName),
       browserBindingHash: await sha256Base64Url(browserSession),
     },
     CONSENT_TTL,
@@ -58,10 +56,10 @@ export async function authorizePage(request, env) {
   return html(
     "Authorize Harness X Harness",
     `<p><strong>${escapeHtml(client.clientName ?? "MCP client")}</strong> requests permission to use Harness X Harness.</p>
-     <p class="note">These permissions control what ChatGPT can ask Harness to do. GitHub separately verifies the user and the Execution Repository operation.</p>
+     <p class="note">These permissions control what your MCP client can ask Harness to do. GitHub separately verifies the user and the Execution Repository operation.</p>
      <h2>Requested permissions</h2>
      ${scopeList}
-     <p class="note">GitHub verifies your identity next. Harness derives an Environment credential limited to the runner repository and Actions workflow control.</p>
+     <p class="note">GitHub verifies your identity next. Harness derives a workflow credential limited to the runner repository and Actions workflow control.</p>
      <form method="post" action="/authorize/consent">
        <input type="hidden" name="csrf" value="${escapeHtml(csrf)}" />
        <div class="actions">
@@ -130,8 +128,6 @@ export async function submitAuthorizationDecision(request, env) {
     {
       kind: "mcp",
       authRequest,
-      controllerGrantId: `grant_${crypto.randomUUID()}`,
-      clientName: boundedClientName(consent.value.clientName),
     },
   );
 }
@@ -153,13 +149,6 @@ export async function completeAuthorizationCallback(
   let response;
   if (authorization.payload?.kind === "mcp") {
     response = await completeGitHubUserAuthorization(
-      env,
-      authorization,
-      fetchImpl,
-      logger,
-    );
-  } else if (authorization.payload?.kind === "environment") {
-    response = await completeEnvironmentAuthorization(
       env,
       authorization,
       fetchImpl,
@@ -264,10 +253,4 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function boundedClientName(value) {
-  return typeof value === "string" && value.length > 0
-    ? value.slice(0, 256)
-    : "MCP client";
 }

@@ -1,5 +1,5 @@
 const { TaskError } = require("../../../shared/task-errors.js");
-const { JsonRpcError, JsonRpcProcess } = require("./json-rpc.js");
+const { JsonRpcProcess } = require("./json-rpc.js");
 
 class GrokClient {
   constructor({ workingDirectory, onNotification, onRequest, onExit, createProcess = createGrokProcess, env }) {
@@ -11,7 +11,7 @@ class GrokClient {
     this.env = env;
   }
 
-  async initialize({ interject = false } = {}) {
+  async initialize() {
     this.rpc = this.createProcess({
       cwd: this.workingDirectory,
       env: this.env,
@@ -33,22 +33,10 @@ class GrokClient {
       clientInfo: { name: "harness-runner", title: "Harness Runner", version: "1.0.0" },
     });
     if (initialized.protocolVersion !== 1) throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-    if (interject) await this.requireInterject();
     const started = await this.rpc.request("session/new", { cwd: this.workingDirectory, mcpServers: [] });
     this.sessionId = started.sessionId;
     if (typeof this.sessionId !== "string" || !this.sessionId || this.sessionId.length > 512) {
       throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-    }
-  }
-
-  async requireInterject() {
-    try {
-      // Probe method availability without targeting a native conversation.
-      await this.rpc.request("_x.ai/interject", {});
-    } catch (error) {
-      if (!(error instanceof JsonRpcError) || error.code === -32601) {
-        throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-      }
     }
   }
 
@@ -64,13 +52,6 @@ class GrokClient {
     }
   }
 
-  async steer(text, interjectionId) {
-    const result = await this.rpc.request("_x.ai/interject", { sessionId: this.sessionId, text, interjectionId });
-    if (result.status !== "queued") throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-  }
-
-  interrupt() { this.rpc.notify("session/cancel", { sessionId: this.sessionId }); }
-  stop() { return this.rpc?.stop(); }
   close() { return this.rpc?.close(); }
 }
 

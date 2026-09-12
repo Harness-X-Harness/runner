@@ -12,7 +12,7 @@ export async function internalTaskFetch(request, env, keys) {
   const [, taskId, operation] = route;
   let execution;
   try {
-    const claims = await verifyRunnerIdentity(request, env, TASK_WORKFLOW, undefined, keys);
+    const claims = await verifyRunnerIdentity(request, env, TASK_WORKFLOW, keys);
     execution = taskExecutionClaims(claims, env);
   } catch {
     return taskErrorResponse(new TaskError("CLAIM_REJECTED"), 401);

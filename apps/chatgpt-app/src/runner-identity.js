@@ -4,8 +4,8 @@ const githubOidcKeys = createRemoteJWKSet(
   new URL("https://token.actions.githubusercontent.com/.well-known/jwks"),
 );
 
-export async function verifyRunnerIdentity(request, env, workflowId, suppliedToken, keys = githubOidcKeys) {
-  const token = suppliedToken ?? request.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1];
+export async function verifyRunnerIdentity(request, env, workflowId, keys = githubOidcKeys) {
+  const token = request.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1];
   if (!token) throw new Error("runner identity required");
   const { payload } = await jwtVerify(token, keys, {
     algorithms: ["RS256"],
@@ -43,16 +43,4 @@ export function taskExecutionClaims(payload, env) {
   }
   return { ownerId: String(payload.actor_id), repository: String(payload.repository),
     runId: String(payload.run_id), runAttempt: String(payload.run_attempt) };
-}
-
-export function webSocketRunnerToken(request, protocol = "harness.environment.v1") {
-  const offered = (request.headers.get("sec-websocket-protocol") ?? "")
-    .split(",")
-    .map((value) => value.trim());
-  if (offered.length !== 2 || offered[0] !== protocol || !offered[1].startsWith("oidc.")) {
-    throw new Error("runner WebSocket identity required");
-  }
-  const token = offered[1].slice("oidc.".length);
-  if (!token) throw new Error("runner WebSocket identity required");
-  return token;
 }
