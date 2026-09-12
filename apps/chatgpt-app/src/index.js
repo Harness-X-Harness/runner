@@ -29,6 +29,7 @@ import {
 import { verifyRunnerIdentity, webSocketRunnerToken } from "./runner-identity.js";
 import { sessionStreamFetch } from "./session-stream.js";
 import { internalTaskFetch } from "./task-callback.js";
+import { isLegacyDrain, LEGACY_RETIRED } from "./legacy-drain.js";
 
 export { AuthorizationStateObject, EnvironmentObject, TaskRuntimeObject };
 
@@ -48,6 +49,7 @@ export default {
 };
 
 function createOAuthProvider(env, canonicalResource) {
+  const publishedScopes = isLegacyDrain(env) ? ["tasks:manage"] : [...OAUTH_SCOPES];
   return new OAuthProvider({
     apiRoute: "/mcp",
     apiHandler: McpApi,
@@ -55,11 +57,11 @@ function createOAuthProvider(env, canonicalResource) {
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/oauth/token",
     clientRegistrationEndpoint: "/oauth/register",
-    scopesSupported: [...OAUTH_SCOPES],
+    scopesSupported: publishedScopes,
     resourceMetadata: {
       resource: canonicalResource,
       authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],
-      scopes_supported: [...OAUTH_SCOPES],
+      scopes_supported: publishedScopes,
       bearer_methods_supported: ["header"],
       resource_name: "Harness X Harness",
     },
@@ -80,6 +82,10 @@ function createOAuthProvider(env, canonicalResource) {
 
 async function defaultFetch(request, env) {
   const url = new URL(request.url);
+  if (isLegacyDrain(env) && (url.pathname === "/environment" ||
+      url.pathname.startsWith("/internal/environments/") || url.pathname.startsWith("/session-stream/"))) {
+    return new Response(LEGACY_RETIRED, { status: 410, headers: { "cache-control": "no-store" } });
+  }
 
   if (url.pathname === "/health") {
     return new Response("ok", { headers: { "content-type": "text/plain" } });

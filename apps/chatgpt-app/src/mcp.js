@@ -21,6 +21,7 @@ import {
 import { createSessionStreamCapability } from "./session-stream.js";
 import { TOOL_CONTRACT } from "./tool-contract.js";
 import { TASK_SECURITY_SCHEMES, registerTaskTools } from "./task-tools.js";
+import { isLegacyDrain, LEGACY_DRAIN_TOOLS, retainedSession } from "./legacy-drain.js";
 import {
   cancelAgentQueuedTurn,
   interruptAgentTurn,
@@ -111,12 +112,14 @@ export function createServer(env, props) {
     { name: "harness-x-harness", version: "1.0.0" },
     {
       instructions:
-        "Use run_task and wait_task for autonomous code tasks. Agent Sessions remain available for interactive coding during the transition.",
+        isLegacyDrain(env)
+          ? "Use run_task and wait_task for all new code work. Legacy Session tools only read retained data or close an old environment; they cannot execute work."
+          : "Use run_task and wait_task for autonomous code tasks. Agent Sessions remain available for interactive coding during the transition.",
     },
   );
   registerTaskTools(server, env, () => currentProps(props));
   const controlPlaneOrigin = new URL(env.TASK_CONTROL_PLANE_URL).origin;
-  server.registerResource(
+  if (!isLegacyDrain(env)) server.registerResource(
     "environment-widget",
     ENVIRONMENT_WIDGET_URI,
     {
@@ -145,7 +148,7 @@ export function createServer(env, props) {
       ],
     }),
   );
-  server.registerResource(
+  if (!isLegacyDrain(env)) server.registerResource(
     "session-widget",
     SESSION_WIDGET_URI,
     {
@@ -175,9 +178,8 @@ export function createServer(env, props) {
       ],
     }),
   );
-
   registerAppTool(
-    server,
+    env, server,
     "start_session",
     {
       title: "Start coding task",
@@ -224,7 +226,7 @@ export function createServer(env, props) {
   );
 
   registerAppTool(
-    server,
+    env, server,
     "list_sessions",
     {
       title: "List coding sessions",
@@ -242,12 +244,12 @@ export function createServer(env, props) {
         requiredGitHubUserId(requestProps),
         requiredSessionController(requestProps),
       );
-      return result({ sessions }, `${sessions.length} Sessions found.`);
+      return result({ sessions: sessions.map((session) => retainedSession(env, session)) }, `${sessions.length} Sessions found.`);
     },
   );
 
   registerAppTool(
-    server,
+    env, server,
     "read_session",
     {
       title: "Read coding session",
@@ -274,15 +276,15 @@ export function createServer(env, props) {
         { afterCursor, limit },
       );
       return result(
-        read,
+        { ...read, session: retainedSession(env, read.session) },
         `Session ${sessionId} is ${read.session.phase}.`,
-        await sessionStreamMeta(env, requestProps, sessionId),
+        isLegacyDrain(env) ? undefined : await sessionStreamMeta(env, requestProps, sessionId),
       );
     },
   );
 
   registerAppTool(
-    server,
+    env, server,
     "send_turn",
     {
       title: "Send Session turn",
@@ -389,7 +391,7 @@ export function createServer(env, props) {
   ));
 
   registerAppTool(
-    server,
+    env, server,
     "open_environment",
     {
       title: "Open private development environment",
@@ -426,7 +428,7 @@ export function createServer(env, props) {
   );
 
   registerAppTool(
-    server,
+    env, server,
     "close_environment",
     {
       title: "Close private development environment",
@@ -454,7 +456,10 @@ export function createServer(env, props) {
         (workerEnv, runId) =>
           cancelEnvironmentWorkflow(workerEnv, githubAccessToken, runId),
       );
-      return result(environment, `Environment is ${environment.status}.`);
+      const observed = isLegacyDrain(env) && environment.status === "closing"
+        ? await openAuthorizedEnvironment(env, requestProps, true)
+        : environment;
+      return result(observed, `Environment is ${observed.status}.`);
     },
   );
 
@@ -477,16 +482,17 @@ function currentProps(fallback) {
   return getMcpAuthContext()?.props ?? fallback ?? {};
 }
 
-function registerAppTool(server, name, config, handler) {
+function registerAppTool(env, server, name, config, handler) {
+  if (isLegacyDrain(env) && !LEGACY_DRAIN_TOOLS.has(name)) return;
   const { securitySchemes, _meta, ...serverConfig } = config;
   server.registerTool(name, {
     ...serverConfig,
-    _meta: { ..._meta, securitySchemes },
+    _meta: { ...(!isLegacyDrain(env) && _meta), securitySchemes },
   }, handler);
 }
 
 function registerSessionMutationTool(server, env, fallbackProps, name, config, mutate) {
-  registerAppTool(server, name, {
+  registerAppTool(env, server, name, {
     ...config,
     outputSchema: sessionSnapshotSchema,
     securitySchemes: SECURITY_SCHEMES[name],
@@ -656,6 +662,7 @@ function openAuthorizedEnvironment(env, props, observeOnly = false) {
 }
 
 async function progressPendingSessionEnvironment(env, props) {
+  if (isLegacyDrain(env)) return;
   const environment = await readEnvironment(
     env,
     requiredGitHubUserId(props),
