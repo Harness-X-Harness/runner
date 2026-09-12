@@ -21,31 +21,16 @@ Task state can remain active after GitHub ends the run. GitHub's sixty-minute
 job limit still bounds execution. Terminal results expire seven days after the
 original terminal commit. Do not recover results from logs or artifacts.
 
-## Legacy drain
+## Storage lifecycle
 
-Production sets `LEGACY_DRAIN_MODE=true`. Only Tasks admit new execution.
-Existing authorized clients can use `list_sessions` and `read_session` for
-retained terminal data, or `close_environment` for an exact old run. Old scopes
-do not authorize Tasks. New environment, turn and queue requests are rejected;
-the old browser entry, private stream and runner routes return HTTP 410.
-Repeated close observes that exact run and returns Offline only after terminal
-GitHub evidence. An unavailable observation leaves Closing; it cannot reopen.
+Applied migration tags are append-only. Check the deployed Worker and its exact
+bindings before a migration. Preserve Task and authorization namespaces unless
+their deletion is explicitly requested.
 
-Before activating this cutover, confirm that all admitted legacy runs have
-ended. Do not cancel an unrelated run. A pending old dispatch can still arrive
-at GitHub; the Durable Object claim gate prevents it from acquiring execution
-credentials. Read requests cannot progress a reserved replacement. A late
-dispatch response can still record exact ownership for cleanup but cannot admit
-work. Cutover closes old control channels rather than preserving active native
-conversations.
-
-Keep the `EnvironmentObject` binding and storage for the existing terminal
-read-retention window. No active GitHub run is not evidence that this window
-has elapsed. Verify the latest retained terminal timestamps before a
-destructive migration; earlier deletion needs explicit approval. A reviewed
-source/deployment rollback is possible while storage remains, but it is not a
-runtime fallback and must not automatically replay work. Deleting Durable
-Object data cannot be undone by a source rollback.
+A [Cloudflare class-deletion migration](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/#delete-migration)
+deletes every object's data in that class. Source rollback cannot restore it.
+Keep the OAuth provider's KV namespace and existing grant schema stable when
+cleaning unrelated product code.
 
 ## Deployment credentials
 
@@ -123,6 +108,9 @@ git diff --check
 ```
 
 ## Live acceptance
+
+Follow the [Task Live Story](agents/live-stories/task-runtime.md). It is a
+manual development acceptance guide, not another CI framework.
 
 Use authenticated MCP discovery, then run a bounded prompt through
 `run_task` and read its final response through `wait_task`. Verify the exact

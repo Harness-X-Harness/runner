@@ -56,24 +56,6 @@ class CodexClient {
     }
   }
 
-  async steer(text, messageId) {
-    const turnId = this.activeTurnId();
-    const result = await this.rpc.request("turn/steer", {
-      threadId: this.threadId, expectedTurnId: turnId,
-      clientUserMessageId: messageId, input: [{ type: "text", text }],
-    });
-    if (result.turnId !== turnId) throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-  }
-
-  interrupt() {
-    return this.rpc.request("turn/interrupt", { threadId: this.threadId, turnId: this.activeTurnId() });
-  }
-
-  activeTurnId() {
-    if (!this.turn?.id) throw new TaskError("PROVIDER_PROTOCOL_ERROR");
-    return this.turn.id;
-  }
-
   bindTurn(id) {
     if (this.turn.id && this.turn.id !== id) throw new TaskError("PROVIDER_PROTOCOL_ERROR");
     this.turn.id = id;
@@ -95,7 +77,6 @@ class CodexClient {
     this.onNotification?.(method, params);
   }
 
-  stop() { return this.rpc?.stop(); }
   close() { return this.rpc?.close(); }
 }
 

@@ -21,10 +21,6 @@
         "class_name": "AuthorizationStateObject"
       },
       {
-        "name": "ENVIRONMENTS",
-        "class_name": "EnvironmentObject"
-      },
-      {
         "name": "TASKS",
         "class_name": "TaskRuntimeObject"
       }
@@ -33,23 +29,39 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["TaskObject"]
+      "new_sqlite_classes": [
+        "TaskObject"
+      ]
     },
     {
       "tag": "v2",
-      "new_sqlite_classes": ["AuthorizationStateObject"]
+      "new_sqlite_classes": [
+        "AuthorizationStateObject"
+      ]
     },
     {
       "tag": "v3",
-      "new_sqlite_classes": ["EnvironmentObject"]
+      "new_sqlite_classes": [
+        "EnvironmentObject"
+      ]
     },
     {
       "tag": "v4",
-      "deleted_classes": ["TaskObject"]
+      "deleted_classes": [
+        "TaskObject"
+      ]
     },
     {
       "tag": "v5",
-      "new_sqlite_classes": ["TaskRuntimeObject"]
+      "new_sqlite_classes": [
+        "TaskRuntimeObject"
+      ]
+    },
+    {
+      "tag": "v6",
+      "deleted_classes": [
+        "EnvironmentObject"
+      ]
     }
   ],
   "kv_namespaces": [
@@ -59,9 +71,7 @@
     }
   ],
   "vars": {
-    "LEGACY_DRAIN_MODE": "true",
     "GITHUB_RUNNER_REPOSITORY": "Harness-X-Harness/runner",
-    "GITHUB_ENVIRONMENT_WORKFLOW_ID": "private-runner-session.yml",
     "GITHUB_RUNNER_REF": "main",
     "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
     "TASK_CONTROL_PLANE_URL": "https://runners.trustedtunnel.app"

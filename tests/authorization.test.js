@@ -15,7 +15,7 @@ const authRequest = Object.freeze({
   responseType: "code",
   clientId: "client-123",
   redirectUri: "https://client.example/callback",
-  scope: ["sessions:manage", "environments:manage"],
+  scope: ["tasks:manage"],
   state: "client-state",
   issuer: "https://runner.example.com",
   codeChallenge: "client-challenge",
@@ -48,9 +48,9 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("set-cookie"), /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
-  assert.match(body, /Manage coding sessions/);
-  assert.match(body, /Manage private development environments/);
-  assert.match(body, /sessions:manage/);
+  assert.match(body, /Run and control code tasks/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /tasks:manage/);
   assert.match(body, /name="decision" value="allow"/);
   assert.match(body, /name="decision" value="deny"/);
   assert.match(body, /&lt;script&gt;ChatGPT&lt;\/script&gt;/);
@@ -58,8 +58,7 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.deepEqual(stored.authRequest.scope, [
-    "environments:manage",
-    "sessions:manage",
+    "tasks:manage",
   ]);
 });
 
@@ -72,7 +71,7 @@ test("initial consent displays and preserves every requested capability", async 
       OAUTH_PROVIDER: {
         parseAuthRequest: async () => ({
           ...authRequest,
-          scope: ["sessions:manage", "environments:manage"],
+          scope: ["tasks:manage"],
         }),
         lookupClient: async () => ({ clientName: "ChatGPT" }),
       },
@@ -80,20 +79,18 @@ test("initial consent displays and preserves every requested capability", async 
   );
 
   const body = await response.text();
-  assert.match(body, /Manage coding sessions/);
-  assert.match(body, /Manage private development environments/);
-  assert.match(body, /Session permissions/);
-  assert.match(body, /Environment permissions/);
+  assert.match(body, /Run and control code tasks/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /Task permissions/);
   assert.match(
     body,
-    /These permissions control what ChatGPT can ask Harness to do/,
+    /These permissions control what your MCP client can ask Harness to do/,
   );
-  assert.match(body, /Harness derives an Environment credential limited to the runner repository and Actions workflow control/);
+  assert.match(body, /Harness derives a workflow credential limited to the runner repository and Actions workflow control/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.deepEqual(stored.authRequest.scope, [
-    "environments:manage",
-    "sessions:manage",
+    "tasks:manage",
   ]);
 });
 
@@ -326,7 +323,9 @@ test("GitHub callback requires the initiating browser and exchanges PKCE once", 
 });
 
 test("authorization rejects scopes outside the declared Harness products", () => {
-  assert.throws(() => describeScopes(["unknown:scope"]), /Unknown OAuth scope/);
+  for (const scope of ["unknown:scope", "sessions:manage", "environments:manage"]) {
+    assert.throws(() => describeScopes([scope]), /Unknown OAuth scope/);
+  }
 });
 
 function consentRequest(decision, csrf = "csrf-123", cookie = csrf) {

@@ -60,7 +60,7 @@ test("GitHub App callback exchanges its code with App credentials", async () => 
   assert.equal(token.access_token, "ghu_access");
 });
 
-test("Environment token is scoped to one runner repository and Actions write", async () => {
+test("Workflow token is scoped to one runner repository and Actions write", async () => {
   let captured;
   const token = await scopeGitHubUserToken(appEnv(), "ghu_base", async (url, init) => {
     captured = { url, init };
@@ -82,12 +82,12 @@ test("Environment token is scoped to one runner repository and Actions write", a
   assert.equal(token.token, "ghu_scoped");
 });
 
-test("GitHub callback stores only refresh and scoped Environment authority", async () => {
+test("GitHub callback stores only refresh and scoped workflow authority", async () => {
   const authRequest = {
     responseType: "code",
     clientId: "client-123",
     redirectUri: "https://client.example/callback",
-    scope: ["environments:manage"],
+    scope: ["tasks:manage"],
     state: "client-state",
     codeChallenge: "challenge",
     codeChallengeMethod: "S256",
@@ -108,8 +108,6 @@ test("GitHub callback stores only refresh and scoped Environment authority", asy
       codeVerifier: "verifier-123",
       payload: {
         authRequest,
-        controllerGrantId: "grant_12345678-1234-1234-1234-123456789abc",
-        clientName: "VS Code",
       },
     },
     async (url) => {
@@ -139,12 +137,9 @@ test("GitHub callback stores only refresh and scoped Environment authority", asy
   assert.equal(completedAuthorization.props.environmentGithubAccessToken, "ghu_scoped");
   assert.equal(completedAuthorization.props.environmentGithubAccessTokenExpiresAt, 1_893_456_000);
   assert.equal(completedAuthorization.props.githubAuthorizationKind, "github_app_scoped");
-  assert.deepEqual(completedAuthorization.props.oauthScopes, ["environments:manage"]);
-  assert.equal(
-    completedAuthorization.props.mcpControllerGrantId,
-    "grant_12345678-1234-1234-1234-123456789abc",
-  );
-  assert.equal(completedAuthorization.props.mcpClientName, "VS Code");
+  assert.deepEqual(completedAuthorization.props.oauthScopes, ["tasks:manage"]);
+  assert.equal(completedAuthorization.props.mcpControllerGrantId, undefined);
+  assert.equal(completedAuthorization.props.mcpClientName, undefined);
 });
 
 test("token properties retain GitHub App refresh metadata", () => {
@@ -240,7 +235,7 @@ test("MCP refresh derives a new scoped token without retaining the base token", 
   assert.equal(result.newProps.githubRefreshToken, "ghr_new");
 });
 
-test("old grants cannot become Environment authority", async () => {
+test("unscoped old grants cannot become workflow authority", async () => {
   await assert.rejects(
     githubGrantTokenExchange(appEnv(), {
       grantType: "authorization_code",

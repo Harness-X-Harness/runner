@@ -75,14 +75,6 @@ exact GitHub run and reconcile its terminal status. This needs the owner's
 valid GitHub authority. There is no permanent background observer or result
 recovery from logs. See the [Task contract](docs/development/task-runtime.md).
 
-## Retained legacy data
-
-New execution uses Tasks only. During the old data's retention window,
-`list_sessions`, `read_session` and `close_environment` remain for existing
-authorized clients. They cannot start an environment, submit turns or resume
-work. Widgets, private streams and the old `/environment` entry are disabled.
-Old storage is not deleted by this admission cutover.
-
 ## Validate and operate
 
 ```bash

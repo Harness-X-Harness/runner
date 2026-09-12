@@ -79,8 +79,7 @@ test("MCP discovery adds three Task tools with one scope and no widget or legacy
   assert.deepEqual(run.annotations, { readOnlyHint: false, destructiveHint: true, openWorldHint: true });
   assert.equal(tools.find((x) => x.name === "wait_task").annotations.readOnlyHint, true);
   assert.equal(tools.find((x) => x.name === "cancel_task").annotations.destructiveHint, true);
-  assert.ok(listed.result.tools.some((x) => x.name === "start_session"));
-  assert.ok(listed.result.tools.some((x) => x.name === "open_environment"));
+  assert.equal(listed.result.tools.length, 3);
 });
 
 test("MCP old scopes and absent execution authority cannot run a Task", async () => {
