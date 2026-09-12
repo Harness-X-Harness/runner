@@ -199,6 +199,10 @@ start a run. Startup failure converges to Offline and terminates its Sessions as
 
 ## Deployment and checks
 
+For local credential loading, use the
+[deployment entrypoint](runner-operations-runbook.md#deployment-credentials).
+With the deployment environment already configured:
+
 ```bash
 cd apps/chatgpt-app
 npm ci
