@@ -1,3 +1,5 @@
+import { isLegacyDrain, LEGACY_RETIRED } from "./legacy-drain.js";
+
 const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 
@@ -19,6 +21,7 @@ export async function dispatchEnvironmentWorkflow(
   environment,
   fetchImpl = fetch,
 ) {
+  if (isLegacyDrain(env)) throw new EnvironmentDispatchError(LEGACY_RETIRED, "rejected");
   let owner;
   let repository;
   try {

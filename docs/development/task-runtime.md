@@ -10,6 +10,12 @@ The two provider clients and JSON-RPC process transport live in
 and the current Session adapters use these clients. Session IDs, controllers,
 queues, event output and product transitions remain outside the clients.
 
+Codex App Server omits the JSON-RPC version member on its wire envelopes; Grok
+ACP uses JSON-RPC 2.0. Each client configures its one transport contract, with
+no protocol fallback. Codex's `thread/start.sandbox` uses `danger-full-access`,
+while `turn/start.sandboxPolicy.type` uses `dangerFullAccess`. These are distinct
+native schema fields, not a shared Harness sandbox string.
+
 ## Final response
 
 - Codex: consume authoritative completed `agentMessage` items, exclude explicit
@@ -208,3 +214,29 @@ passed internally into the wait gate so a transition between observation and
 subscription cannot be lost. With no later caller or no valid user authority,
 automatic running-Task convergence is not promised. GitHub still enforces the
 job lifetime; there is no permanent observer or alternate identity.
+
+## Legacy admission cutover
+
+`LEGACY_DRAIN_MODE` disables new Environment/Session entry at MCP discovery,
+workflow dispatch and Durable Object mutation/claim boundaries. Existing
+owner-authorized Session reads and exact-run close remain for retained data.
+Read snapshots advertise no mutation or stream capability. Cutover requires
+that previously admitted legacy runs have ended; it does not preserve their
+native channels. The [operations runbook](../runner-operations-runbook.md#legacy-drain)
+owns the storage-retention and deployment preconditions.
+
+[LegacyRetirement](../../formal/LegacyRetirement.tla) models reservation,
+already-issued dispatch completion, retirement and credential admission as
+separate actions. Dispatch can finish after retirement, but a claim at the
+retired gate cannot release execution credentials. The fault configuration
+allows that claim and must violate `NoLateLegacyAdmission`. This is a finite
+safety model of the gate, not a proof of distributed deployment atomicity,
+JavaScript refinement, data-retention expiry or external progress. There is no
+fairness, symmetry reduction or state constraint. Principal and payload values
+are omitted because this gate denies all legacy admission uniformly; existing
+identity tests own authorization checks.
+
+[Cutover tests](../../tests/legacy-drain.test.js) check actual MCP registration
+and actual workerd SQLite reads and denied mutations. They keep old grant
+authority distinct from Tasks. Production acceptance separately checks the
+deployed catalogue, retained reads and one new Task using the same grant.

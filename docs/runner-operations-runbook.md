@@ -1,100 +1,51 @@
-# Private development environment operations
+# Task Runner operations
 
-## Start an environment
+## Task operation
 
-Call `open_environment` from the connected ChatGPT app and open its stable
-Environment URL. The control plane dispatches **Private Development
-Environment** with one signed generation and one opaque owner concurrency
-slot. The workflow uses the fixed `session--none` GitHub Environment. It
-claims its exact run through GitHub OIDC before loading credentials or starting
-private interfaces. It then creates an empty `$HOME/workspace`, attempts the
-optional Headscale attachment, and starts T3 through a Quick Tunnel. A failed
-Headscale attachment does not block T3 or the Session runtime.
+After authorizing `tasks:manage`, use `run_task` with executor and prompt, then
+`wait_task` with its returned Task ID. No target repository, branch, mode or
+token is a separate tool input. `cancel_task` commits intent first and cancels
+only its exact known GitHub run. A `cancelling` response is not an offline or
+rollback guarantee; query again to observe the terminal result.
 
-## Connect
+Unclaimed work expires after ten minutes even if a dispatch reply was lost.
+The claim gate rejects late startup; there is no automatic second dispatch.
+After an admitted run loses its finish callback, a nonzero `wait_task` or
+`cancel_task` can reconcile the exact run/attempt using the owner's current
+scoped GitHub authority. A zero-second wait returns stored state only. Revoked
+authorization or unavailable GitHub evidence leaves execution status uncertain;
+reconnect or query later, not with an alternate identity.
 
-When the optional Tailscale attachment succeeds:
+There is no unattended running-Task observer. With no later authorized query,
+Task state can remain active after GitHub ends the run. GitHub's sixty-minute
+job limit still bounds execution. Terminal results expire seven days after the
+original terminal commit. Do not recover results from logs or artifacts.
 
-```bash
-tailscale ssh runner@gha-<run-id>-<run-attempt>
-```
+## Legacy drain
 
-Read the private connection data after connecting:
+Production sets `LEGACY_DRAIN_MODE=true`. Only Tasks admit new execution.
+Existing authorized clients can use `list_sessions` and `read_session` for
+retained terminal data, or `close_environment` for an exact old run. Old scopes
+do not authorize Tasks. New environment, turn and queue requests are rejected;
+the old browser entry, private stream and runner routes return HTTP 410.
+Repeated close observes that exact run and returns Offline only after terminal
+GitHub evidence. An unavailable observation leaves Closing; it cannot reopen.
 
-```bash
-cat ~/private-runner-session/t3code/connection.txt
-```
+Before activating this cutover, confirm that all admitted legacy runs have
+ended. Do not cancel an unrelated run. A pending old dispatch can still arrive
+at GitHub; the Durable Object claim gate prevents it from acquiring execution
+credentials. Read requests cannot progress a reserved replacement. A late
+dispatch response can still record exact ownership for cleanup but cannot admit
+work. Cutover closes old control channels rather than preserving active native
+conversations.
 
-The file is mode `0600`. After T3 and the Environment Control Channel are ready, the authenticated
-Environment entry redirects its owning user to T3's native pairing flow. Do
-not copy pairing data to Actions output, artifacts, chat, or public tracking
-systems.
-
-Use the environment like a personal temporary Linux machine. Authenticate
-tools and clone or create repositories after connection. Call
-`close_environment` when finished. If ChatGPT is unavailable, cancel the same
-GitHub run directly. The platform run limit is the other termination path.
-
-## Failure behavior
-
-This repository follows the happy path. Native commands keep their normal
-output and exit status. Only the optional Tailscale step uses GitHub's native
-`continue-on-error`; core setup has no custom retry, timeout, fallback, or
-diagnostic-artifact layer.
-
-GitHub Actions is authoritative for current run status. The control plane only
-stores ownership, generation admission, exact run identity, private delivery,
-and close intent.
-
-If GitHub rejects dispatch before it creates a run, `open_environment` reports
-the failure and releases that generation. Do not retry while GitHub has a known
-service outage.
-
-If GitHub returns `5xx` or the response is lost, the tool returns Starting and
-does not dispatch again. The stable entry says that GitHub has not confirmed
-startup until the early OIDC claim supplies the exact run. If the workflow does
-not claim, call `close_environment`. Closing an unclaimed generation returns
-Offline and invalidates every delayed callback from that generation. A delayed
-workflow can perform checkout, but it fails its claim before executor secrets,
-Tailscale, T3, or Quick Tunnel setup.
-
-The same user action applies if Cloudflare committed the generation but the
-Worker did not receive the Durable Object response. A repeated open returns the
-same unconfirmed generation and does not infer that dispatch is safe. Close it,
-then open a new generation after the platform is healthy.
-
-If an exact run is already known and cancellation cannot be delivered,
-`close_environment` returns Closing and keeps the cancellation pending.
-Repeating close can affect only that same run. The stable Environment entry
-observes the exact run and changes to Offline after GitHub makes it terminal.
-An explicit `open_environment` call while Starting, Ready, or Closing observes
-only that exact run. If GitHub confirms it terminal, the same user request can
-create one replacement generation; a live or unavailable observation cannot
-dispatch.
-
-The Environment card uses `open_environment({ operation: "observe" })` every ten
-seconds while it waits. This mode can reconcile the exact run but cannot create
-a generation or dispatch a workflow. If the original Open first returned
-Closing, the card may issue one explicit replacement Open after terminal
-evidence. It consumes that one replacement before observing the new Starting
-run. A startup failure then becomes Offline; it never starts a second
-replacement. A Close observed from any MCP client clears the card's local Open
-intent. The Worker does not persist a user token or create a background reopen
-job. `operation` is required, so cached clients that omit it cannot mutate the
-Environment. A direct user Open uses `operation: "open"`.
-
-A run that terminates before Ready ends its generation-bound Sessions with
-`startup_failed`. A run that terminates after Ready uses `environment_ended`;
-an explicit Close uses `stopped`.
-If that exact-run lookup is temporarily unavailable, the entry request can
-fail, but it does not rewrite Environment state. Refresh it after GitHub
-recovers; do not use an empty list or a failed lookup to start another run.
-
-This is not exactly-once network delivery. GitHub does not accept an
-application idempotency key for workflow dispatch. Safety comes from an
-at-most-once dispatch attempt, the early generation gate, owner-slot workflow
-concurrency, and exact-run cancellation. No empty workflow listing or `5xx`
-response is treated as proof that GitHub created no run.
+Keep the `EnvironmentObject` binding and storage for the existing terminal
+read-retention window. No active GitHub run is not evidence that this window
+has elapsed. Verify the latest retained terminal timestamps before a
+destructive migration; earlier deletion needs explicit approval. A reviewed
+source/deployment rollback is possible while storage remains, but it is not a
+runtime fallback and must not automatically replay work. Deleting Durable
+Object data cannot be undone by a source rollback.
 
 ## Deployment credentials
 
@@ -128,14 +79,10 @@ Remove `--dry-run` only for an authorized deployment. The configured Worker,
 route, bindings and variables are owned by
 [wrangler.jsonc](../apps/chatgpt-app/wrangler.jsonc); secret usage is owned by
 the [Worker source](../apps/chatgpt-app/src/) and
-[Environment workflow](../.github/workflows/private-runner-session.yml),
+[Task workflow](../.github/workflows/run-task.yml),
 not a second configuration list in this runbook.
 
-## Task acceptance preparation
-
-This prepares the Task Runtime work tracked in
-[#114](https://github.com/Harness-X-Harness/runner/issues/114); it does not
-change the current Environment/Session product or its user-managed GitHub login.
+## Private acceptance credentials
 
 Use the approved private disposable repository recorded in ignored local
 project memory, with base branch `main` and unique `harness-acceptance/` branches
@@ -160,44 +107,30 @@ the runner consumed the correct value. Read-only API success is not
 write acceptance. Never put token values or private acceptance output in logs,
 Issues, artifacts or this runbook.
 
-Fresh `tasks:manage` consent belongs to
-[#123](https://github.com/Harness-X-Harness/runner/issues/123), after the new
-scope/tools are deployed. Provide the authorization link and wait for the user.
-Do not require another consent when the existing grant is already valid.
-
-## Task operation
-
-After authorizing `tasks:manage`, use `run_task` with executor and prompt, then
-`wait_task` with its returned Task ID. No target repository, branch, mode or
-token is a separate tool input. `cancel_task` commits intent first and cancels
-only its exact known GitHub run. A `cancelling` response is not an offline or
-rollback guarantee; query again to observe the terminal result.
-
-Unclaimed work expires after ten minutes even if a dispatch reply was lost.
-The claim gate rejects late startup; there is no automatic second dispatch.
-After an admitted run loses its finish callback, a nonzero `wait_task` or
-`cancel_task` can reconcile the exact run/attempt using the owner's current
-scoped GitHub authority. A zero-second wait returns stored state only. Revoked
-authorization or unavailable GitHub evidence leaves execution status uncertain;
-reconnect or query later, not with an alternate identity.
-
-There is no unattended running-Task observer. With no later authorized query,
-Task state can remain active after GitHub ends the run. GitHub's sixty-minute
-job limit still bounds execution. Terminal results expire seven days after the
-original terminal commit. Do not recover results from logs or artifacts.
+When `tasks:manage` consent is missing, provide the authorization link and wait
+for the user. Reuse an existing valid Task grant; do not require another consent
+only because a new version was deployed.
 
 ## Local checks
 
 ```bash
+npm --prefix apps/chatgpt-app test
+npm --prefix apps/chatgpt-app run typecheck
 bash tests/workflow-security.test.sh
-node --test tests/await-log.test.js
 shellcheck --severity=warning tests/*.sh
 actionlint
+git diff --check
 ```
 
 ## Live acceptance
 
-After a merged change affects this environment path, follow
-[Live Story: Private Development Environment](agents/live-stories/private-development-environment.md).
-It separates autonomous probes from the user-owned ChatGPT and T3 pairing gates
-and requires cleanup of the temporary runner.
+Use authenticated MCP discovery, then run a bounded prompt through
+`run_task` and read its final response through `wait_task`. Verify the exact
+`run-task.yml` execution and its terminal state. Test changed provider or
+GitHub write boundaries in the approved disposable repository; do not repeat
+unaffected acceptance matrices on every deployment.
+
+Record private evidence in ignored local project memory. Confirm that created
+runs have ended and clean up only the exact test branches, Issues and draft
+PRs. Never publish prompts, raw protocol data, full logs, keys or provider URLs.
+Static tests and configured Secret names are not end-to-end proof.

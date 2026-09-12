@@ -18,6 +18,7 @@ import {
   parseEnvironmentChannelMessage,
 } from "./environment-channel.js";
 import { publicSessionSnapshot } from "./session-public.js";
+import { isLegacyDrain, legacyStoreRequestAllowed, LEGACY_RETIRED } from "./legacy-drain.js";
 
 const STORAGE_KEY = "environment";
 const ACTIVE_STATUSES = new Set(["dispatching", "starting", "ready", "closing"]);
@@ -38,6 +39,9 @@ export class EnvironmentObject extends DurableObject {
   }
 
   async fetch(request) {
+    if (isLegacyDrain(this.env) && !legacyStoreRequestAllowed(request)) {
+      return Response.json({ error: LEGACY_RETIRED }, { status: 410 });
+    }
     const path = new URL(request.url).pathname;
 
     const streamMatch = path.match(/^\/sessions\/([^/]+)\/stream$/);
@@ -498,6 +502,10 @@ export class EnvironmentObject extends DurableObject {
   }
 
   async webSocketMessage(socket, message) {
+    if (isLegacyDrain(this.env)) {
+      socket.close(1008, "Legacy execution retired");
+      return;
+    }
     const attachment = socket.deserializeAttachment();
     const current = /** @type {any} */ (await this.ctx.storage.get(STORAGE_KEY));
     if (
