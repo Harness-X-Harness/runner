@@ -59,6 +59,13 @@ PKCE, canonical resource binding, client ID metadata documents and a compatible
 dynamic client registration endpoint. The Harness consent page and GitHub's
 user authorization page are separate boundaries.
 
+CIMD requires the Worker to fetch and validate the client's public metadata.
+If that lookup fails before consent, Harness returns a local HTTP 503 page
+without redirecting to an unverified callback or creating consent state. It
+does not bypass validation or switch to DCR automatically. Restore metadata
+access before repeating CIMD authorization; an operator can separately choose
+the existing DCR registration mode in a client that supports it.
+
 The GitHub App user flow uses S256 PKCE and browser-bound, one-time callback
 state. After GitHub returns a base user token, Harness scopes it to the runner
 repository and `Actions: write`. The base access token is not retained. The

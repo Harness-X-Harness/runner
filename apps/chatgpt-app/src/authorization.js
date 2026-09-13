@@ -17,13 +17,21 @@ const GITHUB_AUTHORIZATION_ORIGIN = "https://github.com";
 
 export async function authorizePage(request, env) {
   let authRequest;
+  let client;
   try {
     authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+    client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   } catch (error) {
+    if (isCimdFetchError(error)) {
+      return html(
+        "Authorization temporarily unavailable",
+        "<p>Harness could not verify your MCP client's public metadata. No authorization was granted.</p><p>The service operator must resolve the metadata lookup failure before you can connect.</p>",
+        503,
+      );
+    }
     if (!isAuthorizationError(error)) throw error;
     return authorizationErrorResponse(error);
   }
-  const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) return html("Authorization error", "<p>Unknown OAuth client.</p>", 400);
 
   let scopeDetails;
@@ -182,6 +190,14 @@ function isAuthorizationError(error) {
   return candidate.name === "AuthorizationError" &&
     typeof candidate.code === "string" &&
     typeof candidate.description === "string";
+}
+
+/** @param {unknown} error */
+function isCimdFetchError(error) {
+  if (!(error instanceof Error)) return false;
+  const candidate = /** @type {Error & Record<string, unknown>} */ (error);
+  return candidate.name === "CimdFetchError" &&
+    candidate.reason === "metadata_resolution_failed";
 }
 
 function oauthRedirect(redirectUri, parameters) {

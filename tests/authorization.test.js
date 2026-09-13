@@ -155,6 +155,35 @@ test("untrusted authorization redirects are rendered locally", async () => {
   assert.match(await response.text(), /redirect was not trusted/);
 });
 
+for (const failedMethod of ["parseAuthRequest", "lookupClient"]) {
+  test(`CIMD failure in ${failedMethod} creates no consent state`, async () => {
+    const states = fakeAuthorizationStates();
+    const response = await authorizePage(new Request("https://runner.example.com/authorize"), {
+      AUTHORIZATION_STATES: states.binding,
+      OAUTH_PROVIDER: {
+        parseAuthRequest: async () => authRequest,
+        lookupClient: async () => ({ clientName: "ChatGPT" }),
+        [failedMethod]: async () => {
+          throw Object.assign(new Error("private-upstream-detail"), {
+            name: "CimdFetchError", reason: "metadata_resolution_failed",
+          });
+        },
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(states.size(), 0);
+    assert.equal(response.headers.has("location"), false);
+    assert.doesNotMatch(await response.text(), /private-upstream-detail/);
+  });
+}
+
+test("unexpected authorization defects are not disguised as CIMD unavailability", async () => {
+  const defect = new Error("unexpected defect");
+  await assert.rejects(authorizePage(new Request("https://runner.example.com/authorize"), {
+    OAUTH_PROVIDER: { parseAuthRequest: async () => { throw defect; } },
+  }), (error) => error === defect);
+});
+
 test("denying consent returns access_denied without contacting GitHub", async () => {
   const states = fakeAuthorizationStates([[
     "oauth:consent:csrf-123",
