@@ -73,6 +73,11 @@ encrypted OAuth grant stores the refresh token and expiry, scoped token and
 expiry, GitHub Principal and Harness scopes. Refresh derives a new
 scoped token.
 
+GitHub callback failures distinguish code exchange from workflow-token scoping.
+Diagnostics include only the stage, upstream HTTP status when available, and a
+fixed error category. They omit credentials, callback parameters and raw upstream
+responses. Callback state is consumed once; a failed attempt needs a new authorization.
+
 There is no App JWT, installation token, PAT, OAuth `repo` scope or alternate
 identity for control-plane workflow authority. The separate fixed Agent PAT
 never enters OAuth grants or Worker callback payloads. Shared provider secrets

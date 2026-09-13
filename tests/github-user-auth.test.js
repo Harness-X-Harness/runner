@@ -269,6 +269,54 @@ test("GitHub failures expose no upstream response or credential details", async 
   );
 });
 
+test("GitHub callback distinguishes token exchange from workflow token scoping safely", async () => {
+  const authorization = {
+    code: "private-authorization-code", callback: "https://runner.example/github/callback",
+    codeVerifier: "private-verifier", payload: { authRequest: { scope: ["tasks:manage"] } },
+  };
+  for (const [stage, upstreamStatus, reason, publicTitle] of [
+    ["code_exchange", 200, "bad_verification_code", "GitHub token exchange failed"],
+    ["token_scoping", 403, "upstream_rejected", "GitHub workflow token scoping failed"],
+  ]) {
+    const logs = [];
+    const response = await completeGitHubUserAuthorization(appEnv(), authorization, async (url) => {
+      if (stage === "token_scoping" && url === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "private-base-token" });
+      }
+      return Response.json({ error: stage === "code_exchange" ? reason : "private-upstream-error",
+        error_description: "private-upstream-description", message: "private-response-body" }, { status: upstreamStatus });
+    }, { error: (...args) => logs.push(args) });
+    const text = await response.text();
+    assert.equal(response.status, 502);
+    assert.equal(text, `${publicTitle} (HTTP ${upstreamStatus}; ${reason}).`);
+    assert.deepEqual(logs, [["GitHub authorization failed", { stage, status: upstreamStatus, reason }]]);
+    assert.doesNotMatch(JSON.stringify({ text, logs }), /private-|client-secret/);
+  }
+});
+
+test("GitHub callback diagnostics omit raw HTML, network errors, and unknown OAuth values", async () => {
+  const authorization = {
+    code: "private-code", callback: "https://runner.example/github/callback",
+    codeVerifier: "private-verifier", payload: { authRequest: { scope: ["tasks:manage"] } },
+  };
+  for (const [fetchImpl, expected] of [
+    [async () => new Response("<html>private-token</html>", { status: 500 }),
+      { stage: "code_exchange", status: 500, reason: "invalid_response" }],
+    [async () => { throw new Error("private-token in a network failure"); },
+      { stage: "code_exchange", reason: "request_failed" }],
+    [async () => Response.json({ error: "private-error" }, { status: 401 }),
+      { stage: "code_exchange", status: 401, reason: "upstream_rejected" }],
+  ]) {
+    const logs = [];
+    const response = await completeGitHubUserAuthorization(appEnv(), authorization, fetchImpl,
+      { error: (...args) => logs.push(args) });
+    const text = await response.text();
+    assert.equal(response.status, 502);
+    assert.deepEqual(logs, [["GitHub authorization failed", expected]]);
+    assert.doesNotMatch(JSON.stringify({ text, logs }), /private-|client-secret|<html>/);
+  }
+});
+
 test("deployment uses only GitHub App user authorization and no installation-token credentials", async () => {
   const files = await Promise.all(
     [

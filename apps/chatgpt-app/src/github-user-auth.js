@@ -7,6 +7,19 @@ const AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const MINIMUM_TOKEN_TTL = 60;
 const AUTHORIZATION_KIND = "github_app_scoped";
+const SAFE_OAUTH_ERRORS = new Set([
+  "incorrect_client_credentials", "redirect_uri_mismatch",
+  "bad_verification_code", "unverified_user_email",
+]);
+
+class GitHubTokenError extends Error {
+  constructor(message, response, body) {
+    super(message);
+    this.status = response.status;
+    this.reason = !body ? "invalid_response"
+      : SAFE_OAUTH_ERRORS.has(body.error) ? body.error : "upstream_rejected";
+  }
+}
 
 export function githubUserAuthorizationUrl(env, callback, state, codeChallenge) {
   const url = new URL(AUTHORIZE_URL);
@@ -67,7 +80,7 @@ export async function scopeGitHubUserToken(
   );
   const scoped = await response.json().catch(() => undefined);
   if (!response.ok || typeof scoped?.token !== "string") {
-    throw new Error("GitHub user token scoping failed");
+    throw new GitHubTokenError("GitHub user token scoping failed", response, scoped);
   }
   return scoped;
 }
@@ -81,6 +94,7 @@ export async function completeGitHubUserAuthorization(
   const { authRequest } = githubAuthorization.payload;
   let token;
   let scopedToken;
+  let stage = "code_exchange";
   try {
     token = await exchangeGitHubUserCode(
       env,
@@ -89,9 +103,18 @@ export async function completeGitHubUserAuthorization(
       githubAuthorization.codeVerifier,
       fetchImpl,
     );
+    stage = "token_scoping";
     scopedToken = await scopeGitHubUserToken(env, token.access_token, fetchImpl);
-  } catch {
-    return new Response("GitHub token exchange failed", { status: 502 });
+  } catch (error) {
+    const detail = error instanceof GitHubTokenError
+      ? { status: error.status, reason: error.reason }
+      : { reason: "request_failed" };
+    // Never log the raw exception, request, token, or upstream response body.
+    logger.error("GitHub authorization failed", { stage, ...detail });
+    const title = stage === "code_exchange"
+      ? "GitHub token exchange failed" : "GitHub workflow token scoping failed";
+    const status = "status" in detail ? `HTTP ${detail.status}; ` : "";
+    return new Response(`${title} (${status}${detail.reason}).`, { status: 502 });
   }
 
   let profile;
@@ -255,7 +278,7 @@ async function requestGitHubUserToken(parameters, fetchImpl) {
   });
   const token = await response.json().catch(() => undefined);
   if (!response.ok || !token?.access_token) {
-    throw new Error("GitHub user token exchange failed");
+    throw new GitHubTokenError("GitHub user token exchange failed", response, token);
   }
   return token;
 }
