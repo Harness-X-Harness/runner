@@ -110,11 +110,11 @@ native tool event identifying a timeout, and then releases a late result. This
 proves a configured boundary, not the default timeout or a full Environment
 lifetime. The ordinary `wait` modes use ACP-supplied MCP server configuration.
 
-`long-wait` configures `tool_timeout_sec = 120` in the same temporary native
+`long-wait` configures `tool_timeout_sec = 660` in the same temporary native
 configuration. After actual tool entry, it requires the original prompt to remain
-pending for at least 65 seconds, then consume an unpredictable result with exactly
-one target-tool call. This mode has a 180-second outer budget; other modes retain
-their 90-second prompt budget. This crosses
-Codex's [documented default 60-second tool timeout](https://learn.chatgpt.com/docs/config-file/config-reference),
-but does not establish another provider's default or a full Environment lifetime.
+pending for at least 600 seconds, then consume an unpredictable result with exactly
+one target-tool call. This mode has a 720-second prompt budget to allow tool discovery
+and final response; other modes retain their 90-second prompt budget. The acceptance
+target is ten minutes, not a measurement of a provider's default timeout or proof of
+the full Environment lifetime. It does not require crossing Grok's 6000-second default.
 No daily user configuration is changed.
