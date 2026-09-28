@@ -151,7 +151,7 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
     } catch { controller.abort(); return error(403, -32602, 'Task subscription unavailable'); }
   }
   const transport = new PerRequestHTTPServerTransport({ classification: route.classification,
-    responseMode: input.method === 'subscriptions/listen' ? 'sse' : 'auto', keepAliveMs: 0 });
+    responseMode: input.method === 'subscriptions/listen' ? 'sse' : 'auto' });
   transport.onclose = () => controller.abort();
   transport.onmessage = () => {
     void Promise.resolve().then(async () => {
