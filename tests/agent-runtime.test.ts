@@ -9,6 +9,15 @@ import { withAcpAgent } from "../.github/actions/agent-runtime/acp-client.ts";
 import { readAgentTurn, readFinalResponse } from "../.github/actions/agent-runtime/final-response.ts";
 import { methods } from "../.github/actions/agent-runtime/node_modules/@agentclientprotocol/sdk/dist/acp.js";
 import { EnvironmentRuntime } from "../.github/actions/agent-runtime/environment-runtime.ts";
+import { providerProcess } from "../.github/actions/agent-runtime/provider-process.ts";
+
+test("Codex launch enables native user questions outside plan mode", () => {
+  const process = providerProcess("codex", "/workspace", {});
+  const config = JSON.parse(process.env.CODEX_CONFIG!);
+  assert.equal(config["features.default_mode_request_user_input"], true);
+  assert.equal(config.approval_policy, "never");
+  assert.equal(config.sandbox_mode, "danger-full-access");
+});
 
 const fixturePath = fileURLToPath(new URL("../.github/actions/agent-runtime/fixtures/agent.ts", import.meta.url));
 const runtime = (executor: Executor) => new AgentRuntime(executor, { env: {}, agentProcess: {
