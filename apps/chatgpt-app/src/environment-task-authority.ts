@@ -43,7 +43,7 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
   return {
     async tools() {
       executionPrincipal(await authorize(), ENVIRONMENT_SCOPE);
-      return { resultType: "complete", tools: environmentTools() };
+      return { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: environmentTools() };
     },
     async resources(cursor) {
       if (cursor !== undefined) throw new Error("INVALID_RESOURCE_CURSOR");

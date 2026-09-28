@@ -84,6 +84,8 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal((await rpc("ping", {}, false)).result?.resultType, "complete");
   assert.equal(reservations, 0);
   const catalog = await rpc("tools/list", {}, false);
+  assert.equal(catalog.result?.ttlMs, 0);
+  assert.equal(catalog.result?.cacheScope, "private");
   const tools = z.array(z.looseObject({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })).parse(catalog.result?.tools);
   assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "open_environment"]);
   assert.equal(reservations, 0);
@@ -119,12 +121,17 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
     { code: -32602, message: "Task not found or no longer available" });
   const resourceUris = (response: Awaited<ReturnType<typeof rpc>>) =>
     z.array(z.object({ uri: z.string() })).parse(response.result?.resources).map(item => item.uri);
-  assert.deepEqual(resourceUris(await rpc("resources/list", {}, false, freshClient)), [uri]);
+  const resourceCatalog = await rpc("resources/list", {}, false, freshClient);
+  assert.deepEqual(resourceUris(resourceCatalog), [uri]);
+  assert.equal(resourceCatalog.result?.ttlMs, 0);
+  assert.equal(resourceCatalog.result?.cacheScope, "private");
   assert.deepEqual(resourceUris(await rpc("resources/list", {}, false, otherOwner)), []);
   assert.ok((await rpc("resources/read", { uri }, false, otherOwner)).error);
   assert.ok((await rpc("resources/read", { uri: `${uri}?owner=123` }, false)).error);
   assert.ok((await rpc("resources/list", { cursor: "invented" }, false)).error);
   const read = await rpc("resources/read", { uri }, false, freshClient);
+  assert.equal(read.result?.ttlMs, 0);
+  assert.equal(read.result?.cacheScope, "private");
   const contents = z.array(z.object({ text: z.string() })).parse(read.result?.contents);
   assert.equal(JSON.parse(contents[0]!.text).status, "ready");
   assert.ok(!JSON.stringify(read).includes("PRIVATE_RUNTIME"));
