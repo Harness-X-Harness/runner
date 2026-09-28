@@ -185,7 +185,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   }>;
   assert.equal((await readEnvironment()).status, "opening");
   assert.equal((await readEnvironment()).expiresAt, null);
-  assert.equal((await call(environmentId, { ownerId: "2" }, "read-environment")).status, 409);
+  assert.equal(await (await call(environmentId, { ownerId: "2" }, "read-environment")).json(), null);
   assert.deepEqual(await (await call("global", { ownerId: "1" }, "list-environments")).json(), [environmentId]);
   assert.deepEqual(await (await call("global", { ownerId: "2" }, "list-environments")).json(), []);
   assert.equal((await call("other", { ownerId: "1" }, "list-environments")).status, 409);
@@ -410,7 +410,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(await nextOutput(), streamed);
   await outputReader.cancel();
   assert.deepEqual(await (await call(environmentId, operation, "read-output")).json(), streamed);
-  assert.equal((await call(environmentId, { ...operation, ownerId: "2" }, "read-output")).status, 409);
+  assert.equal(await (await call(environmentId, { ...operation, ownerId: "2" }, "read-output")).json(), null);
   const beforeResult = await (await call(environmentId, operation, "read-operation")).json() as { result?: unknown };
   assert.equal(beforeResult.result, undefined);
   const finalOutput = { revision: 3, text: "LIVE_OUTPUT\nFINAL_OUTPUT", truncated: false };
@@ -510,7 +510,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   for (const changed of [{ runId: "124" }, { runAttempt: "2" }, { repository: "other/runner" }, { ownerId: "2" }]) {
     assert.equal((await call(environmentId, { ...execution, ...changed }, "bind")).status, 409);
   }
-  assert.equal((await call(environmentId, { ...input, ownerId: "2" }, "close")).status, 409);
+  assert.equal(await (await call(environmentId, { ...input, ownerId: "2" }, "close")).json(), null);
   assert.equal((await readEnvironment()).status, "ready");
   const idleAfterResult = await (await call(environmentId, input, "alarm-time")).json() as number;
   assert.ok(idleAfterResult < expectedDeadline);
@@ -638,9 +638,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal(await lifecycleTask(environmentId, "1", "open"), null);
   assert.equal(await lifecycleTask(environmentId, "1", "close"), null);
   assert.equal(await (await call(environmentId, operation, "read-operation")).json(), null);
-  assert.equal((await call(environmentId, operation, "read-output")).status, 409);
+  assert.equal(await (await call(environmentId, operation, "read-output")).json(), null);
   assert.equal((await call(environmentId, operation, "reserve-operation")).status, 409);
-  assert.equal((await call(environmentId, input, "read-environment")).status, 409);
+  assert.equal(await (await call(environmentId, input, "read-environment")).json(), null);
   assert.ok(await (await call(environmentId, input, "content-count")).json() as number > 0);
   assert.equal((await call(environmentId, input, "alarm")).status, 204);
   assert.equal(await (await call(environmentId, input, "content-count")).json(), 0);

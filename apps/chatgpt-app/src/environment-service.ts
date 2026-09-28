@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { executionPrincipal, executionToken } from "./execution-authority.ts";
 import type { EnvironmentObject } from "./environment-object.ts";
+import { TaskError } from "../../../shared/task-errors.ts";
 
 // A fresh product scope. Neither legacy environments:manage nor tasks:manage implies it.
 import { ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
@@ -32,6 +33,7 @@ export async function closeEnvironment(env: EnvironmentService, props: unknown, 
   const object = env.ENVIRONMENTS.getByName(environmentId);
   // Preserve stop intent even when the current external credential has expired.
   const status = await object.requestClose(ownerId);
+  if (status === null) throw new TaskError("ENVIRONMENT_NOT_FOUND");
   if (status === "closed") return { environmentId, status };
   return { environmentId, status: await object.closeExecution(ownerId, executionToken(props)) };
 }

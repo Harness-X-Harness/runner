@@ -13,27 +13,31 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   let reservations = 0;
   let lifecycle: EnvironmentSnapshot["status"] = "ready";
   let readFailure = false;
+  let closeExecutions = 0;
   const env = { ENVIRONMENT_ADMISSION: { getByName(name: string) {
     assert.equal(name, "global");
     return { async list(owner: string) { return owner === "123" ? [environmentId] : []; } };
   } }, ENVIRONMENTS: { getByName(id: string) {
     assert.equal(id, environmentId);
     return {
-      async readEnvironment(owner: string): Promise<EnvironmentSnapshot> {
-        if (owner !== "123" || readFailure) throw new Error("unavailable");
+      async readEnvironment(owner: string): Promise<EnvironmentSnapshot | null> {
+        if (readFailure) throw new Error("PRIVATE_STORAGE_FAILURE");
+        if (owner !== "123") return null;
         return { environmentId, executor: "codex", status: lifecycle, createdAt: 1, expiresAt: 1000, activeTaskId: null };
       },
       async readOutput(owner: string, taskId: string) {
-        if (owner !== "123" || !records.has(taskId)) throw new Error("unavailable");
+        if (readFailure) throw new Error("PRIVATE_STORAGE_FAILURE");
+        if (owner !== "123" || !records.has(taskId)) return null;
         return { revision: 2, text: "OWNER_VISIBLE", truncated: false };
       },
       async initialize(): Promise<never> { throw new Error("unexpected open"); },
       async dispatchExecution(): Promise<never> { throw new Error("unexpected dispatch"); },
-      async requestClose(owner: string): Promise<"closing" | "closed"> {
-        assert.equal(owner, "123");
+      async requestClose(owner: string): Promise<"closing" | "closed" | null> {
+        if (readFailure) throw new Error("PRIVATE_STORAGE_FAILURE");
+        if (owner !== "123") return null;
         return lifecycle === "closed" ? "closed" : "closing";
       },
-      async closeExecution(): Promise<"closing"> { return "closing"; },
+      async closeExecution(): Promise<"closing"> { closeExecutions++; return "closing"; },
       async readLifecycleTask(owner: string, kind: "open" | "close") {
         return owner === "123" ? lifecycleTask(environmentId, kind,
           { createdAt: 1, updatedAt: 2, status: lifecycle === "closed" ? "completed" : "working" }) : null;
@@ -142,7 +146,14 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(resourceCatalog.result?.ttlMs, 0);
   assert.equal(resourceCatalog.result?.cacheScope, "private");
   assert.deepEqual(resourceUris(await rpc("resources/list", {}, false, otherOwner)), []);
-  assert.ok((await rpc("resources/read", { uri }, false, otherOwner)).error);
+  const unavailable = { code: -32602, message: "Resource not found or no longer available" };
+  assert.deepEqual((await rpc("resources/read", { uri }, false, otherOwner)).error, unavailable);
+  const deniedClose = await rpc("tools/call", { name: "close_environment", arguments: { environmentId } }, true, otherOwner);
+  assert.equal(deniedClose.error, undefined);
+  assert.equal(deniedClose.result?.resultType, "complete");
+  assert.equal(deniedClose.result?.isError, true);
+  assert.equal(lifecycle, "ready");
+  assert.equal(closeExecutions, 0);
   assert.ok((await rpc("resources/read", { uri: `${uri}?owner=123` }, false)).error);
   assert.ok((await rpc("resources/list", { cursor: "invented" }, false)).error);
   const read = await rpc("resources/read", { uri }, false, freshClient);
@@ -155,9 +166,19 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   const output = await rpc("resources/read", { uri: outputUri }, false, freshClient);
   const outputContents = z.array(z.object({ text: z.string() })).parse(output.result?.contents);
   assert.deepEqual(JSON.parse(outputContents[0]!.text), { revision: 2, text: "OWNER_VISIBLE", truncated: false });
-  assert.ok((await rpc("resources/read", { uri: outputUri }, false, otherOwner)).error);
+  assert.deepEqual((await rpc("resources/read", { uri: outputUri }, false, otherOwner)).error, unavailable);
+  assert.deepEqual((await rpc("resources/read", {
+    uri: `harness://tasks/task_${"a".repeat(32)}_${"0".repeat(32)}/output`,
+  }, false)).error, unavailable);
   readFailure = true;
-  assert.ok((await rpc("resources/list", {}, false)).error);
+  for (const [method, arguments_] of [
+    ["resources/list", {}], ["resources/read", { uri }], ["resources/read", { uri: outputUri }],
+    ["tools/call", { name: "close_environment", arguments: { environmentId } }],
+  ] as const) {
+    const failure = await rpc(method, arguments_);
+    assert.deepEqual(failure.error, { code: -32603, message: "Task request failed" });
+    assert.doesNotMatch(JSON.stringify(failure), /PRIVATE_STORAGE_FAILURE/);
+  }
   readFailure = false;
   // Close can commit between membership lookup and lifecycle read.
   lifecycle = "closing";
