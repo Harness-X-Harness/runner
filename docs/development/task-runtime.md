@@ -6,27 +6,25 @@ repository, manage GitHub authorization, create branches or pull requests, or
 own Task state. The Task layer owns lifecycle; the Agent performs repository
 work from the prompt with its configured credentials.
 
-The two provider clients and JSON-RPC process transport live in
-[agent-runtime](../../.github/actions/agent-runtime/). Only the one-shot runtime uses these clients. Product Task state remains
-outside them; native conversation identifiers never become public Task IDs.
-
-Codex App Server omits the JSON-RPC version member on its wire envelopes; Grok
-ACP uses JSON-RPC 2.0. Each client configures its one transport contract, with
-no protocol fallback. Codex's `thread/start.sandbox` uses `danger-full-access`,
-while `turn/start.sandboxPolicy.type` uses `dangerFullAccess`. These are distinct
-native schema fields, not a shared Harness sandbox string.
+The TypeScript runtime in [agent-runtime](../../.github/actions/agent-runtime/)
+uses the official ACP SDK for both providers. Codex uses the official Codex ACP
+adapter with `CODEX_PATH=codex`, so the workflow's installed CLI is authoritative;
+Grok exposes ACP directly. There is no handwritten JSON-RPC transport or provider
+fallback. Product Task state remains outside this runtime; native conversation
+identifiers never become public Task IDs.
 
 ## Final response
 
-- Codex: consume authoritative completed `agentMessage` items, exclude explicit
-  `commentary`, and wait for success of the exact native turn. The optional
-  `phase` field uses the documented `commentary` / `final_answer` values.
+- Codex: select the last message by ACP message identity and the adapter's
+  `codex.phase` metadata; exclude commentary and adapter notices.
 - Grok: use ACP text chunks within each model-response boundary. The xAI
   `response_completed` update ends one response; `session/prompt` success ends
   the operation. Return only the last completed response, not the concatenation
   of earlier commentary. Both documented xAI session-notification carriers are
-  supported. Missing completion boundaries are a protocol error, not a reason
-  to capture CLI stdout.
+  supported. A small input transform maps these boundaries into standard ACP
+  session updates with metadata. The SDK ActiveSession queue orders text,
+  boundaries and stop. Missing boundaries are a protocol error, not a reason
+  to capture CLI stdout or add a settling delay.
 
 Native completion means the provider succeeded with non-empty final text. It
 does not prove that the prompt's business objective succeeded. Progress,
@@ -40,13 +38,16 @@ and Grok's [native response notifications](https://github.com/xai-org/grok-build
 Command and file approvals follow the autonomous policy. New human questions
 or MCP elicitation fail with `USER_INPUT_REQUIRED`; the runtime has no interactive
 continuation. Provider startup, protocol and execution failures use the shared
-[safe error definitions](../../shared/task-errors.js). Only code, safe message
+[safe error definitions](../../shared/task-errors.ts). Only code, safe message
 and retryable are serialized. There is no provider or credential fallback.
 
-The runtime closes its child after success or failure. Transport cleanup sends
-SIGTERM, allows one second, then sends SIGKILL if the child has not exited.
-The runtime's outer cleanup bound is 1.5 seconds; a cleanup failure cannot
-replace the original result or error.
+The SDK runs in a Node Worker whose stdout/stderr are drained but never forwarded
+to Action logs. Only the result or a canonical error crosses to the parent.
+This includes diagnostics emitted internally by dependencies; it is not a
+permissions sandbox. On close, the connection receives an abort. Child cleanup
+first allows EOF-based shutdown, sends SIGTERM after one second and SIGKILL
+after two. Explicit close has a four-second worker termination bound. A result
+is returned only after the runtime worker exits.
 
 ## Task state
 
@@ -63,7 +64,7 @@ finish replay succeeds without extending retention; another execution or a
 conflicting outcome is rejected. A SHA-256 digest distinguishes complete final
 texts even when their retained prefixes match.
 
-The shared [Task contract](../../shared/task-contract.js) owns these limits:
+The shared [Task contract](../../shared/task-contract.ts) owns these limits:
 
 - Prompt: non-empty, at most 64 KiB in UTF-8; oversized input is rejected.
 - Final response: non-empty, at most 64 KiB retained. Truncation ends at a
@@ -88,7 +89,7 @@ Session, event log or stream. It subscribes before its first read.
 ## Lifecycle model boundary
 
 [TaskLifecycle](../../formal/TaskLifecycle.tla) is a finite requirements model,
-not a proof of JavaScript refinement or external delivery. Its consistency
+not a proof of implementation refinement or external delivery. Its consistency
 boundary is each committed per-Task storage transaction. Three execution values
 distinguish another run and a new attempt of the same run; two principals
 distinguish the owner from another caller. Payload bytes and numeric clock
@@ -107,7 +108,7 @@ There are no symmetry
 reductions or state constraints. Stuttering represents valid quiescence, not
 deadlock freedom of the external system.
 
-[Task state tests](../../tests/task-state.test.js) force the matching cancel/claim
+[Task state tests](../../tests/task-state.test.ts) force the matching cancel/claim
 and finish/cancel orders, foreign identities and identical/conflicting replay.
 They also check private serialization, Unicode bounds, wait subscription and
 seven-day expiry. These tests do not establish production OIDC, GitHub delivery,
@@ -160,8 +161,10 @@ the job's `GITHUB_TOKEN`. This is non-inheritance, not isolation from another
 process running as the same user. The Agent intentionally has the fixed token's
 repository rights; user OAuth authority is only for controlling the runner.
 
-The [small Node Action](../../.github/actions/task-runtime/) handles private
-protocol data, not installation orchestration. Its claim and result files use
+The [small TypeScript Action](../../.github/actions/task-runtime/) runs directly
+on Node 24, without a generated JavaScript entry or build wrapper. Claim has no
+installed package dependency; provider packages are needed only for execution.
+It handles private protocol data, not installation orchestration. Its claim and result files use
 0600 permissions inside a 0700 directory under `RUNNER_TEMP`. The workspace is
 inside that directory; tool homes are not relocated. Only the validated provider
 name is an Action output. Prompts, final text, credentials and protocol payloads

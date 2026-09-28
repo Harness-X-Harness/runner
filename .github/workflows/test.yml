@@ -20,11 +20,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Install Worker dependencies
         shell: bash
         run: npm ci --prefix apps/chatgpt-app
+
+      - name: Install Agent runtime dependencies
+        run: npm ci --prefix .github/actions/agent-runtime
 
       - name: Install actionlint
         shell: bash
@@ -38,18 +41,14 @@ jobs:
         shell: bash
         run: ./actionlint -color
 
-      - name: ShellCheck scripts and tests
-        shell: bash
-        run: shellcheck --severity=warning tests/*.sh
+      - name: Type-check Worker and shared runtime source
+        working-directory: apps/chatgpt-app
+        run: npx tsc --noEmit
 
-      - name: Test workflow security contract
+      - name: Test TypeScript source
         shell: bash
-        run: bash tests/workflow-security.test.sh
+        run: node --test tests/*.test.ts
 
-      - name: Type-check Worker JavaScript
-        shell: bash
-        run: npm --prefix apps/chatgpt-app run typecheck
-
-      - name: Test Node actions
-        shell: bash
-        run: node --test tests/*.test.js
+      - name: Type-check Agent runtime and tests
+        working-directory: .github/actions/agent-runtime
+        run: npx tsc --noEmit

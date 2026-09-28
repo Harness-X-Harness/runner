@@ -36,6 +36,9 @@ jobs:
         shell: bash
         run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
+      - name: Install Agent runtime
+        run: npm ci --prefix .github/actions/agent-runtime --omit=dev
+
       - name: Install Grok
         if: steps.claim.outputs.executor == 'grok'
         shell: bash
