@@ -37,8 +37,8 @@ type WorkerEnvironment = TaskEnv & AuthorizationEnvironment & Parameters<typeof 
 
 export class McpApi extends WorkerEntrypoint<WorkerEnvironment, Record<string, unknown>> {
   fetch(request: Request): Promise<Response> {
-    // Temporary acceptance boundary: fresh consent selects the new product.
-    // Remove old admission after Environment acceptance; never retry across products.
+    // Fresh consent selects Environment; old grants can only drain/read retained Tasks.
+    // Never retry across products or reinterpret an existing grant.
     if (Array.isArray(this.ctx.props.oauthScopes) && this.ctx.props.oauthScopes.includes(ENVIRONMENT_SCOPE)) {
       return handleEnvironmentTaskRequest(request, this.env);
     }

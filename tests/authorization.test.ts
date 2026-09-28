@@ -64,8 +64,8 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("set-cookie") ?? "", /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
-  assert.match(body, /Run and control code tasks/);
-  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /Read and stop retained code tasks/);
+  assert.match(body, /cannot start new work/);
   assert.match(body, /tasks:manage/);
   assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="allow")[^>]*>Continue with GitHub<\/button>/);
   assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="deny")[^>]*>Cancel<\/button>/);
@@ -100,8 +100,8 @@ test("initial consent displays and preserves every requested capability", async 
   );
 
   const body = await response.text();
-  assert.match(body, /Run and control code tasks/);
-  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /Read and stop retained code tasks/);
+  assert.match(body, /cannot start new work/);
   assert.match(body, /Task permissions/);
   assert.match(
     body,
@@ -116,7 +116,7 @@ test("initial consent displays and preserves every requested capability", async 
   ]);
 });
 
-test("Task consent names the fixed Agent authority and grants no legacy scope", async () => {
+test("retained Task consent excludes new work and grants no Environment authority", async () => {
   const states = fakeAuthorizationStates();
   const response = await authorizePage(new Request("https://runner.example.com/authorize"), {
     ...baseEnv,
@@ -129,8 +129,8 @@ test("Task consent names the fixed Agent authority and grants no legacy scope", 
   });
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /Run and control code tasks/);
-  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /Read and stop retained code tasks/);
+  assert.match(body, /cannot start new work/);
   assert.doesNotMatch(body, /Manage coding sessions|Manage private development environments/);
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);

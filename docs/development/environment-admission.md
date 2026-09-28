@@ -29,11 +29,11 @@ service is registered by adding this model.
 
 `environment-service.ts` composes authenticated open/close with the Environment
 Object. It requires the fresh `environments:use` scope; neither current Task nor
-legacy Environment grants imply this permission. During isolated acceptance,
-fresh consent selects the Environment MCP handler at the existing endpoint;
-Task-only grants keep the current Task handler. There is no cross-product retry.
-Remove old admission after new-product acceptance and drain, retaining known
-old results only for their existing retention period. The service shares Principal and expiring scoped
+legacy Environment grants imply this permission. Fresh consent selects the
+Environment MCP handler at the existing endpoint. Task-only grants keep only
+observation and stop for retained one-shot Tasks; new admission is removed.
+There is no cross-product retry. Retained results remain available for their
+existing retention period. The service shares Principal and expiring scoped
 Actions-token validation with Task services. Open validates authorization before
 storage or GitHub effects. A supplied idempotency key derives an owner-scoped
 128-bit Environment ID; the immutable creation record rejects executor conflicts.

@@ -7,7 +7,7 @@ It uses Node's process API, not an Agent or a shell wrapper.
 The public `command` tool reaches this primitive through the Environment Task
 authority and its authenticated runner connection. The Worker selects that
 authority for grants with `environments:use`; Task-only grants keep the separate
-one-shot handler until its admission and retention conditions permit retirement.
+one-shot observation/stop handler until its retention conditions permit retirement.
 The tool schema requires `environmentId`, nonempty `argv` and a positive
 `timeoutSeconds`; `cwd` defaults to the workspace. Tool schemas in
 `environment-tools.ts` share the service validators and are the input authority.

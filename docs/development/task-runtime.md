@@ -181,11 +181,13 @@ terminal state is the evidence for later Task reconciliation, not log scraping.
 
 ## MCP and convergence
 
-`run_task({executor, prompt})`, `wait_task({taskId, timeoutSeconds?})` and
-`cancel_task({taskId})` require `tasks:manage` and the owning GitHub Principal.
+This is the retained one-shot Task contract, not the Environment execution path.
+New admission and its dispatch adapter are removed. Only
+`wait_task({taskId, timeoutSeconds?})` and `cancel_task({taskId})` remain, requiring
+`tasks:manage` and the owning GitHub Principal.
 The scoped GitHub App user token remains the only control-plane execution
-authority. It is not the fixed Agent token. Discovery marks arbitrary Agent
-work as destructive and open-world; wait is read-only. There is no Task widget,
+authority. It is not the fixed Agent token. Cancellation is destructive;
+wait is read-only. There is no retained Task widget,
 cursor, event stream, listing, interactive continuation or automatic rerun.
 
 Creation starts a ten-minute unclaimed deadline. One per-Task alarm expires
@@ -196,10 +198,9 @@ intent was already committed. The same alarm handles seven-day terminal
 retention; claim removes the startup alarm. Neither cancellation nor a repeat
 read resets a deadline.
 
-Dispatch sends only Task ID. A definitive rejection fails that Task. A network
-failure, timeout or server error retains the queued Task for a late claim or
-expiry; it never restores a dispatch budget. A new `run_task` call creates new
-work and is not an idempotent retry of the previous call.
+Previously accepted uncertain dispatch retains its queued Task for a late claim
+or expiry. It never restores a dispatch budget. An old cached `run_task` call
+now fails without creating state or dispatching work.
 
 A nonzero wait and each cancellation of a known active execution query only
 the bound GitHub repository/run/attempt using the caller's current authority.

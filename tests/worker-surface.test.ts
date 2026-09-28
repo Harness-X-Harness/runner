@@ -100,7 +100,7 @@ for (const failedLookup of [1, 2]) {
         { headers: { "content-type": "application/json", "cache-control": "no-store" } }).times(2);
     const recovered = await mf.dispatchFetch(authorizeUrl());
     assert.equal(recovered.status, 200);
-    assert.match(await recovered.text(), /Run and control code tasks/);
+    assert.match(await recovered.text(), /Read and stop retained code tasks/);
     fetchMock.assertNoPendingInterceptors();
   });
 }

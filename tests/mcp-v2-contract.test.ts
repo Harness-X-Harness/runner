@@ -65,7 +65,7 @@ test("OAuth resource metadata binds the control plane to /mcp", async () => {
   assert.doesNotMatch(source, /resourceMatchOriginOnly/);
 });
 
-test("MCP serves only Task tools to modern and legacy stateless clients", async () => {
+test("retained Tasks serve only observation and stop to modern and legacy stateless clients", async () => {
   async function request(method: string, params: { name?: string; uri?: string; arguments?: Record<string, unknown> } = {}, modern = true) {
     const props = { githubUserId: "test-user", oauthScopes: ["tasks:manage"] };
     return handleMcpRequest(new Request("https://runner.example/mcp", {
@@ -98,7 +98,7 @@ test("MCP serves only Task tools to modern and legacy stateless clients", async 
   const tools = z.object({ result: z.object({ tools: z.array(z.looseObject({
     name: z.string(), securitySchemes: z.unknown(), _meta: z.record(z.string(), z.unknown()),
   })) }) }).parse(await modern.json()).result.tools;
-  assert.deepEqual(tools.map(t=>t.name), ["run_task", "wait_task", "cancel_task"]);
+  assert.deepEqual(tools.map(t=>t.name), ["wait_task", "cancel_task"]);
   for (const tool of tools) {
     assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["tasks:manage"] }]);
     assert.equal(tool._meta.ui, undefined);

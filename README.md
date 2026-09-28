@@ -1,42 +1,50 @@
-# Harness X Harness Task Runner
+# Harness X Harness
 
 [![Codex auth](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/codex-auth.yml)
 [![Grok auth](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml/badge.svg)](https://github.com/Harness-X-Harness/runner/actions/workflows/grok-auth.yml)
 
-Give Codex or Grok a prompt. Harness starts one temporary GitHub-hosted Ubuntu
-runner and returns the Agent's final response. Put repository access, issues,
-code changes and PR instructions in the prompt; the Agent performs that work.
-Harness does not impose a clone, test, commit or PR pipeline.
+Open a temporary GitHub-hosted Ubuntu Environment. Run commands directly or
+send multiple prompts to Codex or Grok in the same workspace and native session.
+The Agent handles repository access, issues, code and PRs; Harness does not
+impose a clone, test, commit or PR pipeline.
 
 ## Use from an MCP client
 
-Connect to `https://runners.trustedtunnel.app/mcp` and authorize `tasks:manage`.
+Connect to `https://runners.trustedtunnel.app/mcp` and authorize `environments:use`.
+Use a client implementing MCP 2026-07-28 Tasks and subscriptions. This release
+targets SDK clients; tool discovery alone does not prove desktop-host Task,
+resource-display or model-continuation support. There is no polling fallback.
 
 ```text
-run_task({ executor: "codex", prompt: "Read owner/repo and explain its architecture. Do not change files." })
-wait_task({ taskId: "<returned Task ID>" })
-cancel_task({ taskId: "<returned Task ID>" })
+open_environment({ executor: "codex", idempotencyKey: "<unique creation key>" })
+command({ environmentId: "<ready Environment ID>", argv: ["pwd"], timeoutSeconds: 10 })
+agent({ environmentId: "<ready Environment ID>", prompt: "Explain this workspace. Do not change files." })
+close_environment({ environmentId: "<Environment ID>" })
 ```
 
-Use `codex` or `grok`. Save the returned Task ID: there is no Task list API.
-Wait returns a snapshot, with final text or a safe error when terminal. It can
-wait up to 25 seconds; repeat it if work is still active. A new `run_task` call
-starts new work, not a retry of the previous Task.
+Use `codex` or `grok`. Long operations return a standard Task handle. Subscribe
+to changes, answer requested input with `tasks/update`, and request a stop with
+`tasks/cancel`. Reconnect reads current state without rerunning work.
+`resources/list` finds your live Environments; linked resources expose private
+state and bounded output. Resource notifications trigger reads, not token streams.
 
-There is no Task widget, stream, conversation, T3 link or automatic resubmission.
-An existing grant with `tasks:manage` remains valid. Older Environment/Session
-grants need new consent; refresh does not add Task authority.
+Each Environment has one active Agent/command slot. Later Agent calls continue
+the same native session. Reuse the same idempotency key and input for uncertain
+submission; a new key is new work. There is no T3, Lark or widget dependency.
+Old `tasks:manage` grants only read/stop previously accepted one-shot Tasks through
+`wait_task`/`cancel_task`; `run_task` no longer accepts work. Environment access
+needs fresh consent, not token refresh. See the [MCP contract](docs/chatgpt-app.md).
 
 ## Runtime and credentials
 
-The stable Cloudflare Worker authenticates the MCP user, stores one private
-Task in a Durable Object and dispatches [run-task.yml](.github/workflows/run-task.yml).
-GitHub OIDC binds claim and finish to the exact owner, workflow, run and attempt.
+The stable Cloudflare Worker authenticates the Principal, stores Environment
+state in Durable Objects and dispatches [run-environment.yml](.github/workflows/run-environment.yml).
+GitHub OIDC binds the runner connection to the exact owner, workflow, run and attempt.
 
 The workflow is declarative and happy-path. It installs only the selected CLI
 through its current official installer and uses its default native home. There
 is no tool cache, alternate installer, custom tool home or shell-wrapper layer.
-A small Node Action handles private native protocol input and output.
+A TypeScript runtime uses the standard ACP SDK for native Agent interaction.
 
 Configure these repository secrets:
 
@@ -65,15 +73,18 @@ keys are secrets, not public configuration or Task results.
 
 ## Lifetime and cancellation
 
-Unclaimed work expires after ten minutes. GitHub bounds each job to sixty
-minutes. Cancellation is a request to stop, not rollback; an accepted final
-result or failure can win the race. Terminal results are owner-only and expire
-after seven days.
+Startup is bounded to ten minutes. GitHub bounds each job to sixty minutes;
+installation consumes that budget and the runtime reserves cleanup time.
+An idle Environment closes after fifteen minutes. Input and CI waits still
+consume the hard lifetime. Admission allows one Environment per Principal and
+four globally; this is platform policy, not a measured GitHub quota.
 
-If a runner loses its finish callback, a later nonzero wait can observe the
-exact GitHub run and reconcile its terminal status. This needs the owner's
-valid GitHub authority. There is no permanent background observer or result
-recovery from logs. See the [Task contract](docs/development/task-runtime.md).
+Cancellation is intent, not rollback. Closing completes only after stop and
+capacity release are confirmed. Closed Environments leave live discovery;
+known Task/state/output resources remain owner-private for seven days after
+closure. No results are recovered from workflow logs. See
+[admission](docs/development/environment-admission.md) and
+[runtime](docs/development/command-runtime.md).
 
 ## Validate and operate
 

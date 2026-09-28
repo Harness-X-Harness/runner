@@ -4,11 +4,11 @@
 
 ## 身份与授权
 
-固定 Worker `https://runners.trustedtunnel.app` 提供 MCP、OAuth 和 Task 状态。唯一产品 scope 是 `tasks:manage`。
+固定 Worker `https://runners.trustedtunnel.app` 提供 MCP、OAuth、Environment 和 Task 状态。新工作使用 `environments:use`；`tasks:manage` 仅保留已接受的一次性任务查询和取消，不能创建新工作。
 
 必须区分三种身份：
 
-- Harness Principal：稳定 GitHub 用户 ID，拥有 Task。
+- Harness Principal：稳定 GitHub 用户 ID，拥有 Environment 和 Task。
 - Execution identity：GitHub OIDC 签发的精确 repository、workflow/ref、actor、run ID 和 attempt。
 - Agent GitHub identity：Repository Secret `AGENT_GITHUB_TOKEN` 对应的固定身份，通过 `GH_TOKEN` 注入 Agent。
 
@@ -20,13 +20,21 @@ Agent 使用固定 GitHub token 的全部已配置目标权限，不按提交者
 
 ## 一次性 runner 的信任边界
 
-`run-task.yml` 只接收 opaque Task ID。它 checkout 受保护分支上的可信 runtime，关闭 checkout credential persistence，在获取 executor secrets 前通过 OIDC 领取任务，然后安装选定 CLI 并执行 prompt。仓库、issue、代码和 PR 操作由 Agent 按 prompt 完成，不是平台固定流水线。
+`run-environment.yml` 只接收 opaque Environment ID。它 checkout 可信 runtime，关闭 checkout credential persistence，在获取 executor secrets 前通过 OIDC 领取环境，然后安装选定 CLI 并建立绑定到精确执行的连接。Agent 和直接命令共享工作区，每个 Environment 同时只允许一个操作。仓库、issue、代码和 PR 操作不是平台固定流水线。`run-task.yml` 与旧回调仅为已接受工作保留，不开放新 MCP admission。
 
 runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用户运行，可以读取该用户可读的文件和凭证。模型 secrets 和 Agent PAT 只进入执行步骤；claim/finish 不接收它们。原生子进程不直接继承 Actions OIDC request URL/token 或 job `GITHUB_TOKEN`，但这不构成相同用户下的进程隔离。
 
 合入受保护分支并由可信 workflow 执行的 `.github/`、`apps/` 和 `shared/` 代码均在生产信任边界内。不得把可以运行任意恶意代码并持有可复用凭证的主机描述为隔离的多租户沙箱。
 
-## 领取、结果与取消
+## Environment 状态与输出
+
+Environment 及其操作按 Principal 检查所有权；ID 和 Resource URI 不是凭据。同一 Principal 的不同 grant 可以访问同一环境，但每次操作与订阅交付仍须有效授权。旧 scope 不升级为 `environments:use`。
+
+运行时连接绑定精确 GitHub run/attempt、runtime identity 和递增 generation。断线不证明进程已停止，旧 generation 不能提交新状态。关闭须确认执行终止和容量释放，取消不能回滚外部副作用。相同 runner 用户下 Agent 与 command 不是隔离边界。
+
+输出 Resource 只交付有界用户可见文本，不转发 reasoning、原生 RPC 或 metadata。命令输出和 Agent 回复是用户数据，不能保证任意文本绝不包含秘密；平台不得主动写入凭据。关闭环境退出 live discovery，已知结果保留七天，到期后读取拒绝且不能重新执行。
+
+## 保留的一次性任务
 
 Task claim 验证 OIDC 签名、issuer、canonical audience、repository、workflow/ref、受保护分支、GitHub-hosted runner、dispatch event、actor 和 run/attempt。一个 Task 最多释放 prompt 给一个已接纳执行。取消先于领取时，后到 claim 不得释放 prompt。
 
@@ -38,7 +46,7 @@ prompt 只在私有状态和 mode-0600 handoff 文件中传递，终态提交时
 
 ## 凭证与供应链
 
-配置入口见 [workflow](.github/workflows/run-task.yml)、[Worker 配置](apps/chatgpt-app/wrangler.jsonc) 和 [部署说明](docs/runner-operations-runbook.md#deployment-credentials)，不在此维护第二份变量清单。
+配置入口见 [workflow](.github/workflows/run-environment.yml)、[Worker 配置](apps/chatgpt-app/wrangler.jsonc) 和 [部署说明](docs/runner-operations-runbook.md#deployment-credentials)，不在此维护第二份变量清单。
 
 Codex/Grok 使用默认 home 的原生 config，并通过 `env_key = "MINI_END_USER_KEY"` 读取 key。endpoint 来自 GitHub Secrets。外部 Actions 固定完整 commit SHA；CLI 使用官方当前 installer。这是 happy-path，不是可复现工具链。两条 auth workflow 的输出必须丢弃，不能变成公开诊断日志。
 
@@ -46,7 +54,7 @@ Codex/Grok 使用默认 home 的原生 config，并通过 `env_key = "MINI_END_U
 
 ## 发布前检查
 
-- Task 只使用 `tasks:manage`，旧 scope 不升级为 Task 权限。
+- 新工作仅使用 `environments:use`，旧 scope 不自动升级；旧结果按原保留期读取。
 - 用户 GitHub 权限与固定 Agent GitHub 权限分开。
 - OIDC 精确身份验证先于私有 prompt 和执行凭证释放。
 - prompt 在终态删除，结果保留七天，终态不可复活。

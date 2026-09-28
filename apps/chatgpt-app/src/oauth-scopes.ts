@@ -8,8 +8,8 @@ const SCOPE_DETAILS = Object.freeze({
   }),
   "tasks:manage": Object.freeze({
     group: "Task permissions",
-    title: "Run and control code tasks",
-    description: "Run autonomous Codex and Grok tasks, read their results and cancel them. Agents use the platform's configured GitHub credentials.",
+    title: "Read and stop retained code tasks",
+    description: "Read results and request cancellation of previously submitted tasks. This permission cannot start new work.",
   }),
 });
 
