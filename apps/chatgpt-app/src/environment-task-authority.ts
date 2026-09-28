@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { bearerAuthChallengeResponse, getOAuthProtectedResourceMetadataUrl, OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
 import { TaskError } from "../../../shared/task-errors.ts";
 import { canonicalMcpResource } from "./oauth-resource.ts";
@@ -7,7 +6,7 @@ import { mcpAuthorization } from "./mcp-authorization.ts";
 import type { EnvironmentObject } from "./environment-object.ts";
 import { openEnvironment, closeEnvironment, ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { executionPrincipal } from "./execution-authority.ts";
-import { environmentTools } from "./environment-tools.ts";
+import { environmentTools, environmentToolDefinitions } from "./environment-tools.ts";
 import { listEnvironmentResources, observeEnvironmentResource, readEnvironmentResource, type EnvironmentResources } from "./environment-resources.ts";
 import { lifecycleTaskId } from "./environment-lifecycle-task.ts";
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
@@ -55,6 +54,18 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
     async call(request) {
       const props = await authorize();
       const { name, arguments: args } = request.params;
+      executionPrincipal(props, ENVIRONMENT_SCOPE);
+      const definition = environmentToolDefinitions.find(tool => tool.name === name);
+      if (!definition) throw new Error("UNKNOWN_TOOL");
+      const parsed = definition.schema.safeParse(args);
+      if (!parsed.success) {
+        // Report schema-owned field names, never user values or arbitrary object keys.
+        const fields = Object.keys(definition.schema.shape);
+        const invalid = [...new Set(parsed.error.issues.map(issue =>
+          fields.includes(String(issue.path[0])) ? String(issue.path[0]) : "arguments"))];
+        return { resultType: "complete", isError: true,
+          content: [{ type: "text", text: `Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.` }] };
+      }
       if (name === "open_environment" || name === "close_environment") {
         const kind = name === "open_environment" ? "open" : "close";
         const value = kind === "open" ? await openEnvironment(env, props, args) : await closeEnvironment(env, props, args);
@@ -62,9 +73,7 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
         return task.status === "completed" ? task.result : { ...task, resultType: "task" };
       }
       if (name !== "command" && name !== "agent") throw new Error("UNKNOWN_TOOL");
-      const input = z.record(z.string(), z.unknown()).parse(args);
-      if (Object.hasOwn(input, "kind")) throw new Error("INVALID_OPERATION_INPUT");
-      const { taskId } = await startEnvironmentOperation(env, props, { ...input, kind: name });
+      const { taskId } = await startEnvironmentOperation(env, props, { ...parsed.data, kind: name });
       const snapshot = await getEnvironmentTask(env, props, taskId);
       return snapshot.status === "completed" ? snapshot.result : { ...snapshot, resultType: "task" };
     },

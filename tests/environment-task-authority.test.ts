@@ -98,6 +98,20 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.throws(() => commandSchema.parse({ ...params.arguments, argv: [] }));
   assert.ok((await rpc("tools/call", params, false)).error);
   assert.equal(reservations, 0);
+  for (const [name, arguments_, field] of [
+    ["command", { environmentId, argv: ["PRIVATE_INPUT"] }, "timeoutSeconds"],
+    ["agent", { environmentId, prompt: { secret: "PRIVATE_INPUT" } }, "prompt"],
+    ["open_environment", { executor: "PRIVATE_INPUT" }, "executor"],
+    ["close_environment", { environmentId: "PRIVATE_INPUT" }, "environmentId"],
+  ] as const) {
+    const invalid = await rpc("tools/call", { name, arguments: arguments_ });
+    assert.equal(invalid.error, undefined);
+    assert.equal(invalid.result?.resultType, "complete");
+    assert.equal(invalid.result?.isError, true);
+    assert.match(JSON.stringify(invalid.result?.content), new RegExp(field));
+    assert.doesNotMatch(JSON.stringify(invalid), /PRIVATE_INPUT/);
+    assert.equal(reservations, 0);
+  }
   const created = await rpc("tools/call", params);
   const taskId = created.result?.taskId;
   assert.equal(typeof taskId, "string");
