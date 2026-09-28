@@ -108,6 +108,33 @@ test("targeted cancellation preserves the native session and ignores a late prio
   });
 });
 
+test("hard deadline cancels a pending native question and rejects its late answer", { timeout: 8000 }, async () => {
+  const pid = await withEnvironment(processConfig, "codex", Date.now() + 2000, {}, handlers, async environment => {
+    const initial = await environment.agent("continuity");
+    assert.equal(initial.status, "completed");
+    if (initial.status !== "completed") throw new Error("Expected completion");
+    const entered = Promise.withResolvers<void>();
+    const unsubscribe = environment.inputs.subscribe(() => {
+      if (environment.inputs.pending("deadline-question").length) entered.resolve();
+    });
+    try {
+      const turn = environment.execute("deadline-question", { kind: "agent", prompt: "question" });
+      await entered.promise;
+      const question = environment.inputs.pending("deadline-question")[0]!;
+      assert.equal(environment.signal.aborted, false);
+      // No answer or explicit close: only the original hard deadline can release the question.
+      assert.deepEqual(await turn, { ok: true, value: { status: "cancelled" } });
+      assert.equal(environment.signal.aborted, true);
+      assert.deepEqual(environment.inputs.pending(), []);
+      assert.throws(() => environment.inputs.answer("deadline-question", question.inputId,
+        { action: "accept", content: { marker: "MUST_NOT_RESUME" } }), /INPUT_RESPONSE_CONFLICT/);
+      await assert.rejects(environment.agent("continuity"), /ENVIRONMENT_RUNTIME_CLOSING/);
+      return JSON.parse(initial.finalResponse).pid;
+    } finally { unsubscribe(); }
+  });
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
 test("immediate command cancellation does not launch its process and leaves the Environment usable", async () => {
   await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {
     const pending = environment.execute("command", { kind: "command",
