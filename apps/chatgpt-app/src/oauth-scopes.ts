@@ -1,4 +1,11 @@
+export const ENVIRONMENT_SCOPE = "environments:use";
+
 const SCOPE_DETAILS = Object.freeze({
+  [ENVIRONMENT_SCOPE]: Object.freeze({
+    group: "Environment permissions",
+    title: "Use private development environments",
+    description: "Open and close temporary environments, run commands and coding agents, and read their tasks and output. Agents use the platform's configured GitHub credentials.",
+  }),
   "tasks:manage": Object.freeze({
     group: "Task permissions",
     title: "Run and control code tasks",

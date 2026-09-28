@@ -13,7 +13,8 @@ import {
 import type { AuthorizationEnvironment } from "./authorization.ts";
 import type { TaskEnv } from "./task.ts";
 import { handleMcpRequest } from "./mcp.ts";
-import { OAUTH_SCOPES } from "./oauth-scopes.ts";
+import { OAUTH_SCOPES, ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
+import { handleEnvironmentTaskRequest } from "./environment-task-authority.ts";
 import {
   authorizationServerIssuer,
   canonicalMcpResource,
@@ -31,10 +32,16 @@ import { AUTH_STYLES_PATH } from "./authorization-view.ts";
 export { AuthorizationStateObject, TaskRuntimeObject };
 
 type WorkerEnvironment = TaskEnv & AuthorizationEnvironment & Parameters<typeof internalEnvironmentFetch>[1] &
+  Parameters<typeof handleEnvironmentTaskRequest>[1] &
   Parameters<typeof environmentWebhook>[1] & { TASK_CONTROL_PLANE_URL: string; OAUTH_KV: KVNamespace };
 
 export class McpApi extends WorkerEntrypoint<WorkerEnvironment, Record<string, unknown>> {
   fetch(request: Request): Promise<Response> {
+    // Temporary acceptance boundary: fresh consent selects the new product.
+    // Remove old admission after Environment acceptance; never retry across products.
+    if (Array.isArray(this.ctx.props.oauthScopes) && this.ctx.props.oauthScopes.includes(ENVIRONMENT_SCOPE)) {
+      return handleEnvironmentTaskRequest(request, this.env);
+    }
     return handleMcpRequest(request, this.env, this.ctx.props, this.ctx);
   }
 }

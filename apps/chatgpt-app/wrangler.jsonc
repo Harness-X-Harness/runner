@@ -84,6 +84,7 @@
     }
   ],
   "vars": {
+    "GITHUB_CI_EVENT_REPOSITORIES": "[\"Harness-X-Harness/runner\"]",
     "ENVIRONMENT_STARTUP_MS": 600000,
     "GITHUB_RUNNER_REPOSITORY": "Harness-X-Harness/runner",
     "GITHUB_RUNNER_REF": "main",

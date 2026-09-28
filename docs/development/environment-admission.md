@@ -29,8 +29,11 @@ service is registered by adding this model.
 
 `environment-service.ts` composes authenticated open/close with the Environment
 Object. It requires the fresh `environments:use` scope; neither current Task nor
-legacy Environment grants imply this permission. Production OAuth registration
-is unchanged until cutover. The service shares Principal and expiring scoped
+legacy Environment grants imply this permission. During isolated acceptance,
+fresh consent selects the Environment MCP handler at the existing endpoint;
+Task-only grants keep the current Task handler. There is no cross-product retry.
+Remove old admission after new-product acceptance and drain, retaining known
+old results only for their existing retention period. The service shares Principal and expiring scoped
 Actions-token validation with Task services. Open validates authorization before
 storage or GitHub effects. A supplied idempotency key derives an owner-scoped
 128-bit Environment ID; the immutable creation record rejects executor conflicts.
@@ -95,8 +98,8 @@ expired or wrong-audience tokens, and `403 insufficient_scope` for grants withou
 `environments:use`. Challenges identify the canonical protected-resource metadata
 URL. Authorization storage failures return a sanitized 500 instead of requesting
 new consent. This preflight does not cache authority: operations and subscription
-delivery continue to recheck the grant. Production OAuth registration still needs
-to be switched together with the new endpoint.
+delivery continue to recheck the grant. OAuth metadata lists both scopes only
+during this acceptance boundary; existing grants are not upgraded.
 
 The new handler implements standard `server/discover` and `ping`. Discovery
 advertises protocol 2026-07-28, tools, resource subscriptions and the Tasks
@@ -123,15 +126,15 @@ result-retention alarm.
 
 The alarm has no stored user GitHub token and does not claim it cancelled a
 queued/disconnected run. Exact-run observation and the backend's hard job budget
-remain necessary. Production routing remains incomplete. The handler is not yet
-registered on the production endpoint.
+remain necessary. Selecting this handler requires fresh Environment consent;
+the endpoint does not infer it from a protocol version or an old Task grant.
 
 `releaseConfirmed` is an internal authority call, not evidence verification or a
 public endpoint. The Environment lifecycle must verify exact stop evidence or
 prove dispatch was not issued before calling it. Closing intent alone is not proof.
 
-The admission module is bound internally in the Worker, but is not exposed by
-the current public MCP handler. Each reservation carries an
+The admission module is bound internally in the Worker and reached only through
+the authorized Environment handler. Each reservation carries an
 `admitUntil` deadline from the immutable Environment creation record. The caller
 must reuse that deadline on every retry and must not accept it from an MCP client.
 Expired admission requests are rejected. Released receipts can be removed during

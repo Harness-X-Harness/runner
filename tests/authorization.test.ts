@@ -137,6 +137,25 @@ test("Task consent names the fixed Agent authority and grants no legacy scope", 
   assert.deepEqual(stored.authRequest.scope, ["tasks:manage"]);
 });
 
+test("Environment consent grants only the fresh requested scope", async () => {
+  const states = fakeAuthorizationStates();
+  const response = await authorizePage(new Request("https://runner.example.com/authorize"), {
+    ...baseEnv, AUTHORIZATION_STATES: states.binding,
+    OAUTH_PROVIDER: { ...baseEnv.OAUTH_PROVIDER,
+      parseAuthRequest: async () => ({ ...authRequest, scope: ["environments:use"] }),
+    },
+  });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /Use private development environments/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.doesNotMatch(body, /tasks:manage|environments:manage/);
+  const [stored] = states.values();
+  assert.ok(stored && "authRequest" in stored);
+  assert.deepEqual(stored.authRequest.scope, ["environments:use"]);
+  assert.throws(() => describeScopes(["environments:manage"]), /Unknown OAuth scope/);
+});
+
 test("validated authorization errors return OAuth error state and issuer", async () => {
   const response = await authorizePage(
     new Request("https://runner.example.com/authorize"),

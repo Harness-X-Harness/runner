@@ -40,7 +40,7 @@ test("deployed Worker entry shape serves Task OAuth metadata and rejects retired
     const response = await mf.dispatchFetch(`https://runner.example${path}`);
     assert.equal(response.status, 200);
     const metadata = z.object({ scopes_supported: z.array(z.string()) }).parse(await response.json());
-    assert.deepEqual(metadata.scopes_supported, ["tasks:manage"]);
+    assert.deepEqual(metadata.scopes_supported, ["environments:use", "tasks:manage"]);
   }
   for (const path of ["/environment", "/session-stream/old", "/internal/environments/old/claim"]) {
     for (const method of ["GET", "POST"]) {

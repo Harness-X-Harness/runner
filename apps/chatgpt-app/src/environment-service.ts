@@ -3,7 +3,8 @@ import { executionPrincipal, executionToken } from "./execution-authority.ts";
 import type { EnvironmentObject } from "./environment-object.ts";
 
 // A fresh product scope. Neither legacy environments:manage nor tasks:manage implies it.
-export const ENVIRONMENT_SCOPE = "environments:use";
+import { ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
+export { ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
 type EnvironmentService = { ENVIRONMENTS: { getByName(name: string):
   Pick<EnvironmentObject, "initialize" | "dispatchExecution" | "requestClose" | "closeExecution"> } };
 export const openInput = z.object({ executor: z.enum(["codex", "grok"]),
