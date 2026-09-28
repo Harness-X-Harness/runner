@@ -27,7 +27,9 @@ async function main() {
   const mode = process.argv[4] ?? "continuity";
   assert.ok(["continuity", "runtime", "environment", "environment-ci", "final", "wait", "wait-cancel", "long-wait", "timeout", "question", "question-later", "question-cancel"].includes(mode));
   const nativeToolConfig = mode === "timeout" || mode === "long-wait";
-  const promptBudgetMs = mode === "long-wait" ? 180000 : 90000;
+  const longWaitMs = 600000;
+  const longWaitTimeoutSeconds = 660;
+  const promptBudgetMs = mode === "long-wait" ? 720000 : 90000;
   const questionMode = mode.startsWith("question");
   assert.ok(source && isAbsolute(source), "An absolute private config root is required");
   const original = parse(await readFile(join(source, `.${executor}/config.toml`), "utf8"));
@@ -43,7 +45,7 @@ async function main() {
   try {
     if (!["continuity", "runtime", "environment", "environment-ci"].includes(mode)) tool = await startWaitTool();
     if (nativeToolConfig && tool) config.mcp_servers = {
-      probe: { url: tool.url, tool_timeout_sec: mode === "timeout" ? 2 : 120 },
+      probe: { url: tool.url, tool_timeout_sec: mode === "timeout" ? 2 : longWaitTimeoutSeconds },
     };
     await mkdir(join(temporary, `.${executor}`), { mode: 0o700 });
     await mkdir(join(temporary, "workspace"));
@@ -298,7 +300,7 @@ async function main() {
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
-            new Promise<void>(resolve => { timer = setTimeout(resolve, 65000); }),
+            new Promise<void>(resolve => { timer = setTimeout(resolve, longWaitMs); }),
             pending.then(() => { throw Object.assign(new Error("Prompt completed before tool release"), { code: "PROMPT_ENDED_BEFORE_RELEASE" }); }),
           ]);
         } finally {
@@ -306,7 +308,7 @@ async function main() {
           evidence.heldMs = Math.round(performance.now() - started);
           evidence.nativeTimeoutObserved = timeoutObserved;
         }
-        assert.ok(performance.now() - started >= 65000);
+        assert.ok(performance.now() - started >= longWaitMs);
         const value = `LONG_WAIT_${randomUUID()}`;
         evidence.phase = "long_wait_result";
         tool.release(value);
@@ -314,7 +316,7 @@ async function main() {
         assert.ok(output.includes(value));
         assert.equal(tool.calls, 1);
         assert.equal(timeoutObserved, false);
-        checks.push("configured_120s_tool_wait_65s_same_turn");
+        checks.push("configured_660s_tool_wait_600s_same_turn");
         delete evidence.phase;
         return;
       }
