@@ -19,6 +19,48 @@ import { join } from "node:path";
 const { WebSocketServer }: typeof import("../.github/actions/agent-runtime/node_modules/@types/ws/index.d.ts") =
   createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url))("ws");
 
+test("output acknowledgement coalesces pending revisions into the latest snapshot", { timeout: 5000 }, async t => {
+  const output = new EnvironmentOutput();
+  output.begin("stream");
+  const controller = new AbortController();
+  const unexpected = async (): Promise<never> => { throw new Error("Unexpected execution"); };
+  const environment: EnvironmentPort = { signal: controller.signal, output,
+    inputs: new EnvironmentInput(), ciWaits: new EnvironmentCiWaits(),
+    execute: unexpected, cancel: unexpected, command: unexpected, agent: unexpected,
+    close: async () => { controller.abort(); } };
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(async () => {
+    controller.abort();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const snapshots: Array<{ revision: number; text: string; truncated: boolean }> = [];
+  server.on("connection", socket => {
+    socket.send(JSON.stringify({ type: "connected", generation: 1, deadline: Date.now() + 4000 }));
+    socket.on("message", raw => {
+      const message = JSON.parse(String(raw));
+      if (message.type === "ready") socket.send(JSON.stringify({ type: "ready-accepted" }));
+      if (message.type !== "output") return;
+      snapshots.push(message.output);
+      if (snapshots.length === 1) {
+        // Keep revision zero unacknowledged while every append notifies the channel.
+        for (let index = 0; index < 100; index++) output.append("stream", "x");
+        socket.send(JSON.stringify({ type: "output-accepted", generation: 1,
+          taskId: "stream", revision: message.output.revision }));
+      } else socket.close(1000);
+    });
+  });
+  const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+    "00000000-0000-4000-8000-000000000001", async () => "fixture", AbortSignal.timeout(3000));
+  await serveEnvironmentConnection(connection, environment, () => 1);
+  assert.deepEqual(snapshots, [
+    { revision: 0, text: "", truncated: false },
+    { revision: 100, text: "x".repeat(100), truncated: false },
+  ]);
+});
+
 test("channel transports a native ACP question and resumes its exact answer", { timeout: 6000 }, async t => {
   const deadline = Date.now() + 5000;
   const result = Promise.withResolvers<unknown>();
