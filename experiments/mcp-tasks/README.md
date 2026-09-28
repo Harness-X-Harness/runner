@@ -1,17 +1,27 @@
 # Modern MCP integration probe
 
-Development-only probe for [#139](https://github.com/Harness-X-Harness/runner/issues/139).
-It does not register production tools, dispatch a runner, call a model, or use
-credentials. The independent package keeps experimental SDK versions out of the
-production dependency tree.
+Development-only protocol checks for [#139](https://github.com/Harness-X-Harness/runner/issues/139).
+These checks do not dispatch a runner, call a model, or use credentials. They
+exercise public SDK interfaces and the shared production protocol binding with
+controlled authorities. This package owns its test dependencies; production
+dependencies remain owned by the Worker package.
+
+For the deployed product contract and client requirements, see
+[ChatGPT App and MCP access](../../docs/chatgpt-app.md). Live acceptance follows
+the repository's [Environment Live Story](../../docs/agents/live-stories/task-runtime.md),
+not these synthetic fixtures.
 
 ```sh
 cd experiments/mcp-tasks
 npm ci --ignore-scripts --no-audit --no-fund
 npx tsc --noEmit
 npm test
-node probe.ts
 ```
+
+Run `node probe.ts` separately to inspect the high-level server registry's
+extension support, or `node client-probe.ts` to inspect the Tasks requester's
+observation policy. These diagnostics can intentionally exit nonzero and are
+not the test suite or a verdict on the shared production binding.
 
 The probe starts an ephemeral loopback HTTP server and closes it before exit.
 Requests and subscriptions have five-second bounds. It uses only public SDK
@@ -40,7 +50,7 @@ failure as an SDK defect. This probe cannot report full #139 acceptance.
 
 The synthetic Task is not executed or persisted. Method registration does not
 prove input handling, cancellation or durability. Those checks, owner/scope
-boundaries, reconnect recovery, and real host delivery remain separate work.
+boundaries, reconnect recovery, and real host delivery require separate evidence.
 The loopback client is not ChatGPT or Codex, and the probe does not prove their
 UI or model-resumption behavior. It does not use polling or a legacy fallback.
 
@@ -62,9 +72,10 @@ ownership, or scope verification. Separate subscription HTTP tests inject one
 shared authority for reads and notifications, filter two synthetic Principals,
 and recover a completed result on reconnect without polling. The caller must
 authenticate and bind this authority to the Principal and grant. The binding
-does not own Task state or join the production endpoint. Its supplied authority
-owns Task creation and execution. Complete
-#139 acceptance still requires durable lifecycle and real authorization evidence.
+does not own Task state. The production endpoint calls it through
+`environment-task-authority.ts`, which supplies authorization and Environment
+operations. The tests below instead supply controlled authorities; their success
+alone does not establish real authorization or production lifecycle behavior.
 
 `lifecycle.test.ts` supplies a temporary SQLite authority through real loopback
 HTTP. It checks capability rejection before insertion, immediate handle read,
@@ -91,9 +102,9 @@ changes; an existing subscription receives a safe error and closes instead of
 delivering the next committed result. Observers are detached. This does not test
 real OAuth revocation, distributed grant propagation, or recall of data already
 authorized and sent before revocation.
-The experiment currently requires Tasks capability for every tool call; a
-production mixed catalog must keep ordinary non-Task tools on their own declared
-capability contract rather than inheriting this experiment's restriction.
+The shared binding requires Tasks capability for every tool call in the current
+Environment catalog. A mixed catalog must keep ordinary non-Task tools on their
+own declared capability contract rather than inheriting this restriction.
 
 `node client-probe.ts` inspects the official Tasks requester's default behavior
 with a synthetic port and no notifications. It reports the dispatched methods
@@ -147,8 +158,12 @@ Current evidence scopes (not interchangeable):
 | --- | --- | --- |
 | Controlled HTTP fixture | Task lifecycle, reconnect, owner/grant checks | Real OAuth and Agent execution |
 | Official client transport | Handle, input/update, cancellation and completion events without `tasks/get` | Full client discovery and OAuth consent |
+| Official high-level client fixture | Discovery, tools, owner-private resource catalog/read and cache metadata | Real OAuth and Task execution |
 | Official Resource handler fixture | Owner-scoped list/read/listen, event-triggered read, grant-signal stream teardown | Real OAuth revocation propagation |
-| ChatGPT / Codex host | Unverified for this new protocol path | Notification delivery and model continuation |
+
+Desktop host support is not inferred from these fixtures. The product's client
+requirements belong in the linked MCP documentation; observed host versions and
+acceptance results belong in issue evidence, not a second status table here.
 
 Protocol authorities:
 
