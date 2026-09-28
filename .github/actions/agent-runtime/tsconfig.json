@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2024", "module": "NodeNext", "strict": true,
+    "noEmit": true, "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": [
+    "*.ts", "fixtures/*.ts", "../task-runtime/*.ts",
+    "../../../tests/agent-runtime.test.ts", "../../../tests/command.test.ts",
+    "../../../tests/environment-lifetime.test.ts", "../../../tests/environment-runtime.test.ts",
+    "../../../tests/environment-connection.test.ts",
+    "../../../tests/environment-operations.test.ts",
+    "../../../tests/github-wait-tool.test.ts",
+    "../../../tests/github-run-wait.test.ts",
+    "../../../tests/environment-ci-waits.test.ts",
+    "../../../tests/environment-output.test.ts",
+    "../../../tests/task-action-entry.test.ts", "../../../tests/runner-identity.test.ts",
+    "../../../tests/environment-entry.test.ts", "../../../tests/environment-input.test.ts", "../../../tests/grok-question.test.ts"
+  ]
+}

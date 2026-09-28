@@ -1,0 +1,23 @@
+const SCOPE_DETAILS = Object.freeze({
+  "tasks:manage": Object.freeze({
+    group: "Task permissions",
+    title: "Run and control code tasks",
+    description: "Run autonomous Codex and Grok tasks, read their results and cancel them. Agents use the platform's configured GitHub credentials.",
+  }),
+});
+
+export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));
+
+export function consentScopes(requestedScopes: readonly string[]): string[] {
+  describeScopes(requestedScopes);
+  const requested = new Set(requestedScopes);
+  return OAUTH_SCOPES.filter((scope) => requested.has(scope));
+}
+
+export function describeScopes(scopes: readonly string[]) {
+  return scopes.map((scope) => {
+    if (!Object.hasOwn(SCOPE_DETAILS, scope)) throw new TypeError(`Unknown OAuth scope: ${scope}`);
+    const detail = SCOPE_DETAILS[scope as keyof typeof SCOPE_DETAILS];
+    return { scope, ...detail };
+  });
+}

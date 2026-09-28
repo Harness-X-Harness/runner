@@ -99,10 +99,11 @@ only because a new version was deployed.
 ## Local checks
 
 ```bash
-npm --prefix apps/chatgpt-app test
-npm --prefix apps/chatgpt-app run typecheck
-bash tests/workflow-security.test.sh
-shellcheck --severity=warning tests/*.sh
+npm ci --prefix apps/chatgpt-app
+npm ci --prefix .github/actions/agent-runtime
+node --test tests/*.test.ts
+apps/chatgpt-app/node_modules/.bin/tsc --noEmit -p apps/chatgpt-app
+.github/actions/agent-runtime/node_modules/.bin/tsc --noEmit -p .github/actions/agent-runtime
 actionlint
 git diff --check
 ```

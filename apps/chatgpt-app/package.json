@@ -3,20 +3,28 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ../../tests/*.test.js",
+    "test": "node --test ../../tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.10.3",
+    "@modelcontextprotocol/ext-tasks": "0.1.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@octokit/webhooks-methods": "6.0.0",
+    "@radix-ui/themes": "3.3.0",
     "agents": "0.20.1",
+    "eventsource-parser": "4.1.1",
     "jose": "6.2.4",
-    "zod": "4.4.3"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260724.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "typescript": "7.0.2",
     "wrangler": "4.114.0"
   }

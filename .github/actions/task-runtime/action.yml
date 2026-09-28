@@ -9,4 +9,4 @@ outputs:
     description: Validated provider name from an admitted claim
 runs:
   using: node24
-  main: index.js
+  main: index.ts
