@@ -361,8 +361,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal(environmentTask(operation.taskId, await readRecord()).status, "input_required");
   assert.equal((await call(environmentId, { ...operation, responses: { [inputId]: { action: "accept", content: { name: 1 } } } }, "answer-operation")).status, 409);
   const answer = { action: "accept", content: { name: "Ada" } };
-  let answeredAt: number | undefined;
-  for (let repetition = 0; repetition < 2; repetition++) {
+  {
     const messages: unknown[] = [];
     const delivered = new Promise<void>(resolve => {
       const listener = (event: MessageEvent) => {
@@ -376,13 +375,14 @@ test("Environment DO identity and cross-object admission use committed creation"
     assert.equal((await call(environmentId, { ...operation, responses: { [inputId]: answer } }, "answer-operation")).status, 204);
     await delivered;
     assert.deepEqual(messages[1], { type: "input-response", generation: 4, taskId: operation.taskId, inputId, response: answer });
-    const record = await readRecord();
-    answeredAt ??= record.updatedAt;
-    assert.equal(record.updatedAt, answeredAt);
   }
   await publishQuestion();
   assert.equal(environmentTask(operation.taskId, await readRecord()).status, "working");
-  assert.equal((await call(environmentId, { ...operation, responses: { [inputId]: { action: "cancel" } } }, "answer-operation")).status, 409);
+  const answeredRecord = await readRecord();
+  for (const responses of [{ [inputId]: answer }, { [inputId]: { action: "cancel" } }, { unknown: null }, { constructor: null }]) {
+    assert.equal((await call(environmentId, { ...operation, responses }, "answer-operation")).status, 204);
+    assert.deepEqual(await readRecord(), answeredRecord);
+  }
   const outcome = { ok: true, value: { status: "completed", finalResponse: "x".repeat(140000) } };
   assert.equal((await call(environmentId, { ...operation, ownerId: "2" }, "observe-operation")).status, 409);
   const observation = await call(environmentId, operation, "observe-operation");
@@ -426,6 +426,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   }
   const stored = await (await call(environmentId, operation, "read-operation")).json() as { result: typeof outcome };
   assert.equal(stored.result.value.finalResponse.length, 140000);
+  assert.equal((await call(environmentId, { ...operation, responses: { [inputId]: answer } }, "answer-operation")).status, 204);
+  assert.deepEqual(await readRecord(), stored);
+  assert.equal((await call(environmentId, { ...operation, ownerId: "2", responses: { [inputId]: answer } }, "answer-operation")).status, 409);
   const oldOutputAck = nextMessage(sockets[1]!);
   sockets[1]!.send(JSON.stringify(outputFrame));
   assert.deepEqual(await oldOutputAck, { type: "output-accepted", generation: 4, taskId: operation.taskId, revision: 1 });
