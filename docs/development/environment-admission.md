@@ -181,7 +181,8 @@ committed, using the current Principal's supplied Actions token. A definite HTTP
 rejection with no verified execution claim persists rejection and close intent
 before releasing unused capacity. A concurrent claim prevents this release;
 unknown delivery retains the reservation. A failed release can be resumed by
-close from the persisted rejection. Startup-expiry reconciliation remains incomplete.
+close from the persisted rejection. Startup expiry records close intent; it does
+not supply missing dispatch or stop evidence.
 
 The current GitHub dispatch API returns `workflow_run_id`. The Environment saves
 that authoritative allocation identity without requiring an OIDC claim first.
@@ -199,8 +200,8 @@ first, no new permission is issued; if permission committed first, remote work
 may still start and remains subject to cleanup. Repeated initialization cannot
 clear close intent. Close intent alone never releases capacity or proves stop;
 persisted definite dispatch rejection can release an unused reservation.
-Close during admission can leave a held reservation that the future cleanup
-adapter must reconcile; it cannot enable dispatch after the intent commits.
+Close during admission waits for its acknowledgement. Admission completion
+checks the persisted close intent and releases the reservation without dispatch.
 
 `bindExecution` accepts only one repository/run/attempt tuple for the owner after
 dispatch permission was issued. The internal caller must verify fresh workflow
@@ -210,11 +211,10 @@ and receives `stop`; it does not reopen the Environment. `bound` confirms identi
 only, not readiness, a WebSocket generation, or permission to execute commands.
 `environment-callback.ts` verifies the shared GitHub OIDC contract for
 `run-environment.yml` before calling this method. Owner and execution fields come
-only from signed claims; request bodies cannot override them. Its handler is
-tested with signed local credentials but is not routed by the deployed Worker.
-The internal claim now establishes the hard runtime deadline using the job's
-temporary GitHub observation token. The workflow exists but is not deployed or
-connected to public tools. See [runner composition](command-runtime.md).
+only from signed claims; request bodies cannot override them. The Worker mounts
+this handler under `/internal/environments/`. Claim establishes the hard runtime
+deadline using the job's temporary GitHub observation token. The Environment
+tools dispatch `run-environment.yml`; see [runner composition](command-runtime.md).
 
 `observeJobStart` reads the job's `started_at` from the bound workflow run
 attempt's jobs endpoint. It requires exactly one matching job name and a complete
@@ -226,9 +226,9 @@ margin` once. Repeated calls return the stored deadline, even after a policy
 change; elapsed installation time is not restored. The GitHub observation is
 outside the storage transaction, and the commit rechecks close intent. An
 already elapsed deadline remains elapsed, not a new lifetime. This internal
-method does not declare readiness or release capacity. Runtime budget and
-cleanup margin must be tied to the new workflow before using the deadline for
-command admission and runner shutdown; these integrations remain incomplete.
+method does not declare readiness or release capacity. The workflow's job budget
+and cleanup margin determine the deadline passed to runner lifetime and command
+admission; readiness does not restart that budget.
 The local workerd test holds the job lookup pending, commits close, then releases
 the lookup and requires deadline establishment to fail. Promise barriers define
 the ordering without timing sleeps. This checks that delayed evidence cannot
@@ -250,9 +250,8 @@ transaction checks the canonical generation, deadline and close intent before
 recording readiness. Old or invalid messages close only their own socket with
 1008. Disconnect does not imply stopped execution or release capacity. Local
 workerd tests open two real sockets and reject the older connection's ready
-message. This route is not registered in the deployed Worker; operation/result
-delivery and runner-side reconnect remain incomplete. Advancing a generation
-does not prove readiness or delivery of any operation.
+message. The Worker routes the authenticated upgrade to this object. Advancing
+a generation does not prove readiness or delivery of any operation.
 
 The runner's `connectEnvironment` uses the `ws` package for framing and upgrade.
 It requests a token for each explicit connection attempt, sends credentials only
@@ -261,8 +260,9 @@ Only WSS is accepted except loopback WS for local development. An abort signal
 bounds the handshake; transport closure is reported independently from runtime
 termination. It does not retry or execute messages. A real loopback WebSocket
 test covers fresh headers across connections, expired handshakes and closure;
-it does not prove deployed OIDC-to-DO integration. The runtime owner still needs
-to retain one identity, deadline and operation receipts across reconnections.
+it does not prove deployed OIDC-to-DO integration. `serveRunnerEnvironment`
+retains one runtime identity and supplies the same Environment and original
+deadline across reconnections.
 
 `serveEnvironmentConnection` attaches one socket to an existing Environment port.
 After ready acknowledgement, execute messages must match both the connection's
@@ -270,9 +270,10 @@ generation and the runtime owner's current generation. Results are sent only on
 that still-current open connection. Malformed messages close the socket; they
 do not start work. Pending deliveries and buffered output have explicit bounds.
 Disconnection removes socket listeners but leaves execution and receipts with
-the Environment. A controlled loopback test disconnects after operation admission,
-redelivers the same ID on a new generation before execution completes, and checks
-one real filesystem effect and a generation-2 result. The control-plane result
+the Environment. Controlled loopback tests redeliver the same ID on a new
+generation both before completion and after completion during disconnection.
+Both check one real filesystem effect and a result on the new generation.
+The control-plane result
 store acknowledges only after its transaction commits; duplicate results preserve
 that record and conflicting results are rejected. See [operation delivery](command-runtime.md)
 for the current bounds and integration limits. Socket send is not proof of durable receipt.
@@ -338,8 +339,8 @@ no acknowledgement remains `closing` until that evidence arrives. Startup alarms
 use the same close path. Once dispatch was issued, an uncertain response still
 requires exact-run stop evidence; elapsed time alone does not release capacity.
 
-Public authorization wiring and a real GitHub observation still require
-integration tests before production use. Local workerd fault injection covers
+Public authorization, GitHub observation and process recovery are separate
+evidence boundaries. Local workerd fault injection covers
 failure before release and a lost reply after release: neither reports closed
 prematurely, and explicit observation resumes cleanup from persisted evidence
 without external HTTP. These tests do not simulate process crash or eviction.
@@ -352,8 +353,9 @@ receipt is collected; it does not alter another Environment's reservation.
 
 The admission storage seam alone cannot detect a caller forging a new deadline
 after receipt cleanup.
-The authenticated release adapter and durability across process restart also
-remain required. There is no periodic cleanup or hidden admission queue.
+Only the internal lifecycle adapter supplies the immutable creation record for
+release. Local storage tests do not establish process-restart behavior. There is
+no periodic cleanup or hidden admission queue.
 
 `tests/environment-admission-sqlite.test.ts` executes the module on local workerd
 SQLite. Five competing owners receive exactly four admissions; a duplicate does
