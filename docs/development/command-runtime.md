@@ -4,6 +4,14 @@
 primitive. It is not registered as an MCP tool and does not dispatch workflows.
 It uses Node's process API, not an Agent or a shell wrapper.
 
+The public `command` tool reaches this primitive through the Environment Task
+authority and its authenticated runner connection. The Worker selects that
+authority for grants with `environments:use`; Task-only grants keep the separate
+one-shot handler until its admission and retention conditions permit retirement.
+The tool schema requires `environmentId`, nonempty `argv` and a positive
+`timeoutSeconds`; `cwd` defaults to the workspace. Tool schemas in
+`environment-tools.ts` share the service validators and are the input authority.
+
 The caller supplies a workspace, an absolute deadline derived from the remaining
 runtime budget, an abort signal and explicit environment fields. The command
 supplies argv, an optional cwd and a relative timeout. The earlier deadline wins.
@@ -36,9 +44,9 @@ The Environment Object rejects conflicting revisions and changes after the
 final result; old replayed output cannot roll its stored snapshot back. Output
 does not change Task status or emit Task progress notifications.
 
-The internal Resource handler serves owner-checked
+The Environment Resource handler serves owner-checked
 `harness://tasks/{taskId}/output`. A known URI is readable while that operation
-record remains stored; this does not add a historical output catalog. The internal
+record remains stored; this does not add a historical output catalog. The Environment
 MCP handler accepts standard `subscriptions/listen` resource filters for output
 URIs. It sends `notifications/resources/updated` with the URI only; the client
 then reads the current snapshot. Each delivery checks current authorization and
@@ -50,9 +58,11 @@ share the same event-driven read mechanism, not the same notification payload.
 Environment lifecycle resources use this same subscription path, including
 control-plane deadline alarms that commit close intent. Closed-Environment content
 expires after seven days using the same native alarm; expiry denies reads and
-deletes stored operation/output content. Production routing remains integration work.
-Local ACP/WebSocket fixtures and protocol tests are not
-real-provider or deployed end-to-end acceptance.
+deletes stored operation/output content. The Worker mounts this handler at `/mcp`
+for Environment grants. Protocol support does not imply that every host can
+display resources or resume its model after a Task notification. Clients must
+support the advertised Tasks extension for effectful tools; there is no polling
+or cross-product fallback for hosts without that capability.
 
 The POSIX child has its own process group. Cancellation and timeout send SIGKILL;
 normal leader exit also stops remaining group members. Result delivery waits for
@@ -94,7 +104,7 @@ its pending delivery. The outer function awaits slot cleanup and ACP process
 exit; the port's close method alone confirms only slot cleanup. Deadline expiry
 during startup aborts the handshake. Local tests cover shared cwd, explicit close,
 idle expiry and expiry during a cancellable native turn, with OS process readback.
-Workflow and transport wiring remain incomplete. A provider that never confirms
+A provider that never confirms
 turn cancellation can still prevent local cleanup completion. This
 timer cannot guarantee a hard wall-clock stop if the Node event loop or OS stalls;
 the external job budget remains the outer containment boundary.
@@ -114,8 +124,9 @@ cancel notification. A controlled test sends standard `session/cancel`, awaits
 the native cancelled response and queue stop marker, then completes another turn
 in the same session and process. The current one-shot `readFinalResponse` caller
 still maps cancellation to its existing Task error contract. Durable turn identity,
-control-plane admission, user-input routing and real provider cancellation remain
-separate integration requirements.
+control-plane admission and user-input routing belong to the Environment authority,
+not this final-response reader. Native provider cancellation remains a distinct
+boundary from the ACP fixture's cancellation behavior.
 
 `withEnvironment` owns one `EnvironmentOperations` receipt set for its process
 lifetime, exposed as `execute(taskId, input)`. A canonical request digest detects
@@ -158,8 +169,9 @@ cancellation and observe the exact attempt once. Only observed completion releas
 capacity; failures retain close intent and cleanup responsibility. An unbound run
 remains closing until its identity can be established. GitHub's cancel API is
 run-scoped, not an atomic attempt-conditional operation: the read-before-cancel
-check cannot exclude a concurrent manual rerun between HTTP calls. Public MCP Tasks and production workflow wiring
-remain integration work; these internal methods are not a deployed API.
+check cannot exclude a concurrent manual rerun between HTTP calls. Public MCP
+tools and Task methods reach these internal methods through
+`environment-task-authority.ts`; the internal methods are not public endpoints.
 
 `connectRunnerEnvironment` binds a connection to the fixed HTTPS control-plane
 origin and Environment ID. Each attempt obtains a fresh GitHub Actions OIDC
@@ -195,19 +207,21 @@ driver, and provider credential configuration has one implementation. Signals
 request local lifetime closure, including during ACP startup. The job timeout
 remains the external containment boundary if cleanup does not complete.
 
-This workflow and entrypoint are development implementation, not a deployed
-product: the Worker does not yet register Environment routes or public tools.
+The Worker registers the Environment tools at `/mcp` and authenticates the
+runner's `/internal/environments/` routes with GitHub Actions OIDC.
 Native ACP form requests wait in the same runtime and resume from an exact
 Task/input-ID answer. The channel publishes pending forms; the Environment DO
 stores requests and answers, projects `input_required`, and routes standard
 `tasks/update` to the runtime. Duplicate answers are idempotent, conflicting
 answers are rejected, and cancellation takes priority over undelivered answers.
-The public Worker endpoint is not switched to this authority yet. Grok's native
+Grok's native
 `ask_user_question` is mapped to the same form channel: answers use question text
 as keys and arrays of selected labels; free text uses `annotations.notes`.
 This follows the [upstream wire contract](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-tools/src/implementations/grok_build/ask_user_question/types.rs).
 Plan-mode chat/skip shortcuts are not exposed; users can answer or cancel.
-Real-provider interactive acceptance remains open.
+Codex uses its native default-mode user-input feature through `CODEX_CONFIG`;
+provider support must be verified separately from ACP form transport. Neither
+provider input nor a reconnect extends the Environment's original hard deadline.
 
 Run `node --test tests/command.test.ts`. `formal/CommandCompletion.tla` checks the
 focused safety obligation that return requires observed process exit and stream
