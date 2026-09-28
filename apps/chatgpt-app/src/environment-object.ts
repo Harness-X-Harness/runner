@@ -570,26 +570,28 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   }
 
   async answerOperation(ownerId: string, taskId: string, value: unknown): Promise<void> {
-    const answers = z.record(z.string().uuid(), z.unknown()).parse(value);
+    const answers = z.record(z.string(), z.unknown()).parse(value);
     if (!Object.keys(answers).length || new TextEncoder().encode(JSON.stringify(answers)).length > 65536) throw new Error("INVALID_INPUT_RESPONSE");
     const changed = await this.ctx.storage.transaction(async () => {
       const record = await this.requireOperation(ownerId, taskId);
-      if (record.result !== undefined || record.cancelRequested) throw new Error("TASK_NOT_WAITING_FOR_INPUT");
+      if (record.result !== undefined || record.cancelRequested) return false;
       const inputs = { ...record.inputs };
       let changed = false;
       for (const [inputId, value] of Object.entries(answers)) {
-        const old = inputs[inputId];
-        if (!old) throw new Error("INPUT_NOT_FOUND");
+        const old = Object.hasOwn(inputs, inputId) ? inputs[inputId] : undefined;
+        // MCP Tasks ignores keys that are no longer outstanding; first answer wins.
+        if (!old || old.response !== undefined) continue;
         const response = inputAnswer(old.request, value);
-        if (old.response && JSON.stringify(old.response) !== JSON.stringify(response)) throw new Error("INPUT_RESPONSE_CONFLICT");
-        changed ||= old.response === undefined;
+        changed = true;
         inputs[inputId] = { ...old, response };
       }
       if (changed) await this.ctx.storage.put(`environment-operation:${taskId}`, { ...record, inputs, updatedAt: Date.now() });
       return changed;
     });
-    if (changed) for (const notify of this.operationObservers.get(taskId) ?? []) notify();
-    await this.deliverRuntimeMessage();
+    if (changed) {
+      for (const notify of this.operationObservers.get(taskId) ?? []) notify();
+      await this.deliverRuntimeMessage();
+    }
   }
 
   /** Internal SSE snapshot stream. The public transport owns OAuth and MCP framing. */
