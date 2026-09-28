@@ -459,6 +459,8 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await call(environmentId, { ...operation, taskId: "operation-two" }, "reserve-operation")).status, 200);
   assert.deepEqual(await secondDelivery, { type: "execute", generation: 4,
     taskId: "operation-two", input: JSON.parse(operation.request) });
+  const retainedWait = { ...ci, taskId: "operation-two", waitId: "00000000-0000-4000-8000-000000000096" };
+  assert.equal((await call(environmentId, retainedWait, "register-ci")).status, 200);
   const conflictClosed = new Promise<number>(resolve => sockets[1]!.addEventListener("close", event => resolve(event.code), { once: true }));
   sockets[1]!.send(JSON.stringify({ ...frame, result: { ok: false, code: "OPERATION_FAILED" } }));
   assert.equal(await conflictClosed, 1008);
@@ -466,6 +468,35 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(await lifecycleTask(environmentId, "1", "open"), opened);
   assert.equal((await readEnvironment()).reason, "runtime_disconnected");
   assert.equal((await untilLifecycle("unavailable")).status, "unavailable");
+  // Commit while disconnected, then require delivery from the stored receipt on the next generation.
+  assert.equal(await (await call(environmentId, ciResult, "complete-ci")).json(), 1);
+  assert.deepEqual(await (await call(environmentId, retainedWait, "read-ci")).json(),
+    { taskId: "operation-two", target: ciTarget, result: ciResult });
+  const replayConnection = await call(environmentId, runtimeClaim, "upgrade");
+  assert.equal(replayConnection.status, 101);
+  const replaySocket = replayConnection.webSocket!;
+  const replayHello = nextMessage(replaySocket);
+  replaySocket.accept();
+  assert.deepEqual(await replayHello, { type: "connected", generation: 5, deadline: expectedDeadline });
+  const replayMessages: unknown[] = [];
+  const replayed = new Promise<void>(resolve => {
+    const listener = (event: MessageEvent) => {
+      replayMessages.push(JSON.parse(String(event.data)));
+      if (replayMessages.length === 3) {
+        replaySocket.removeEventListener("message", listener);
+        resolve();
+      }
+    };
+    replaySocket.addEventListener("message", listener);
+  });
+  replaySocket.send(JSON.stringify({ type: "ready" }));
+  await replayed;
+  assert.deepEqual(replayMessages, [{ type: "ready-accepted" },
+    { type: "execute", generation: 5, taskId: "operation-two", input: JSON.parse(operation.request) },
+    { type: "ci-result", generation: 5, taskId: "operation-two", waitId: retainedWait.waitId, result: ciResult }]);
+  const replayClosed = new Promise<void>(resolve => replaySocket.addEventListener("close", () => resolve(), { once: true }));
+  replaySocket.close(1000, "Controlled disconnect before cancellation");
+  await replayClosed;
   const cancelledOperation = { ...operation, taskId: "operation-two" };
   assert.equal((await call(environmentId, { ...cancelledOperation, ownerId: "2" }, "cancel-operation")).status, 409);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -480,25 +511,24 @@ test("Environment DO identity and cross-object admission use committed creation"
   const resumedSocket = reconnected.webSocket!;
   const resumedHello = nextMessage(resumedSocket);
   resumedSocket.accept();
-  assert.deepEqual(await resumedHello, { type: "connected", generation: 5, deadline: expectedDeadline });
+  assert.deepEqual(await resumedHello, { type: "connected", generation: 6, deadline: expectedDeadline });
   assert.equal((await readEnvironment()).status, "unavailable");
   const resumedMessages: unknown[] = [];
   const redelivered = new Promise<void>(resolve => resumedSocket.addEventListener("message", event => {
     const message = JSON.parse(String(event.data));
-    if (message.type === "ci-result") return;
     resumedMessages.push(message);
     if (resumedMessages.length === 3) resolve();
   }));
   resumedSocket.send(JSON.stringify({ type: "ready" }));
   await redelivered;
-  assert.deepEqual(resumedMessages, [{ type: "ready-accepted" }, { type: "execute", generation: 5,
+  assert.deepEqual(resumedMessages, [{ type: "ready-accepted" }, { type: "execute", generation: 6,
     taskId: "operation-two", input: JSON.parse(operation.request) },
-    { type: "cancel", generation: 5, taskId: "operation-two" }]);
+    { type: "cancel", generation: 6, taskId: "operation-two" }]);
   const cancelAcknowledged = nextMessage(resumedSocket);
-  resumedSocket.send(JSON.stringify({ type: "result", generation: 5, taskId: "operation-two",
+  resumedSocket.send(JSON.stringify({ type: "result", generation: 6, taskId: "operation-two",
     output: { revision: 0, text: "", truncated: false },
     result: { ok: true, value: { status: "cancelled" } } }));
-  assert.deepEqual(await cancelAcknowledged, { type: "result-accepted", generation: 5, taskId: "operation-two" });
+  assert.deepEqual(await cancelAcknowledged, { type: "result-accepted", generation: 6, taskId: "operation-two" });
   const confirmedCancellation = await (await call(environmentId, cancelledOperation, "read-operation")).json() as { result: unknown };
   assert.deepEqual(confirmedCancellation.result, { ok: true, value: { status: "cancelled" } });
   const preserved = await (await call(environmentId, operation, "read-operation")).json() as { result: typeof outcome };
@@ -525,7 +555,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   const cancelledWait = { ...ci, taskId: unfinished.taskId, waitId: "00000000-0000-4000-8000-000000000098" };
   assert.equal((await call(environmentId, cancelledWait, "register-ci")).status, 200);
   const unfinishedInput = nextMessage(resumedSocket);
-  resumedSocket.send(JSON.stringify({ ...question, generation: 5, taskId: unfinished.taskId }));
+  resumedSocket.send(JSON.stringify({ ...question, generation: 6, taskId: unfinished.taskId }));
   assert.equal((await unfinishedInput as { type: string }).type, "input-accepted");
   const unfinishedStream = await call(environmentId, unfinished, "observe-operation");
   const unfinishedReader = unfinishedStream.body!.getReader();
@@ -547,14 +577,14 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await readEnvironment()).reason, "runtime_expired");
   const closeInstruction = nextMessage(resumedSocket);
   assert.equal((await call(environmentId, input, "alarm")).status, 204);
-  assert.deepEqual(await closeInstruction, { type: "close", generation: 5 });
+  assert.deepEqual(await closeInstruction, { type: "close", generation: 6 });
   assert.equal((await readEnvironment()).status, "closing");
   assert.equal((await untilLifecycle("closing")).status, "closing");
   assert.equal((await call(environmentId, deadlineInput, "deadline")).status, 409);
   assert.equal((await call(environmentId, runtimeClaim, "runtime")).status, 409);
   const repeatedClose = nextMessage(resumedSocket);
   assert.equal(await (await call(environmentId, input, "close")).json(), "closing");
-  assert.deepEqual(await repeatedClose, { type: "close", generation: 5 });
+  assert.deepEqual(await repeatedClose, { type: "close", generation: 6 });
   resumedSocket.close(1000);
   assert.equal((await call(environmentId, { ...input, ownerId: "2" }, "close-backend")).status, 409);
   assert.equal(await (await call(environmentId, input, "close-backend")).json(), "closing");
