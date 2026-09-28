@@ -6,11 +6,6 @@ const SCOPE_DETAILS = Object.freeze({
     title: "Use private development environments",
     description: "Open and close temporary environments, run commands and coding agents, and read their tasks and output. Agents use the platform's configured GitHub credentials.",
   }),
-  "tasks:manage": Object.freeze({
-    group: "Task permissions",
-    title: "Read and stop retained code tasks",
-    description: "Read results and request cancellation of previously submitted tasks. This permission cannot start new work.",
-  }),
 });
 
 export const OAUTH_SCOPES = Object.freeze(Object.keys(SCOPE_DETAILS));

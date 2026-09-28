@@ -17,7 +17,6 @@ async function createWorker(t: TestContext, fetchMock?: ReturnType<typeof create
     fetchMock,
     kvNamespaces: ["OAUTH_KV"], bindings: { TASK_CONTROL_PLANE_URL: "https://runner.example", ENVIRONMENT_STARTUP_MS: 600000 },
     durableObjects: {
-      TASKS: { className: "TaskRuntimeObject", useSQLite: true },
       AUTHORIZATION_STATES: { className: "AuthorizationStateObject", useSQLite: true },
       ENVIRONMENTS: { className: "BoundedEnvironmentObject", useSQLite: true },
       ENVIRONMENT_ADMISSION: { className: "EnvironmentAdmissionObject", useSQLite: true },
@@ -40,7 +39,7 @@ test("deployed Worker entry shape serves Task OAuth metadata and rejects retired
     const response = await mf.dispatchFetch(`https://runner.example${path}`);
     assert.equal(response.status, 200);
     const metadata = z.object({ scopes_supported: z.array(z.string()) }).parse(await response.json());
-    assert.deepEqual(metadata.scopes_supported, ["environments:use", "tasks:manage"]);
+    assert.deepEqual(metadata.scopes_supported, ["environments:use"]);
   }
   for (const path of ["/environment", "/session-stream/old", "/internal/environments/old/claim"]) {
     for (const method of ["GET", "POST"]) {
@@ -63,7 +62,7 @@ function authorizeUrl(redirect = redirectUri) {
   const url = new URL("https://runner.example/authorize");
   url.search = new URLSearchParams({
     response_type: "code", client_id: clientId, redirect_uri: redirect,
-    scope: "tasks:manage", state: "private-client-state",
+    scope: "environments:use", state: "private-client-state",
     code_challenge: "x".repeat(43), code_challenge_method: "S256",
     resource: "https://runner.example/mcp",
   }).toString();
@@ -100,7 +99,7 @@ for (const failedLookup of [1, 2]) {
         { headers: { "content-type": "application/json", "cache-control": "no-store" } }).times(2);
     const recovered = await mf.dispatchFetch(authorizeUrl());
     assert.equal(recovered.status, 200);
-    assert.match(await recovered.text(), /Read and stop retained code tasks/);
+    assert.match(await recovered.text(), /Use private development environments/);
     fetchMock.assertNoPendingInterceptors();
   });
 }

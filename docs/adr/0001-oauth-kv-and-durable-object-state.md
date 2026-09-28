@@ -1,11 +1,12 @@
 # Keep provider records in KV and application state in Durable Objects
 
-Status: accepted for Task Runtime and OAuth.
+Status: accepted for Environment and OAuth.
 
 The OAuth provider owns `OAUTH_KV` for its clients, grants, codes, tokens,
 expiry and revocation. Application state instead needs immediate consistency:
 one-time consent/callback state uses `AuthorizationStateObject`, and each
-opaque Task ID uses one `TaskRuntimeObject`.
+Environment uses one `BoundedEnvironmentObject`. `EnvironmentAdmissionObject`
+coordinates bounded live membership per Principal.
 
 ## Considered options
 
@@ -20,6 +21,5 @@ opaque Task ID uses one `TaskRuntimeObject`.
 ## Consequences
 
 Preserve the OAuth KV binding. Use strongly consistent per-object transactions
-for Task identity, terminal state and one-time authorization decisions. D1 is
-not used. Environment/Session state ownership is superseded by the accepted
-[Task product](https://github.com/Harness-X-Harness/runner/issues/114).
+for Environment identity, terminal operation state and one-time authorization
+decisions. D1 is not used.

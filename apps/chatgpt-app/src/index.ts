@@ -11,9 +11,7 @@ import {
   submitAuthorizationDecision,
 } from "./authorization.ts";
 import type { AuthorizationEnvironment } from "./authorization.ts";
-import type { TaskEnv } from "./task.ts";
-import { handleMcpRequest } from "./mcp.ts";
-import { OAUTH_SCOPES, ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
+import { OAUTH_SCOPES } from "./oauth-scopes.ts";
 import { handleEnvironmentTaskRequest } from "./environment-task-authority.ts";
 import {
   authorizationServerIssuer,
@@ -21,29 +19,21 @@ import {
   requireCanonicalResourceParameter,
 } from "./oauth-resource.ts";
 import { AuthorizationStateObject } from "./authorization-state-object.ts";
-import { TaskRuntimeObject } from "./task-runtime-object.ts";
-import { internalTaskFetch } from "./task-callback.ts";
 import { internalEnvironmentFetch } from "./environment-callback.ts";
 import { environmentWebhook } from "./environment-webhook.ts";
 export { EnvironmentObject as BoundedEnvironmentObject, EnvironmentAdmissionObject } from "./environment-object.ts";
 import authorizationStyles from "@radix-ui/themes/styles.css";
 import { AUTH_STYLES_PATH } from "./authorization-view.ts";
 
-export { AuthorizationStateObject, TaskRuntimeObject };
-export { LegacyRetirement } from "./legacy-retirement.ts";
+export { AuthorizationStateObject };
 
-type WorkerEnvironment = TaskEnv & AuthorizationEnvironment & Parameters<typeof internalEnvironmentFetch>[1] &
+type WorkerEnvironment = AuthorizationEnvironment & Parameters<typeof internalEnvironmentFetch>[1] &
   Parameters<typeof handleEnvironmentTaskRequest>[1] &
   Parameters<typeof environmentWebhook>[1] & { TASK_CONTROL_PLANE_URL: string; OAUTH_KV: KVNamespace };
 
 export class McpApi extends WorkerEntrypoint<WorkerEnvironment, Record<string, unknown>> {
   fetch(request: Request): Promise<Response> {
-    // Fresh consent selects Environment; old grants can only drain/read retained Tasks.
-    // Never retry across products or reinterpret an existing grant.
-    if (Array.isArray(this.ctx.props.oauthScopes) && this.ctx.props.oauthScopes.includes(ENVIRONMENT_SCOPE)) {
-      return handleEnvironmentTaskRequest(request, this.env);
-    }
-    return handleMcpRequest(request, this.env, this.ctx.props, this.ctx);
+    return handleEnvironmentTaskRequest(request, this.env);
   }
 }
 
@@ -100,7 +90,6 @@ async function defaultFetch(request: Request, env: WorkerEnvironment): Promise<R
     return new Response("ok", { headers: { "content-type": "text/plain" } });
   }
 
-  if (url.pathname.startsWith("/internal/tasks/")) return internalTaskFetch(request, env);
   if (url.pathname.startsWith("/internal/environments/")) return internalEnvironmentFetch(request, env);
   if (url.pathname === "/github/events") return environmentWebhook(request, env);
 

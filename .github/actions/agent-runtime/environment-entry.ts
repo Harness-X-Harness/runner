@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, appendFile, chmod } from "node:fs/promises"
 import path from "node:path";
 import { z } from "zod";
 import { claimRunnerEnvironment, serveRunnerEnvironment } from "./environment-identity.ts";
-import { agentEnvironment, configureProvider } from "../task-runtime/index.ts";
+import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
 
 const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok"]), deadline: z.number().int().positive() }).strict();

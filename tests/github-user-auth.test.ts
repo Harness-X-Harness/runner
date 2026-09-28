@@ -22,7 +22,7 @@ type Authorization = Parameters<typeof completeGitHubUserAuthorization>[1];
 type CompletedAuthorization = Parameters<AuthorizationEnv["OAUTH_PROVIDER"]["completeAuthorization"]>[0];
 const authRequest: CompletedAuthorization["request"] = {
   responseType: "code", clientId: "client-123", redirectUri: "https://client.example/callback",
-  scope: ["tasks:manage"], state: "client-state", codeChallenge: "challenge", codeChallengeMethod: "S256",
+  scope: ["environments:use"], state: "client-state", codeChallenge: "challenge", codeChallengeMethod: "S256",
 };
 const appEnv = (overrides: Partial<AuthorizationEnv> = {}): AuthorizationEnv => ({
   GITHUB_APP_CLIENT_ID: "Iv1.example",
@@ -146,7 +146,7 @@ test("GitHub callback stores only refresh and scoped workflow authority", async 
   assert.equal(completedAuthorization.props.environmentGithubAccessToken, "ghu_scoped");
   assert.equal(completedAuthorization.props.environmentGithubAccessTokenExpiresAt, 1_893_456_000);
   assert.equal(completedAuthorization.props.githubAuthorizationKind, "github_app_scoped");
-  assert.deepEqual(completedAuthorization.props.oauthScopes, ["tasks:manage"]);
+  assert.deepEqual(completedAuthorization.props.oauthScopes, ["environments:use"]);
   assert.equal(completedAuthorization.props.mcpControllerGrantId, undefined);
   assert.equal(completedAuthorization.props.mcpClientName, undefined);
 });

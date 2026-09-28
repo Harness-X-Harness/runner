@@ -31,9 +31,8 @@ state and bounded output. Resource notifications trigger reads, not token stream
 Each Environment has one active Agent/command slot. Later Agent calls continue
 the same native session. Reuse the same idempotency key and input for uncertain
 submission; a new key is new work. There is no T3, Lark or widget dependency.
-Old `tasks:manage` grants only read/stop previously accepted one-shot Tasks through
-`wait_task`/`cancel_task`; `run_task` no longer accepts work. Environment access
-needs fresh consent, not token refresh. See the [MCP contract](docs/chatgpt-app.md).
+Environment access requires `environments:use` consent. See the
+[MCP contract](docs/chatgpt-app.md).
 
 ## Runtime and credentials
 

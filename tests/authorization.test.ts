@@ -17,7 +17,7 @@ const authRequest: ConsentState["authRequest"] = Object.freeze({
   responseType: "code",
   clientId: "client-123",
   redirectUri: "https://client.example/callback",
-  scope: ["tasks:manage"],
+  scope: ["environments:use"],
   state: "client-state",
   issuer: "https://runner.example.com",
   codeChallenge: "client-challenge",
@@ -64,9 +64,9 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("set-cookie") ?? "", /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
-  assert.match(body, /Read and stop retained code tasks/);
-  assert.match(body, /cannot start new work/);
-  assert.match(body, /tasks:manage/);
+  assert.match(body, /Use private development environments/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /environments:use/);
   assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="allow")[^>]*>Continue with GitHub<\/button>/);
   assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="deny")[^>]*>Cancel<\/button>/);
   assert.doesNotMatch(body, /<script\b|<style\b/);
@@ -77,7 +77,7 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);
   assert.deepEqual(stored.authRequest.scope, [
-    "tasks:manage",
+    "environments:use",
   ]);
 });
 
@@ -92,7 +92,7 @@ test("initial consent displays and preserves every requested capability", async 
         ...baseEnv.OAUTH_PROVIDER,
         parseAuthRequest: async () => ({
           ...authRequest,
-          scope: ["tasks:manage"],
+          scope: ["environments:use"],
         }),
         lookupClient: async () => ({ ...client, clientName: "ChatGPT" }),
       },
@@ -100,9 +100,9 @@ test("initial consent displays and preserves every requested capability", async 
   );
 
   const body = await response.text();
-  assert.match(body, /Read and stop retained code tasks/);
-  assert.match(body, /cannot start new work/);
-  assert.match(body, /Task permissions/);
+  assert.match(body, /Use private development environments/);
+  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /Environment permissions/);
   assert.match(
     body,
     /These permissions control what your MCP client can ask Harness to do/,
@@ -112,29 +112,8 @@ test("initial consent displays and preserves every requested capability", async 
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);
   assert.deepEqual(stored.authRequest.scope, [
-    "tasks:manage",
+    "environments:use",
   ]);
-});
-
-test("retained Task consent excludes new work and grants no Environment authority", async () => {
-  const states = fakeAuthorizationStates();
-  const response = await authorizePage(new Request("https://runner.example.com/authorize"), {
-    ...baseEnv,
-    AUTHORIZATION_STATES: states.binding,
-    OAUTH_PROVIDER: {
-      ...baseEnv.OAUTH_PROVIDER,
-      parseAuthRequest: async () => ({ ...authRequest, scope: ["tasks:manage"] }),
-      lookupClient: async () => ({ ...client, clientName: "Task acceptance client" }),
-    },
-  });
-  assert.equal(response.status, 200);
-  const body = await response.text();
-  assert.match(body, /Read and stop retained code tasks/);
-  assert.match(body, /cannot start new work/);
-  assert.doesNotMatch(body, /Manage coding sessions|Manage private development environments/);
-  const [stored] = states.values();
-  assert.ok(stored && "authRequest" in stored);
-  assert.deepEqual(stored.authRequest.scope, ["tasks:manage"]);
 });
 
 test("Environment consent grants only the fresh requested scope", async () => {

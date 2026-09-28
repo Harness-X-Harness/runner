@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "../apps/chatgpt-app/node_modules/yaml/dist/index.js";
 import { z } from "../.github/actions/agent-runtime/node_modules/zod/index.js";
@@ -31,14 +31,11 @@ for (const provider of ["codex", "grok"] as const) {
 }
 
 test("public workflow sources do not persist executor credentials or publish private Task data", async () => {
-  const sources = await Promise.all(["run-task", "codex-auth", "grok-auth"].map(workflow));
+  const sources = await Promise.all(["run-environment", "codex-auth", "grok-auth"].map(workflow));
   for (const source of sources) {
     assert.doesNotMatch(source, /experimental_bearer_token|auth[.]json|api_key\s*=/);
   }
-  const runtime = new URL("../.github/actions/task-runtime/", import.meta.url);
-  for (const entry of await readdir(runtime, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile()) sources.push(await readFile(`${entry.parentPath}/${entry.name}`, "utf8"));
-  }
+  sources.push(await readFile(new URL("../.github/actions/agent-runtime/provider-config.ts", import.meta.url), "utf8"));
   for (const source of sources) {
     assert.doesNotMatch(source, /GITHUB_STEP_SUMMARY|actions\/upload-artifact|set -x/);
   }
