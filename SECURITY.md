@@ -4,7 +4,7 @@
 
 ## 身份与授权
 
-固定 Worker `https://runners.trustedtunnel.app` 提供 MCP、OAuth、Environment 和 Task 状态。新工作使用 `environments:use`；`tasks:manage` 仅保留已接受的一次性任务查询和取消，不能创建新工作。
+固定 Worker `https://runners.trustedtunnel.app` 提供 MCP、OAuth、Environment 和 Task 状态。访问需要 `environments:use`；其他 scope 不授予 Environment 权限。
 
 必须区分三种身份：
 
@@ -20,7 +20,7 @@ Agent 使用固定 GitHub token 的全部已配置目标权限，不按提交者
 
 ## 一次性 runner 的信任边界
 
-`run-environment.yml` 只接收 opaque Environment ID。它 checkout 可信 runtime，关闭 checkout credential persistence，在获取 executor secrets 前通过 OIDC 领取环境，然后安装选定 CLI 并建立绑定到精确执行的连接。Agent 和直接命令共享工作区，每个 Environment 同时只允许一个操作。仓库、issue、代码和 PR 操作不是平台固定流水线。`run-task.yml` 与旧回调仅为已接受工作保留，不开放新 MCP admission。
+`run-environment.yml` 只接收 opaque Environment ID。它 checkout 可信 runtime，关闭 checkout credential persistence，在获取 executor secrets 前通过 OIDC 领取环境，然后安装选定 CLI 并建立绑定到精确执行的连接。Agent 和直接命令共享工作区，每个 Environment 同时只允许一个操作。仓库、issue、代码和 PR 操作不是平台固定流水线。
 
 runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用户运行，可以读取该用户可读的文件和凭证。模型 secrets 和 Agent PAT 只进入执行步骤；claim/finish 不接收它们。原生子进程不直接继承 Actions OIDC request URL/token 或 job `GITHUB_TOKEN`，但这不构成相同用户下的进程隔离。
 

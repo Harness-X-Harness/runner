@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import type { DurableObjectTransaction } from "../../apps/chatgpt-app/node_modules/@cloudflare/workers-types/index.d.ts";
-import type { publicTask } from "../../apps/chatgpt-app/src/task-state.ts";
-
-type TaskRecord = Parameters<typeof publicTask>[0];
 
 // The fake enforces transaction order and rollback, not Cloudflare I/O behavior.
 export function taskStorage() {
@@ -25,11 +22,6 @@ export function taskStorage() {
   }
   const storage = {
     get, put,
-    async storedTask(): Promise<TaskRecord> {
-      const value = await get<TaskRecord>("task");
-      assert.ok(value, "expected a persisted Task");
-      return value;
-    },
     async deleteAll() {
       if (inTransaction) throw new Error("Cannot call deleteAll() within a transaction");
       values.clear(); alarm = undefined;
@@ -42,7 +34,7 @@ export function taskStorage() {
         const before = structuredClone(values);
         const beforeAlarm = alarm;
         inTransaction = true;
-        // Only the TaskStore-used transaction methods are implemented here.
+        // Only transaction methods used by these tests are implemented here.
         try { return await operation(storage as unknown as DurableObjectTransaction); }
         catch (error) { values = before; alarm = beforeAlarm; throw error; }
         finally { inTransaction = false; }

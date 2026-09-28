@@ -28,13 +28,8 @@ service is registered by adding this model.
 ## Internal storage seam
 
 `environment-service.ts` composes authenticated open/close with the Environment
-Object. It requires the fresh `environments:use` scope; neither current Task nor
-legacy Environment grants imply this permission. Fresh consent selects the
-Environment MCP handler at the existing endpoint. Task-only grants keep only
-observation and stop for retained one-shot Tasks; new admission is removed.
-There is no cross-product retry. Retained results remain available for their
-existing retention period. The service shares Principal and expiring scoped
-Actions-token validation with Task services. Open validates authorization before
+Object. It requires `environments:use` consent. The service uses Principal and
+expiring scoped Actions-token validation. Open validates authorization before
 storage or GitHub effects. A supplied idempotency key derives an owner-scoped
 128-bit Environment ID; the immutable creation record rejects executor conflicts.
 Without a key, each call receives a random ID. This internal service does not

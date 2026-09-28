@@ -5,9 +5,7 @@ primitive. It is not registered as an MCP tool and does not dispatch workflows.
 It uses Node's process API, not an Agent or a shell wrapper.
 
 The public `command` tool reaches this primitive through the Environment Task
-authority and its authenticated runner connection. The Worker selects that
-authority for grants with `environments:use`; Task-only grants keep the separate
-one-shot observation/stop handler until its retention conditions permit retirement.
+authority and its authenticated runner connection, authorized by `environments:use`.
 The tool schema requires `environmentId`, nonempty `argv` and a positive
 `timeoutSeconds`; `cwd` defaults to the workspace. Tool schemas in
 `environment-tools.ts` share the service validators and are the input authority.
@@ -114,16 +112,14 @@ it need not be recreated for each turn. It rejects an already aborted lifetime
 signal before spawning a process. Controlled ACP tests exercise two sequential
 turns in the same native session and verify process exit after leaving the
 scope. This is protocol-fixture evidence, not a real model continuity or turn
-cancellation acceptance result. The one-shot Task facade remains separate until
-the Environment product replaces its deployed consumers.
+cancellation acceptance result.
 
 `readAgentTurn` consumes SDK updates through the native stop marker and returns
 either a completed semantic final response or cancellation. It does not cancel
 the prompt request locally, close the session, or infer stopped work from a sent
 cancel notification. A controlled test sends standard `session/cancel`, awaits
 the native cancelled response and queue stop marker, then completes another turn
-in the same session and process. The current one-shot `readFinalResponse` caller
-still maps cancellation to its existing Task error contract. Durable turn identity,
+in the same session and process. Durable turn identity,
 control-plane admission and user-input routing belong to the Environment authority,
 not this final-response reader. Native provider cancellation remains a distinct
 boundary from the ACP fixture's cancellation behavior.

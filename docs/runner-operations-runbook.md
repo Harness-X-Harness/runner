@@ -9,26 +9,6 @@ Authorize `environments:use` with a modern Tasks-capable client. Use
 exact Environment and Task handles. Uncertain delivery does not permit a new
 creation key. See the [MCP contract](chatgpt-app.md).
 
-## Retained one-shot work
-
-Old `tasks:manage` grants only expose `wait_task` and `cancel_task` for accepted
-work. New `run_task` admission is removed. Keep claim/finish, owner checks and
-retained reads until drain and retention conditions are met. Stop intent is
-not a rollback or confirmation that execution ended.
-
-Unclaimed work expires after ten minutes even if a dispatch reply was lost.
-The claim gate rejects late startup; there is no automatic second dispatch.
-After an admitted run loses its finish callback, a nonzero `wait_task` or
-`cancel_task` can reconcile the exact run/attempt using the owner's current
-scoped GitHub authority. A zero-second wait returns stored state only. Revoked
-authorization or unavailable GitHub evidence leaves execution status uncertain;
-reconnect or query later, not with an alternate identity.
-
-There is no unattended running-Task observer. With no later authorized query,
-Task state can remain active after GitHub ends the run. GitHub's sixty-minute
-job limit still bounds execution. Terminal results expire seven days after the
-original terminal commit. Do not recover results from logs or artifacts.
-
 ## Storage lifecycle
 
 Applied migration tags are append-only. Check the deployed Worker and its exact

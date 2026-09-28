@@ -4,6 +4,31 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimEnvironment } from "../.github/actions/agent-runtime/environment-entry.ts";
+import { agentEnvironment, configureProvider } from "../.github/actions/agent-runtime/provider-config.ts";
+
+test("provider configuration stays private and Agent child does not inherit job authority", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-provider-config-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const env = { HOME: directory, GH_TOKEN: "PRIVATE_AGENT_TOKEN", MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY",
+    MINI_CODEX_BASE_URL: "https://codex.example", MINI_GROK_BASE_URL: "https://grok.example",
+    GITHUB_TOKEN: "PRIVATE_JOB_TOKEN", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "PRIVATE_OIDC",
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example" };
+  for (const executor of ["codex", "grok"] as const) {
+    await configureProvider(executor, env);
+    const file = join(directory, `.${executor}`, "config.toml");
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    const config = await readFile(file, "utf8");
+    assert.match(config, /env_key = "MINI_END_USER_KEY"/);
+    assert.doesNotMatch(config, /PRIVATE_/);
+  }
+  const child = agentEnvironment(env);
+  assert.equal(child.GH_TOKEN, env.GH_TOKEN);
+  assert.equal(child.MINI_END_USER_KEY, env.MINI_END_USER_KEY);
+  for (const key of ["GITHUB_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL"]) {
+    assert.equal(child[key], undefined);
+    assert.ok(env[key as keyof typeof env]);
+  }
+});
 
 test("Environment bootstrap stores only executor/deadline privately and outputs only executor", async t => {
   const directory = await mkdtemp(join(tmpdir(), "harness-environment-entry-"));

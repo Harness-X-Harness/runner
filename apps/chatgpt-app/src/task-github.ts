@@ -1,11 +1,10 @@
-import { TASK_WORKFLOW } from "../../../shared/task-contract.ts";
 import { TaskError } from "../../../shared/task-errors.ts";
 import { githubHeaders } from "./github.ts";
 import { z } from "zod";
-import type { TaskExecution } from "./task-request.ts";
 import { ENVIRONMENT_WORKFLOW } from "./environment-callback.ts";
 
 export type TaskGitHubEnvironment = { GITHUB_RUNNER_REPOSITORY: string; GITHUB_RUNNER_REF?: string };
+type TaskExecution = { ownerId: string; repository: string; runId: string; runAttempt: string };
 const runSchema = z.object({
   id: z.union([z.string(), z.number()]), run_attempt: z.union([z.string(), z.number()]),
   repository: z.object({ full_name: z.string() }), path: z.string(), actor: z.object({ id: z.union([z.string(), z.number()]) }),

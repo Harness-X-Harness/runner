@@ -61,10 +61,6 @@ before issuing one follow-up turn. For CI wait, use one approved exact run and
 prove the original Agent turn consumes its completion without resubmission.
 Do not add these model invocations when their boundaries are unchanged.
 
-For a retained-Task cutover, no new one-shot invocation is allowed: an old
-`run_task` call must fail without creating a run, while a known retained result
-remains readable by its owner. Keep the finalizer until accepted work is drained.
-
 ### Evidence and cleanup
 
 Record bounded facts for semantic results, same Environment/workspace, observed

@@ -39,15 +39,6 @@ it. A completed Agent turn does not certify the user's business objective.
 Repository and PR work remains the Agent's responsibility, not a fixed pipeline.
 See [runtime](development/command-runtime.md) and [admission](development/environment-admission.md).
 
-## Retained one-shot Tasks
-
-`tasks:manage` only exposes `wait_task` and `cancel_task` for previously accepted
-work. `run_task` is absent and cannot dispatch. This temporary path preserves
-owner checks, exact-run cancellation, late completion and existing seven-day
-result retention. It never creates an Environment or upgrades an old grant.
-It is removed only after accepted work is drained and retained results expire;
-see the [retained Task contract](development/task-runtime.md).
-
 ## Identity and authority
 
 - **Principal:** the stable GitHub numeric user ID. It owns the Task across
@@ -62,8 +53,7 @@ see the [retained Task contract](development/task-runtime.md).
 Each Environment has a `BoundedEnvironmentObject`, with owner checks, one
 execution binding and immutable terminal operation results. The admission
 authority owns the bounded live membership, not Task results or history.
-Retained one-shot Tasks remain in `TASKS` until their retention conditions permit
-removal. `AuthorizationStateObject` stores one-time consent and callback state;
+`AuthorizationStateObject` stores one-time consent and callback state;
 `OAUTH_KV` belongs only to the OAuth provider.
 
 Only trusted users should receive Task access. The Agent deliberately has the
