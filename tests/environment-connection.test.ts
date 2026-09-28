@@ -202,13 +202,15 @@ test("runner uses fresh header credentials, validates handshake and reports tran
   assert.equal(tokens, count);
 });
 
-test("socket loss does not restart execution; a new generation resends the retained result", { timeout: 7000 }, async t => {
+for (const completion of ["after-reconnect", "while-disconnected"] as const)
+test(`socket loss preserves one execution and result: completion=${completion}`, { timeout: 7000 }, async t => {
   const workspace = await mkdtemp(join(tmpdir(), "harness-channel-"));
   const runtime = new EnvironmentRuntime({ workspace, deadline: Date.now() + 5000, env: {} });
   const controller = new AbortController();
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const duplicateSeen = Promise.withResolvers<void>();
+  const completed = Promise.withResolvers<void>();
   let executions = 0;
   let deliveries = 0;
   const environment: EnvironmentPort = {
@@ -221,7 +223,7 @@ test("socket loss does not restart execution; a new generation resends the retai
     agent: async () => { throw new Error("must not call model"); },
     execute: (id, input) => {
       if (++deliveries === 2) duplicateSeen.resolve();
-      return operations.execute(id, input);
+      return operations.execute(id, input).then(result => { completed.resolve(); return result; });
     },
   };
   const operations = new EnvironmentOperations(environment, () => runtime.cancelActive());
@@ -263,6 +265,11 @@ test("socket loss does not restart execution; a new generation resends the retai
   first.socket.terminate();
   await firstServing;
   assert.equal(environment.signal.aborted, false);
+  if (completion === "while-disconnected") {
+    release.resolve();
+    await completed.promise;
+    assert.equal(await readFile(join(workspace, "count"), "utf8"), "x");
+  }
   const second = await connectEnvironment(url, runtimeId, async () => "fixture", AbortSignal.timeout(2000));
   const secondServing = serveEnvironmentConnection(second, environment, () => generation);
   await duplicateSeen.promise;
