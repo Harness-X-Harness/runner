@@ -10,6 +10,30 @@ const processConfig = { command: process.execPath,
 };
 const handlers = { sessionUpdate: () => {}, requestPermission: () => ({ outcome: { outcome: "cancelled" as const } }) };
 
+for (const active of [false, true]) test(`provider exit closes Environment without waiting for its deadline, active=${active}`, { timeout: 7000 }, async () => {
+  let pid = 0;
+  let served: Promise<void> | undefined;
+  const scope = withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, environment => served = (async () => {
+    const initial = await environment.agent("continuity");
+    if (initial.status !== "completed") throw new Error("Expected completion");
+    pid = JSON.parse(initial.finalResponse).pid;
+    if (active) {
+      assert.deepEqual(await environment.execute("crash", { kind: "agent", prompt: "crash" }),
+        { ok: false, code: "OPERATION_FAILED" });
+    } else process.kill(pid, "SIGTERM");
+    if (!environment.signal.aborted) await once(environment.signal, "abort", { signal: AbortSignal.timeout(1000) });
+    assert.equal(environment.signal.aborted, true);
+    await assert.rejects(environment.execute("next", { kind: "agent", prompt: "continuity" }), /ENVIRONMENT_RUNTIME_CLOSING/);
+    await assert.rejects(environment.command({ argv: [process.execPath, "--version"], timeoutSeconds: 1 }), /ENVIRONMENT_RUNTIME_CLOSING/);
+  })());
+  await assert.rejects(scope);
+  // The SDK rejects its scope on EOF independently of the serving callback.
+  // Await that callback too so a failed inner assertion cannot be hidden by EOF.
+  assert.ok(served);
+  await served;
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
 test("lost CI completion ends at the Environment deadline and late delivery cannot revive the wait", { timeout: 8000 }, async () => {
   const originalFetch = globalThis.fetch;
   let reads = 0;
