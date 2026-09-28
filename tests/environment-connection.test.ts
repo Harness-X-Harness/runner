@@ -73,13 +73,17 @@ test("channel transports a native ACP question and resumes its exact answer", { 
   assert.ok(outputSnapshots.at(-1)!.text.includes("WIRE_RESUMED"));
 });
 
-test("native ACP turn waits through private MCP and resumes from the CI channel result", { timeout: 8000 }, async t => {
+for (const reconnect of [false, true])
+test(`native ACP CI wait resumes once across channel delivery, reconnect=${reconnect}`, { timeout: 8000 }, async t => {
   const deadline = Date.now() + 6500;
   let reads = 0; let registrations = 0;
+  let generation = 0;
+  const waitIds = new Set<string>();
+  let completion: { taskId: string; waitId: string; result: unknown } | undefined;
   const result = Promise.withResolvers<unknown>();
   t.mock.method(globalThis, "fetch", async (url: unknown) => {
     assert.equal(url, "https://api.github.com/repos/fixture/repo/actions/runs/12/attempts/1");
-    assert.equal(registrations, 1); reads++;
+    assert.equal(waitIds.size, 1); reads++;
     return Response.json({ id: 12, run_attempt: 1, head_sha: "a".repeat(40),
       repository: { full_name: "fixture/repo" }, status: "in_progress", conclusion: null });
   });
@@ -91,35 +95,46 @@ test("native ACP turn waits through private MCP and resumes from the CI channel 
   await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");
   server.on("connection", socket => {
-    socket.send(JSON.stringify({ type: "connected", generation: 1, deadline }));
+    const current = ++generation;
+    socket.send(JSON.stringify({ type: "connected", generation: current, deadline }));
     socket.on("message", raw => {
       const message = JSON.parse(String(raw));
       if (message.type === "ready") {
         socket.send(JSON.stringify({ type: "ready-accepted" }));
-        socket.send(JSON.stringify({ type: "execute", generation: 1, taskId: "ci-turn", input: { kind: "agent", prompt: "ci-wait" } }));
+        socket.send(JSON.stringify({ type: "execute", generation: current, taskId: "ci-turn", input: { kind: "agent", prompt: "ci-wait" } }));
       } else if (message.type === "ci-register") {
         registrations++;
-        socket.send(JSON.stringify({ type: "ci-accepted", generation: 1, taskId: message.taskId, waitId: message.waitId }));
-        socket.send(JSON.stringify({ type: "ci-result", generation: 1, taskId: message.taskId, waitId: message.waitId,
-          result: { ...message.target, conclusion: "success" } }));
+        waitIds.add(message.waitId);
+        const observed = { taskId: message.taskId, waitId: message.waitId,
+          result: { ...message.target, conclusion: "success" } };
+        if (completion) assert.deepEqual(observed, completion);
+        else completion = observed;
+        socket.send(JSON.stringify({ type: "ci-accepted", generation: current, taskId: message.taskId, waitId: message.waitId }));
+        // Lose the first delivery socket after registration. Only the same pending
+        // native call on the next generation may consume the retained result.
+        if (reconnect && current === 1) { socket.close(1000); return; }
+        socket.send(JSON.stringify({ type: "ci-result", generation: current, ...completion }));
       } else if (message.type === "output") {
-        socket.send(JSON.stringify({ type: "output-accepted", generation: 1, taskId: message.taskId, revision: message.output.revision }));
-      } else if (message.type === "result") { result.resolve(message.result); socket.close(1000); }
+        socket.send(JSON.stringify({ type: "output-accepted", generation: current, taskId: message.taskId, revision: message.output.revision }));
+      } else if (message.type === "result") {
+        result.resolve(message.result);
+        socket.send(JSON.stringify({ type: "close", generation: current }));
+      }
     });
   });
   await withEnvironment({ command: process.execPath,
     args: [fileURLToPath(new URL("../.github/actions/agent-runtime/fixtures/agent.ts", import.meta.url))],
     workspace: process.cwd(), env: {} }, "codex", deadline, { GH_TOKEN: "fixture-work-token" }, {
     sessionUpdate: () => {}, requestPermission: () => ({ outcome: { outcome: "cancelled" } }),
-  }, async environment => {
-    const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
-      "00000000-0000-4000-8000-000000000001", async () => "fixture", AbortSignal.timeout(3000));
-    await serveEnvironmentConnection(connection, environment, () => 1);
-  });
+  }, environment => serveEnvironmentConnections(environment, deadline, signal =>
+    connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+      "00000000-0000-4000-8000-000000000001", async () => "fixture", signal)));
   const value = await result.promise as { ok: boolean; value: { finalResponse: string } };
   assert.equal(value.ok, true);
   assert.equal(JSON.parse(value.value.finalResponse).structuredContent.conclusion, "success");
-  assert.equal(registrations, 1); assert.equal(reads, 1);
+  assert.equal(generation, reconnect ? 2 : 1);
+  assert.equal(registrations, generation);
+  assert.equal(waitIds.size, 1); assert.equal(reads, 1);
 });
 
 for (const mode of ["resume", "deadline-change", "generation-replay"] as const) {

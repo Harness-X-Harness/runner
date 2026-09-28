@@ -195,13 +195,25 @@ test("composed Environment shares workspace, closes admission and observes provi
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
-for (const active of [false, true]) test(`Environment deadline closes ACP scope with active turn=${active}`, { timeout: 7000 }, async () => {
-  const pid = await withEnvironment(processConfig, "codex", Date.now() + 1500, {}, handlers, async environment => {
+for (const active of [false, true]) test(`Environment deadline closes ACP scope with active turn=${active}`, { timeout: 7000 }, async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const ready = Promise.withResolvers<void>();
+  const pid = await withEnvironment(processConfig, "codex", Date.now() + 1500, {}, { ...handlers,
+    sessionUpdate(notification) {
+      const update = notification.update;
+      if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text" &&
+          update.content.text === "cancel-ready") ready.resolve();
+    },
+  }, async environment => {
     const initial = await environment.agent("continuity");
     if (initial.status !== "completed") throw new Error("Expected completion");
     const pid = JSON.parse(initial.finalResponse).pid;
     const pending = active ? environment.agent("cancel-turn") : undefined;
-    if (!environment.signal.aborted) await once(environment.signal, "abort");
+    if (active) await ready.promise;
+    // Exercise expiry during the intended phase, not a machine-speed-dependent handshake.
+    assert.equal(environment.signal.aborted, false);
+    t.mock.timers.tick(1500);
+    assert.equal(environment.signal.aborted, true);
     await environment.close();
     if (pending) assert.deepEqual(await pending, { status: "cancelled" });
     return pid;
