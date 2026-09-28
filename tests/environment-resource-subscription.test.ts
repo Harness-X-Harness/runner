@@ -3,8 +3,11 @@ import test from "node:test";
 import { serveTaskRequest, type TaskAuthority } from "../apps/chatgpt-app/src/task-methods.ts";
 import { observeEnvironmentResource, readEnvironmentResource } from "../apps/chatgpt-app/src/environment-resources.ts";
 import { sseMessages } from "./helpers/sse-messages.ts";
+import { mcpAuthorization } from "../apps/chatgpt-app/src/mcp-authorization.ts";
+import type { TokenSummary } from "../apps/chatgpt-app/node_modules/@cloudflare/workers-oauth-provider/dist/oauth-provider.js";
 
-for (const kind of ["output", "environment"] as const) test(`standard ${kind} events deliver URI only, read current state and stop on revoked authority`, { timeout: 5000 }, async () => {
+for (const loss of ["scope", "expiry"] as const)
+for (const kind of ["output", "environment"] as const) test(`standard ${kind} events deliver URI only and stop on authority ${loss}`, { timeout: 5000 }, async () => {
   const taskId = `task_${"a".repeat(32)}_${"b".repeat(32)}`;
   const environmentId = `env_${"a".repeat(32)}`;
   const uri = kind === "output" ? `harness://tasks/${taskId}/output` : `harness://environments/${environmentId}`;
@@ -12,7 +15,16 @@ for (const kind of ["output", "environment"] as const) test(`standard ${kind} ev
   let snapshot = { revision: 0, text: "", truncated: false };
   const listeners = new Set<ReadableStreamDefaultController<Uint8Array>>();
   const cancelled = Promise.withResolvers<void>();
-  const authorize = async () => ({ githubUserId: "123", oauthScopes: allowed ? ["environments:use"] : [] });
+  const authorize = mcpAuthorization(new Request("https://fixture/mcp", {
+    headers: { authorization: "Bearer fixture-token" },
+  }), { TASK_CONTROL_PLANE_URL: "https://fixture", OAUTH_PROVIDER: {
+    async unwrapToken<T>(): Promise<TokenSummary<T> | null> {
+      return { id: "fixture", grantId: "fixture", userId: "github-123", createdAt: 1,
+        expiresAt: !allowed && loss === "expiry" ? 1 : Date.now() / 1000 + 60,
+        audience: "https://fixture/mcp", scope: !allowed && loss === "scope" ? [] : ["environments:use"],
+        grant: { clientId: "fixture", scope: ["environments:use"], props: { githubUserId: "123" } as T } };
+    },
+  } });
   const environmentState = () => ({ environmentId, executor: "codex" as const, createdAt: 1, expiresAt: 1000,
     activeTaskId: null, status: snapshot.revision === 0 ? "opening" as const : "ready" as const });
   const currentState = () => kind === "output" ? snapshot : environmentState();
