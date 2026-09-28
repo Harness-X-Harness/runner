@@ -78,6 +78,8 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   };
   const params = { name: "command", arguments: { environmentId, argv: ["pwd"], timeoutSeconds: 5 } };
   const discovered = await rpc("server/discover", {}, false);
+  assert.equal(discovered.result?.ttlMs, 0);
+  assert.equal(discovered.result?.cacheScope, "private");
   assert.deepEqual(discovered.result?.supportedVersions, ["2026-07-28"]);
   assert.deepEqual(discovered.result?.capabilities, { tools: {}, resources: { subscribe: true },
     extensions: { "io.modelcontextprotocol/tasks": {} } });

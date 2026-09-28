@@ -158,6 +158,7 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
       if (controller.signal.aborted) return;
       if (input.method === 'server/discover') {
         const result = specTypeSchemas.DiscoverResult['~standard'].validate({ resultType: 'complete',
+          ttlMs: 0, cacheScope: 'private',
           supportedVersions: [protocol], capabilities: { tools: {}, resources: { subscribe: true },
             extensions: { 'io.modelcontextprotocol/tasks': {} } },
           _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'harness-x-harness', version: '2.0.0' } },
