@@ -11,6 +11,7 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   const records = new Map<string, OperationRecord>();
   let permits = true;
   let reservations = 0;
+  let immediateResult: OperationRecord["result"];
   let lifecycle: EnvironmentSnapshot["status"] = "ready";
   let readFailure = false;
   let closeExecutions = 0;
@@ -51,6 +52,7 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
       async reserveOperation(owner: string, taskId: string, request: string) {
         assert.equal(owner, "123"); reservations++;
         const record = records.get(taskId) ?? { request, runtimeId: "PRIVATE_RUNTIME", createdAt: 1, updatedAt: 1 };
+        if (immediateResult !== undefined) record.result = immediateResult;
         records.set(taskId, record); return record;
       },
       async readOperation(owner: string, taskId: string) {
@@ -124,6 +126,18 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(created.result?.status, "working");
   assert.ok(!JSON.stringify(created).includes("PRIVATE_RUNTIME"));
   assert.equal((await rpc("tasks/get", { taskId })).result?.status, "working");
+  // A completion committed before the first snapshot is a tool result, not a Task handle.
+  for (const exitCode of [0, 7]) {
+    const value = { exitCode, signal: null, stdout: "FAST_RESULT", stderr: "", truncated: false };
+    immediateResult = { ok: true, value };
+    const fast = await rpc("tools/call", { ...params, arguments: { ...params.arguments,
+      idempotencyKey: `fast-result-${exitCode}` } });
+    assert.equal(fast.result?.resultType, "complete");
+    assert.equal(fast.result?.taskId, undefined);
+    assert.equal(fast.result?.isError, exitCode !== 0);
+    assert.deepEqual(fast.result?.structuredContent, value);
+  }
+  immediateResult = undefined;
   for (const missingId of ["malformed", `task_${"a".repeat(32)}_${"0".repeat(32)}`]) {
     assert.deepEqual((await rpc("tasks/get", { taskId: missingId })).error,
       { code: -32602, message: "Task not found or no longer available" });
