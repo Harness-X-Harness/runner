@@ -30,6 +30,7 @@ import authorizationStyles from "@radix-ui/themes/styles.css";
 import { AUTH_STYLES_PATH } from "./authorization-view.ts";
 
 export { AuthorizationStateObject, TaskRuntimeObject };
+export { LegacyRetirement } from "./legacy-retirement.ts";
 
 type WorkerEnvironment = TaskEnv & AuthorizationEnvironment & Parameters<typeof internalEnvironmentFetch>[1] &
   Parameters<typeof handleEnvironmentTaskRequest>[1] &

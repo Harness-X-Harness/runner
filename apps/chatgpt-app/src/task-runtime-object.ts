@@ -36,4 +36,13 @@ export class TaskRuntimeObject extends DurableObject<unknown> {
   }
 
   async alarm() { await this.tasks.alarm(); }
+
+  /** Temporary operator projection for #145; deliberately bypasses state maintenance. */
+  async retirementMetadata() {
+    const task = await this.ctx.storage.get<{ status: string; createdAt: string;
+      finishedAt?: string; expiresAt?: number }>("task");
+    if (!task) return null;
+    return { status: task.status, createdAt: task.createdAt,
+      finishedAt: task.finishedAt ?? null, expiresAt: task.expiresAt ?? null };
+  }
 }
