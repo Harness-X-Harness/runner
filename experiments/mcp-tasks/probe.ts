@@ -7,7 +7,7 @@ import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { CreateTaskResultV2Schema } from '@modelcontextprotocol/ext-tasks/core/v2';
 import { z } from 'zod';
-import { sseMessages } from './sse-messages.ts';
+import { sseMessages } from '../../tests/helpers/sse-messages.ts';
 
 const protocol = '2026-07-28';
 const uri = 'harness-probe://output';

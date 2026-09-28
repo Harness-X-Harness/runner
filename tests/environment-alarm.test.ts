@@ -3,7 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "../apps/chatgpt-app/node_modules/esbuild/lib/main.js";
 import { Miniflare } from "../apps/chatgpt-app/node_modules/miniflare/dist/src/index.js";
-import { sseMessages } from "../experiments/mcp-tasks/sse-messages.ts";
+import { sseMessages } from "./helpers/sse-messages.ts";
 
 test("native startup alarm closes admission without releasing an unconfirmed run", { timeout: 10000 }, async t => {
   const source = fileURLToPath(new URL("../apps/chatgpt-app/src/environment-object.ts", import.meta.url));

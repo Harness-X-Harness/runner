@@ -8,7 +8,7 @@ import { TaskStatusNotificationV2Schema, type DetailedTaskV2 } from '@modelconte
 import { z } from 'zod';
 import { serveTaskRequest, type TaskAuthority } from '../../apps/chatgpt-app/src/task-methods.ts';
 import { observeTask } from '../../apps/chatgpt-app/src/task-observation.ts';
-import { sseMessages } from './sse-messages.ts';
+import { sseMessages } from '../../tests/helpers/sse-messages.ts';
 
 test('HTTP subscriptions recover authoritative snapshots and isolate owner filters', { timeout: 8000 }, async t => {
   const timestamp = new Date().toISOString();

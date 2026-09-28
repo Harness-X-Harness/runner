@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { serveTaskRequest, type TaskAuthority } from "../apps/chatgpt-app/src/task-methods.ts";
 import { observeEnvironmentResource, readEnvironmentResource } from "../apps/chatgpt-app/src/environment-resources.ts";
-import { sseMessages } from "../experiments/mcp-tasks/sse-messages.ts";
+import { sseMessages } from "./helpers/sse-messages.ts";
 
 for (const kind of ["output", "environment"] as const) test(`standard ${kind} events deliver URI only, read current state and stop on revoked authority`, { timeout: 5000 }, async () => {
   const taskId = `task_${"a".repeat(32)}_${"b".repeat(32)}`;

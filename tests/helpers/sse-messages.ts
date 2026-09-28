@@ -1,4 +1,4 @@
-import { EventSourceParserStream } from 'eventsource-parser/stream';
+import { EventSourceParserStream } from '../../apps/chatgpt-app/node_modules/eventsource-parser/dist/stream.js';
 
 export async function* sseMessages(response: Response): AsyncGenerator<unknown> {
   if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {

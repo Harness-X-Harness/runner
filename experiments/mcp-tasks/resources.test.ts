@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { sseMessages } from './sse-messages.ts';
+import { sseMessages } from '../../tests/helpers/sse-messages.ts';
 
 test('official resource handler keeps owner discovery, reads and subscriptions private', async t => {
   const records = new Map([

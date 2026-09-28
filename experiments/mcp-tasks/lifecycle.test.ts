@@ -16,7 +16,7 @@ import { CreateTaskResultV2Schema, DetailedTaskV2Schema, GetTaskResultV2Schema,
 import { z } from 'zod';
 import { serveTaskRequest, type TaskAuthority } from '../../apps/chatgpt-app/src/task-methods.ts';
 import { observeTask } from '../../apps/chatgpt-app/src/task-observation.ts';
-import { sseMessages } from './sse-messages.ts';
+import { sseMessages } from '../../tests/helpers/sse-messages.ts';
 
 test('HTTP Task handle, input and cooperative cancellation with a reopened SQLite authority', { timeout: 10000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'harness-task-protocol-'));
