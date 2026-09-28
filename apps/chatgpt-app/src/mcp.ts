@@ -8,7 +8,7 @@ import { z } from "zod";
 export function createServer(env: TaskEnv, props: Record<string, unknown> = {}): McpServer {
   const server = new McpServer(
     { name: "harness-x-harness", version: "1.0.0" },
-    { instructions: "Use run_task for one autonomous code task, wait_task for its final response, and cancel_task to request a stop. Save the Task ID; do not automatically resubmit uncertain work." },
+    { instructions: "This retained Task endpoint accepts no new work. Use wait_task or cancel_task only for an existing Task ID. For new work, authorize environments:use with a client supporting modern MCP Tasks. Existing grants do not gain that permission automatically." },
   );
   registerTaskTools(server, env, () => currentProps(props));
   return server;

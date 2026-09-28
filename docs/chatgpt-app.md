@@ -1,36 +1,52 @@
 # Harness X Harness MCP app
 
-Harness runs autonomous Codex or Grok Tasks on temporary GitHub-hosted runners.
+Harness runs commands and interactive Codex or Grok turns in bounded Environments.
 The stable MCP endpoint is `https://runners.trustedtunnel.app/mcp`. Cloudflare
 owns authentication and Task state; GitHub owns the execution lifetime.
 
 ## User flow
 
-1. Connect an MCP client and authorize `tasks:manage`.
+1. Connect a modern Tasks-capable MCP client and authorize `environments:use`.
 2. GitHub verifies the user through the dedicated GitHub App. Harness derives
    a user token limited to `Harness-X-Harness/runner` and `Actions: write`.
-3. Call `run_task` with `executor` and `prompt`. Put the repository and all work
-   instructions in the prompt. Save the returned Task ID.
-4. Call `wait_task` for the final semantic response, or `cancel_task` to request
-   a stop. A nonterminal wait can be repeated; a new run call creates new work.
+3. Call `open_environment` with `executor`. Subscribe to the returned Task and
+   wait for ready. Save its Environment resource link, or discover live owned
+   Environments with `resources/list` from another client of the same Principal.
+4. Call `command` with literal argv and a timeout, or `agent` with a prompt.
+   Agent turns share the workspace and native session. Use standard Task
+   subscriptions for state/result, `tasks/update` for requested input and
+   `tasks/cancel` for cooperative cancellation.
+5. Call `close_environment` and observe completion. A closing status is not
+   confirmation of stopped execution or released capacity.
 
 | Tool | Purpose |
 | --- | --- |
-| `run_task` | Run one autonomous Codex or Grok task with the configured Agent credentials |
-| `wait_task` | Read or briefly wait for an owned Task and its final response |
-| `cancel_task` | Request cancellation of an owned Task and its exact known run |
+| `open_environment` | Allocate a bounded workspace for Codex or Grok |
+| `agent` | Send another prompt to its native Agent session |
+| `command` | Run argv directly in the same workspace without a model |
+| `close_environment` | Stop the exact runtime and confirm cleanup |
 
-These tools require `tasks:manage`. Refreshing an older grant does not add this
-scope. Valid Task grants do not need new consent on each deployment. Discovery
-marks run and cancel as destructive, non-read-only operations; arbitrary Agent
-work is open-world. Wait is read-only.
+These tools require fresh `environments:use` consent and the modern MCP Tasks
+capability. Refresh does not add authority. Valid grants are reused across
+deployments. Unsupported clients are rejected before execution, not silently
+changed to polling. This release targets SDK clients; desktop resource display,
+notifications and automatic model continuation require separate host support.
 
-Tasks have no interactive continuation, widget, stream or list API. Harness
-does not impose checkout, issue, branch or PR tools: the Agent performs those
-operations using the fixed GitHub credential inside its runner. Provider
-completion proves a non-empty final response, not that the user's business
-objective succeeded. The [Task runtime contract](development/task-runtime.md)
-defines bounds, terminal races and conditional lost-finish reconciliation.
+An Environment permits one active Agent/command operation. Resource links expose
+bounded owner-private state and output; URI change notifications trigger reads.
+Reading a snapshot replaces previously displayed content rather than appending
+it. A completed Agent turn does not certify the user's business objective.
+Repository and PR work remains the Agent's responsibility, not a fixed pipeline.
+See [runtime](development/command-runtime.md) and [admission](development/environment-admission.md).
+
+## Retained one-shot Tasks
+
+`tasks:manage` only exposes `wait_task` and `cancel_task` for previously accepted
+work. `run_task` is absent and cannot dispatch. This temporary path preserves
+owner checks, exact-run cancellation, late completion and existing seven-day
+result retention. It never creates an Environment or upgrades an old grant.
+It is removed only after accepted work is drained and retained results expire;
+see the [retained Task contract](development/task-runtime.md).
 
 ## Identity and authority
 
@@ -43,10 +59,12 @@ defines bounds, terminal races and conditional lost-finish reconciliation.
 - **Agent GitHub identity:** `AGENT_GITHUB_TOKEN`, injected as `GH_TOKEN` only
   into execution. It is not the Principal's scoped control-plane token.
 
-Each Task has its own `TaskRuntimeObject` in `TASKS`, with owner checks, a
-single execution binding and immutable terminal state. There is no global Task
-index. `AuthorizationStateObject` stores one-time consent and GitHub callback
-state; `OAUTH_KV` belongs only to the OAuth provider.
+Each Environment has a `BoundedEnvironmentObject`, with owner checks, one
+execution binding and immutable terminal operation results. The admission
+authority owns the bounded live membership, not Task results or history.
+Retained one-shot Tasks remain in `TASKS` until their retention conditions permit
+removal. `AuthorizationStateObject` stores one-time consent and callback state;
+`OAUTH_KV` belongs only to the OAuth provider.
 
 Only trusted users should receive Task access. The Agent deliberately has the
 fixed token's repository rights. Omitting Actions OIDC variables from its child
@@ -85,8 +103,8 @@ also stay out of MCP input/output, Actions logs and public configuration.
 
 The source of truth for Worker variables and bindings is
 [wrangler.jsonc](../apps/chatgpt-app/wrangler.jsonc). The required GitHub App
-client secret, `GITHUB_APP_CLIENT_SECRET`, is loaded privately. The Task workflow filename is defined in
-the shared Task contract, not a second deployment variable.
+client secret, `GITHUB_APP_CLIENT_SECRET`, is loaded privately. Workflow identity
+is checked by the callback authority, not a second deployment variable.
 
 ## Deployment and acceptance
 

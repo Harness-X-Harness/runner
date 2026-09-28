@@ -1,27 +1,13 @@
-import { isTerminalTask, newTaskId, TASK_WORKFLOW } from "../../../shared/task-contract.ts";
+import { isTerminalTask, TASK_WORKFLOW } from "../../../shared/task-contract.ts";
 import { taskRequest, type TaskEnvironment, type TaskControl, type TaskSnapshot } from "./task-request.ts";
-import { taskWaitSeconds, validateTaskInput } from "./task-state.ts";
-import { cancelTaskWorkflow, dispatchTaskWorkflow, observeWorkflowExecution, type TaskGitHubEnvironment } from "./task-github.ts";
+import { taskWaitSeconds } from "./task-state.ts";
+import { cancelTaskWorkflow, observeWorkflowExecution, type TaskGitHubEnvironment } from "./task-github.ts";
 import { executionPrincipal, executionToken } from "./execution-authority.ts";
 
 export type TaskEnv = TaskEnvironment & TaskGitHubEnvironment;
-export type RunTaskInput = { executor: "codex" | "grok"; prompt: string };
 
 function principal(props: unknown): string {
   return executionPrincipal(props, "tasks:manage");
-}
-
-export async function runTask(env: TaskEnv, props: unknown, input: RunTaskInput, fetchImpl = fetch): Promise<TaskSnapshot> {
-  const ownerId = principal(props);
-  const token = executionToken(props);
-  validateTaskInput(input);
-  const taskId = newTaskId();
-  await taskRequest(env, taskId, "/create", { taskId, ownerId,
-    executor: input.executor, prompt: input.prompt, repository: env.GITHUB_RUNNER_REPOSITORY });
-  const outcome = await dispatchTaskWorkflow(env, token, taskId, fetchImpl);
-  if (outcome === "rejected") return taskRequest(env, taskId, "/dispatch-failed", { ownerId });
-  // Neither an unknown response nor a lost claim response permits another dispatch.
-  return taskRequest(env, taskId, "/read", { ownerId });
 }
 
 async function reconcileTask(env: TaskEnv, props: unknown, taskId: string, control: TaskControl, fetchImpl: typeof fetch, timeoutMs = 5000): Promise<TaskSnapshot> {

@@ -1,7 +1,7 @@
 # Harness X Harness
 
-Harness X Harness runs one autonomous code Task on a temporary runner for an
-authorized GitHub user and returns the Agent's final response.
+Harness X Harness gives an authorized GitHub user a temporary Environment for
+commands and coding-agent interaction, with private observable Task results.
 
 ## Language
 
@@ -20,13 +20,18 @@ One revocable permission relationship between an MCP Client and a Harness
 Principal. Several clients can hold separate grants for the same Principal.
 _Avoid_: User Account, GitHub Authorization
 
+**Environment**:
+A Principal-owned, bounded runtime with one workspace, selected executor and
+native Agent session. Its lifetime is separate from each operation's lifetime.
+_Avoid_: Task, desktop session, permanent machine
+
 **Task**:
-One owner-private request to an executor, with one prompt and at most one
-admitted execution. Its terminal outcome is immutable.
+The owner-private outcome of a long Environment operation, including creation,
+an Agent turn, a command or closure. Its terminal outcome is immutable.
 _Avoid_: Agent Session, conversation, fixed pipeline
 
 **Execution Repository**:
-The trusted GitHub repository whose workflow allocates temporary Task runners.
+The trusted GitHub repository whose workflow allocates temporary runtimes.
 _Avoid_: Workspace, target repository
 
 **Execution Authorization**:
@@ -35,8 +40,8 @@ the Execution Repository. It is distinct from the Agent's target-repository righ
 _Avoid_: Organization Membership, App dispatch, Agent GitHub Authorization
 
 **Execution**:
-One exact GitHub workflow run and attempt admitted to one Task. An ended
-execution cannot be replaced by another run under the same Task.
+One exact GitHub workflow run and attempt admitted to one Environment. An ended
+execution cannot be replaced by another run under the same Environment.
 _Avoid_: Task, native thread, retry
 
 **Agent GitHub Authorization**:

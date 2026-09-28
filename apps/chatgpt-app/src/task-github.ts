@@ -21,10 +21,6 @@ function repositoryPath(repository: string): string {
   return `/repos/${repository}`;
 }
 
-export async function dispatchTaskWorkflow(env: TaskGitHubEnvironment, token: string, taskId: string, fetchImpl = fetch): Promise<"unknown" | "accepted" | "rejected"> {
-  return (await dispatchWorkflow(env, token, TASK_WORKFLOW, { task_id: taskId }, fetchImpl)).status;
-}
-
 type DispatchResult = { status: "accepted"; response: Response } | { status: "unknown" | "rejected" };
 export async function dispatchEnvironmentWorkflow(env: TaskGitHubEnvironment, token: string, environmentId: string,
   fetchImpl = fetch): Promise<{ status: "accepted"; runId: string } | { status: "unknown" | "rejected" }> {

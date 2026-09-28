@@ -1,12 +1,20 @@
-# Task Runner operations
+# Harness operations
 
-## Task operation
+## Environment operation
 
-After authorizing `tasks:manage`, use `run_task` with executor and prompt, then
-`wait_task` with its returned Task ID. No target repository, branch, mode or
-token is a separate tool input. `cancel_task` commits intent first and cancels
-only its exact known GitHub run. A `cancelling` response is not an offline or
-rollback guarantee; query again to observe the terminal result.
+Authorize `environments:use` with a modern Tasks-capable client. Use
+`open_environment`, then `command` or `agent` after ready, and finally
+`close_environment`. Subscribe to standard Tasks and Resources; use
+`tasks/update` for input and `tasks/cancel` for operation cancellation. Keep the
+exact Environment and Task handles. Uncertain delivery does not permit a new
+creation key. See the [MCP contract](chatgpt-app.md).
+
+## Retained one-shot work
+
+Old `tasks:manage` grants only expose `wait_task` and `cancel_task` for accepted
+work. New `run_task` admission is removed. Keep claim/finish, owner checks and
+retained reads until drain and retention conditions are met. Stop intent is
+not a rollback or confirmation that execution ended.
 
 Unclaimed work expires after ten minutes even if a dispatch reply was lost.
 The claim gate rejects late startup; there is no automatic second dispatch.
@@ -64,7 +72,7 @@ Remove `--dry-run` only for an authorized deployment. The configured Worker,
 route, bindings and variables are owned by
 [wrangler.jsonc](../apps/chatgpt-app/wrangler.jsonc); secret usage is owned by
 the [Worker source](../apps/chatgpt-app/src/) and
-[Task workflow](../.github/workflows/run-task.yml),
+[Environment workflow](../.github/workflows/run-environment.yml),
 not a second configuration list in this runbook.
 
 ## Private acceptance credentials
@@ -92,8 +100,8 @@ the runner consumed the correct value. Read-only API success is not
 write acceptance. Never put token values or private acceptance output in logs,
 Issues, artifacts or this runbook.
 
-When `tasks:manage` consent is missing, provide the authorization link and wait
-for the user. Reuse an existing valid Task grant; do not require another consent
+When `environments:use` consent is missing, provide the authorization link and wait
+for the user. Reuse an existing valid grant; do not require another consent
 only because a new version was deployed.
 
 ## Local checks
@@ -113,9 +121,9 @@ git diff --check
 Follow the [Task Live Story](agents/live-stories/task-runtime.md). It is a
 manual development acceptance guide, not another CI framework.
 
-Use authenticated MCP discovery, then run a bounded prompt through
-`run_task` and read its final response through `wait_task`. Verify the exact
-`run-task.yml` execution and its terminal state. Test changed provider or
+Use authenticated MCP discovery and the changed-boundary budget in the Story.
+Observe results through standard Task subscriptions and linked Resources.
+Verify the exact `run-environment.yml` execution and its terminal state. Test changed provider or
 GitHub write boundaries in the approved disposable repository; do not repeat
 unaffected acceptance matrices on every deployment.
 
