@@ -230,8 +230,10 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
       controller.abort();
       // Never expose handler exceptions or storage/provider details.
       const notFound = failure instanceof TaskError && failure.code === 'TASK_NOT_FOUND';
+      const resourceMissing = failure instanceof TaskError && failure.code === 'RESOURCE_NOT_FOUND';
       await transport.send({ jsonrpc: '2.0', id: input.id,
         error: notFound ? { code: -32602, message: 'Task not found or no longer available' }
+          : resourceMissing ? { code: -32602, message: 'Resource not found or no longer available' }
           : { code: -32603, message: 'Task request failed' } });
     });
   };

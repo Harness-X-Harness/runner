@@ -3,6 +3,7 @@ import type { EnvironmentAdmissionObject, EnvironmentObject } from "./environmen
 import { executionPrincipal } from "./execution-authority.ts";
 import { ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { authorizedSnapshots } from "./authorized-snapshots.ts";
+import { TaskError } from "../../../shared/task-errors.ts";
 
 export type EnvironmentResources = {
   ENVIRONMENT_ADMISSION: { getByName(name: string): Pick<EnvironmentAdmissionObject, "list"> };
@@ -38,7 +39,11 @@ export async function listEnvironmentResources(env: EnvironmentResources, props:
   // Membership and lifecycle are separate authorities, not one cross-object snapshot.
   // Never turn a failed lifecycle read into an empty or allegedly complete catalog.
   const snapshots = await Promise.all(ids.sort().map(id => env.ENVIRONMENTS.getByName(id).readEnvironment(ownerId)));
-  return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const, resources: snapshots.filter(value => value.status !== "closed").map(value => ({
+  const available = snapshots.map(value => {
+    if (value === null) throw new TaskError("RESOURCE_NOT_FOUND");
+    return value;
+  });
+  return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const, resources: available.filter(value => value.status !== "closed").map(value => ({
     uri: environmentUri(value.environmentId), name: value.environmentId,
     title: `${value.executor} Environment`, mimeType: "application/json",
   })) };
@@ -49,6 +54,7 @@ export async function readEnvironmentResource(env: EnvironmentResources, props: 
   const { uri: parsed, environmentId, taskId } = resourceIdentity(uri);
   const object = env.ENVIRONMENTS.getByName(environmentId);
   const snapshot = taskId ? await object.readOutput(ownerId, taskId) : await object.readEnvironment(ownerId);
+  if (snapshot === null) throw new TaskError("RESOURCE_NOT_FOUND");
   return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const, contents: [
     { uri: parsed, mimeType: "application/json", text: JSON.stringify(snapshot) },
   ] };

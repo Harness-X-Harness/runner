@@ -75,10 +75,10 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   }
 
   /** Owner-private projection. Reading does not dispatch, release, or infer stop. */
-  async readEnvironment(ownerId: string): Promise<EnvironmentSnapshot> {
+  async readEnvironment(ownerId: string): Promise<EnvironmentSnapshot | null> {
     return this.ctx.storage.transaction(async () => {
-      const creation = await this.creation.read(ownerId);
-      await this.retainedUntil();
+      const creation = await this.findRetainedCreation(ownerId);
+      if (!creation) return null;
       const deadline = await this.ctx.storage.get<number>("environment-runtime-deadline");
       const current = await this.ctx.storage.get<RuntimeBinding>("environment-runtime");
       const ready = await this.ctx.storage.get<number>("environment-ready-generation");
@@ -216,7 +216,11 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         this.environmentObservers.add(changed);
         return () => { this.environmentObservers.delete(changed); };
       },
-      read: () => this.readEnvironment(ownerId),
+      read: async () => {
+        const snapshot = await this.readEnvironment(ownerId);
+        if (!snapshot) throw new Error("ENVIRONMENT_NOT_FOUND");
+        return snapshot;
+      },
     }, signal));
   }
 
@@ -356,9 +360,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     return true;
   }
 
-  async readOutput(ownerId: string, taskId: string): Promise<OutputSnapshot> {
+  async readOutput(ownerId: string, taskId: string): Promise<OutputSnapshot | null> {
     return this.ctx.storage.transaction(async () => {
-      await this.requireOperation(ownerId, taskId);
+      if (!await this.readOperation(ownerId, taskId)) return null;
       return await this.ctx.storage.get<OutputSnapshot>(`environment-output:${taskId}`) ?? emptyOutput();
     });
   }
@@ -378,7 +382,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       },
       read: async signal => {
         signal.throwIfAborted();
-        return this.readOutput(ownerId, taskId);
+        const snapshot = await this.readOutput(ownerId, taskId);
+        if (!snapshot) throw new Error("OPERATION_NOT_FOUND");
+        return snapshot;
       },
     }, signal));
   }
@@ -556,6 +562,14 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     return expiresAt;
   }
 
+  /** Expected private absence crosses RPC as data; storage faults still throw. */
+  private async findRetainedCreation(ownerId: string): Promise<EnvironmentCreationRecord | null> {
+    const record = await this.creation.find(ownerId);
+    if (!record) return null;
+    const expiresAt = await this.ctx.storage.get<number>("environment-results-expires-at");
+    return expiresAt !== undefined && expiresAt <= Date.now() ? null : record;
+  }
+
   async cancelOperation(ownerId: string, taskId: string): Promise<void> {
     operationId.parse(taskId);
     const state = await this.ctx.storage.transaction(async () => {
@@ -658,10 +672,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     });
   }
 
-  async requestClose(ownerId: string): Promise<"closing" | "closed"> {
-    const status = await this.ctx.storage.transaction<"closing" | "closed" | "release">(async () => {
-      await this.creation.read(ownerId);
-      await this.retainedUntil();
+  async requestClose(ownerId: string): Promise<"closing" | "closed" | null> {
+    const status = await this.ctx.storage.transaction<"closing" | "closed" | "release" | null>(async () => {
+      if (!await this.findRetainedCreation(ownerId)) return null;
       const closed = await this.ctx.storage.get("environment-capacity-released") === true;
       if (!await this.ctx.storage.get("environment-lifecycle:close")) {
         const now = Date.now();
@@ -676,6 +689,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
            await this.ctx.storage.get("environment-dispatch-issued") !== true)) return "release";
       return "closing";
     });
+    if (status === null) return null;
     this.environmentChanged();
     if (status === "release") {
       return this.releaseCapacity(await this.creation.read(ownerId));

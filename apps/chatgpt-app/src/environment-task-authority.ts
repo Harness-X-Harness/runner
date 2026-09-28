@@ -68,7 +68,14 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       }
       if (name === "open_environment" || name === "close_environment") {
         const kind = name === "open_environment" ? "open" : "close";
-        const value = kind === "open" ? await openEnvironment(env, props, args) : await closeEnvironment(env, props, args);
+        let value: { environmentId: string };
+        try {
+          value = kind === "open" ? await openEnvironment(env, props, args) : await closeEnvironment(env, props, args);
+        } catch (error) {
+          if (!(error instanceof TaskError) || error.code !== "ENVIRONMENT_NOT_FOUND") throw error;
+          return { resultType: "complete", isError: true,
+            content: [{ type: "text", text: error.message }] };
+        }
         const task = await getEnvironmentTask(env, props, lifecycleTaskId(value.environmentId, kind));
         return task.status === "completed" ? task.result : { ...task, resultType: "task" };
       }

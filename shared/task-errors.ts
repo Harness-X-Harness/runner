@@ -1,6 +1,8 @@
 const ERRORS = Object.freeze({
   INVALID_TASK_INPUT: ["The task input is invalid or exceeds a supported limit.", false],
   TASK_NOT_FOUND: ["The task was not found or is no longer available.", false],
+  RESOURCE_NOT_FOUND: ["Resource not found or no longer available.", false],
+  ENVIRONMENT_NOT_FOUND: ["Environment not found or no longer available.", false],
   TASK_AUTH_REQUIRED: ["Reconnect with tasks:manage and valid GitHub runner authorization.", false],
   GITHUB_UNAVAILABLE: ["GitHub could not confirm this runner operation. Check repository access and try again.", true],
   DISPATCH_FAILED: ["The task workflow could not be started. Check GitHub runner access before submitting a new task.", true],
