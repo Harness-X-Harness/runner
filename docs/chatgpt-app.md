@@ -22,8 +22,12 @@ and `Actions: write`.
    the pair for the native session. A rejected candidate does not change that
    session, so a later call can correct it. If application of an accepted pair
    fails, or a native configuration request fails after it starts, later
-   `agent` calls fail until a new Environment is opened. `command` and
-   `close_environment` still work.
+   `agent` calls fail until a new Environment is opened. A model alone uses
+   that model's reported effort. An effort alone uses the deployment default
+   model, including after the pair is fixed; a different resulting pair is
+   rejected. The completed agent result reports the model and effort returned
+   by the executor, not an unconfirmed request. `inspect_environment` does not
+   return that pair. `command` and `close_environment` still work.
    There is no automatic rollback or retry. Agent turns share the workspace and
    native session. Use standard Task
    subscriptions for state and result, `tasks/update` for requested input, and

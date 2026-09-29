@@ -36,11 +36,11 @@ export function resolveAgentSelection(input: {
   locked?: AgentSelection;
 }): AgentSelection {
   if (input.locked && input.requested.model === undefined && input.requested.reasoningEffort === undefined) return input.locked;
-  const fallback = input.locked ?? AGENT_MODEL_DEFAULTS[input.executor];
-  const model = input.requested.model ?? fallback.model;
+  const defaults = AGENT_MODEL_DEFAULTS[input.executor];
+  const model = input.requested.model ?? defaults.model;
   const reported = input.report.models.find(item => item.id === model);
-  const reasoningEffort = input.requested.model === undefined
-    ? input.requested.reasoningEffort ?? fallback.reasoningEffort : input.requested.reasoningEffort ?? reported?.effort;
+  const reasoningEffort = input.requested.reasoningEffort ?? (input.requested.model === undefined
+    ? defaults.reasoningEffort : reported?.effort);
   if (!reported || reasoningEffort === undefined || !reported.efforts.includes(reasoningEffort)) throw new Error("AGENT_MODEL_REJECTED");
   if (input.locked && (input.locked.model !== model || input.locked.reasoningEffort !== reasoningEffort)) {
     throw new Error("AGENT_MODEL_CONFLICT");
@@ -70,11 +70,36 @@ export async function readExecutorReport(executor: AgentExecutor, env: NodeJS.Pr
   }
 }
 
+export function confirmedAgentSelection(responses: readonly unknown[]): AgentSelection | undefined {
+  let model: string | undefined;
+  let reasoningEffort: string | undefined;
+  for (const response of responses) {
+    const parsed = z.object({ configOptions: z.array(z.object({
+      id: identifier.optional(), configId: identifier.optional(), currentValue: z.unknown().optional(),
+    }).passthrough()) }).passthrough().safeParse(response);
+    if (!parsed.success) continue;
+    for (const option of parsed.data.configOptions) {
+      const id = option.id ?? option.configId;
+      if (typeof option.currentValue !== "string") continue;
+      if (id === "model") model = option.currentValue;
+      if (id === "reasoning_effort") reasoningEffort = option.currentValue;
+    }
+  }
+  if (!model || !reasoningEffort) return undefined;
+  return { model, reasoningEffort };
+}
+
 export async function applyAgentSelection(current: AgentSelection, next: AgentSelection,
-  setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<void>): Promise<void> {
-  if (current.model === next.model && current.reasoningEffort === next.reasoningEffort) return;
-  if (current.model !== next.model) await setOption("model", next.model);
-  await setOption("reasoning_effort", next.reasoningEffort);
+  setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<unknown>,
+  confirmUnchanged = false): Promise<AgentSelection | undefined> {
+  if (!confirmUnchanged && current.model === next.model && current.reasoningEffort === next.reasoningEffort) return current;
+  const responses: unknown[] = [];
+  if (confirmUnchanged || current.model !== next.model) responses.push(await setOption("model", next.model));
+  if (confirmUnchanged || current.model !== next.model || current.reasoningEffort !== next.reasoningEffort) {
+    responses.push(await setOption("reasoning_effort", next.reasoningEffort));
+  }
+  const confirmed = confirmedAgentSelection(responses);
+  return confirmed?.model === next.model && confirmed.reasoningEffort === next.reasoningEffort ? confirmed : undefined;
 }
 
 function reportedModel(id: string, effort: string, efforts: string[]): AgentModel {

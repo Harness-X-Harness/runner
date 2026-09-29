@@ -43,7 +43,7 @@ export class EnvironmentRuntime {
       if (!turn.prompt.trim()) throw new Error("INVALID_AGENT_PROMPT");
       if (Date.now() >= this.context.deadline) throw new Error("ENVIRONMENT_DEADLINE_EXPIRED");
       const selection = await this.selectModel(executor, turn, selectionAbort.signal, async (configId, value) => {
-        await client.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
+        return await client.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
       }).catch((error: unknown) => {
         if (error instanceof Error && error.message === "AGENT_TURN_CANCELLED") return undefined;
         throw error;
@@ -73,7 +73,7 @@ export class EnvironmentRuntime {
   }
 
   private async selectModel(executor: "codex" | "grok", turn: AgentTurn, signal: AbortSignal,
-    setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<void>): Promise<AgentSelection> {
+    setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<unknown>): Promise<AgentSelection> {
     if (this.agentConfigUncertain) throw new Error("AGENT_MODEL_UNCERTAIN");
     const requested = { model: turn.model, reasoningEffort: turn.reasoningEffort };
     const explicit = requested.model !== undefined || requested.reasoningEffort !== undefined;
@@ -95,19 +95,20 @@ export class EnvironmentRuntime {
     }
     let started = false;
     try {
-      await applyAgentSelection(this.applied ?? AGENT_MODEL_DEFAULTS[executor], selection, async (configId, value) => {
+      const confirmed = await applyAgentSelection(this.applied ?? AGENT_MODEL_DEFAULTS[executor], selection, async (configId, value) => {
         started = true;
-        await setOption(configId, value);
-      });
+        return await setOption(configId, value);
+      }, this.applied === undefined);
+      if (!confirmed) throw new Error(started ? "AGENT_MODEL_UNCERTAIN" : "AGENT_MODEL_REJECTED");
+      this.applied = this.locked = confirmed;
+      return confirmed;
     } catch (error) {
       if (started) this.agentConfigUncertain = true;
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
       if (started) throw new Error("AGENT_MODEL_UNCERTAIN");
-      if (error instanceof Error && error.message === "AGENT_TURN_CANCELLED") throw error;
+      if (error instanceof Error && (error.message === "AGENT_MODEL_REJECTED" || error.message === "AGENT_TURN_CANCELLED")) throw error;
       throw new Error("AGENT_MODEL_REJECTED");
     }
-    this.applied = this.locked = selection;
-    return selection;
   }
 
   private execute<T>(start: () => Promise<T>, cancel: () => Promise<void>): Promise<T> {

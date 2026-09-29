@@ -126,6 +126,12 @@ roll back, retry, or infer that the untouched default is still active. Command
 and close remain available. The local fault injection is not production
 evidence that a provider has failed this way.
 
+The completed receipt copies `currentValue` for `model` and `reasoning_effort`
+from those responses. A missing or different current value is not replaced with
+the requested pair. An effort without a model resolves to the deployment default
+model before that comparison. Ordinary inspect text and structured outcome omit
+the pair; the agent result keeps it.
+
 `readAgentTurn` consumes SDK updates through the native stop marker and returns
 either a completed semantic final response or cancellation. It does not cancel
 the prompt request locally, close the session, or infer stopped work from a sent

@@ -56,6 +56,11 @@ test("the first resolved pair stays fixed for later agent calls", () => {
     requested: { model: "gpt-5.5", reasoningEffort: "xhigh" }, locked }), locked);
   assert.throws(() => resolveAgentSelection({ executor: "codex", report: codex, requested: { model: "gpt-6-sol" }, locked }),
     /AGENT_MODEL_CONFLICT/);
+  assert.throws(() => resolveAgentSelection({ executor: "codex", report: codex,
+    requested: { reasoningEffort: "xhigh" }, locked }), /AGENT_MODEL_CONFLICT/);
+  assert.deepEqual(resolveAgentSelection({ executor: "codex", report: codex,
+    requested: { reasoningEffort: "high" }, locked: { model: "gpt-6-sol", reasoningEffort: "high" } }),
+    { model: "gpt-6-sol", reasoningEffort: "high" });
 });
 
 test("executor reports keep only their selectable models and efforts", () => {
@@ -87,12 +92,18 @@ test("model report reads use the runner credential and do not echo it", async ()
 });
 
 test("an unchanged agent selection does not reconfigure the session", async () => {
+  const echo = (model: string, reasoningEffort: string) => ({ configOptions: [
+    { id: "model", currentValue: model }, { id: "reasoning_effort", currentValue: reasoningEffort },
+  ] });
   const calls: string[] = [];
   const current = { model: "gpt-6-sol", reasoningEffort: "high" };
   await applyAgentSelection(current, current, async (configId, value) => { calls.push(`${configId}=${value}`); });
   assert.deepEqual(calls, []);
-  await applyAgentSelection(current, { model: "gpt-5.5", reasoningEffort: "xhigh" }, async (configId, value) => {
+  assert.deepEqual(await applyAgentSelection(current, { model: "gpt-5.5", reasoningEffort: "xhigh" }, async (configId, value) => {
     calls.push(`${configId}=${value}`);
-  });
+    return echo("gpt-5.5", "xhigh");
+  }), { model: "gpt-5.5", reasoningEffort: "xhigh" });
   assert.deepEqual(calls, ["model=gpt-5.5", "reasoning_effort=xhigh"]);
+  assert.equal(await applyAgentSelection(current, { model: "gpt-5.5", reasoningEffort: "high" },
+    async () => echo("gpt-6-sol", "high")), undefined);
 });
