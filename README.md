@@ -11,20 +11,27 @@ impose a clone, test, commit or PR pipeline.
 ## Use from an MCP client
 
 Connect to `https://runners.trustedtunnel.app/mcp` and authorize `environments:use`.
-Use a client implementing MCP 2026-07-28 Tasks and subscriptions. This release
-targets SDK clients; tool discovery alone does not prove desktop-host Task,
-resource-display or model-continuation support. There is no polling fallback.
+The protocol is MCP 2026-07-28. A client that declares Tasks receives Task
+handles: subscribe to changes, answer input with `tasks/update`, and cancel
+with `tasks/cancel`. A client that does not declare Tasks receives an ordinary
+acceptance receipt and current status. Call `inspect_environment` when a person
+asks; do not poll. That contract has no subscription, streamed output, answer
+submission, card, or automatic continuation. `closing` is not `closed`, and
+waiting for input is not success. The declared capability is selected before
+execution and is not switched after an error. Tool discovery does not prove
+host support for Tasks, resources, or model continuation.
 
 ```text
 open_environment({ executor: "codex", idempotencyKey: "<unique creation key>" })
+inspect_environment({ environmentId: "<Environment ID>" })
 command({ environmentId: "<ready Environment ID>", argv: ["pwd"], timeoutSeconds: 10 })
 agent({ environmentId: "<ready Environment ID>", prompt: "Explain this workspace. Do not change files." })
 close_environment({ environmentId: "<Environment ID>" })
 ```
 
-Use `codex` or `grok`. Long operations return a standard Task handle. Subscribe
-to changes, answer requested input with `tasks/update`, and request a stop with
-`tasks/cancel`. Reconnect reads current state without rerunning work.
+Use `codex` or `grok`. A Tasks client gets a Task handle for long operations.
+Reconnect reads current state without rerunning work. An ordinary client keeps
+the returned Environment ID and operation ID, then inspects that same operation.
 `resources/list` finds your live Environments; linked resources expose private
 state and bounded output. Resource notifications trigger reads, not token streams.
 

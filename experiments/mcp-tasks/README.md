@@ -102,9 +102,12 @@ changes; an existing subscription receives a safe error and closes instead of
 delivering the next committed result. Observers are detached. This does not test
 real OAuth revocation, distributed grant propagation, or recall of data already
 authorized and sent before revocation.
-The shared binding requires Tasks capability for every tool call in the current
-Environment catalog. A mixed catalog must keep ordinary non-Task tools on their
-own declared capability contract rather than inheriting this restriction.
+The shared binding rejects `tools/call` without Tasks unless that authority
+sets `ordinaryToolCalls`. The Environment authority does this and returns an
+ordinary receipt instead of a Task handle. It does not switch contracts after
+an error. Task methods and Task subscriptions still require the capability.
+Authorities that do not opt in, including this fixture, still reject the call
+before creating work.
 
 `node client-probe.ts` inspects the official Tasks requester's default behavior
 with a synthetic port and no notifications. It reports the dispatched methods
@@ -135,6 +138,15 @@ There are no fairness assumptions, symmetry reductions, or state constraints;
 deadlock checking is disabled because an up-to-date idle observer is quiescent.
 Disconnect, authorization, persistence and cross-process signals are outside
 this model. It is not a whole-system refinement or a liveness guarantee.
+
+`formal/OrdinaryReceipt.tla` is a separate focused safety model for one
+ordinary receipt. A receipt is one cut: current readiness is exactly
+`ready`, and confirmed cleanup is exactly `closed`. A historical selection
+must still show an active input question from that cut. The two faulty
+configurations reproduce a completed-open summary after disconnect, and a
+historical selection that hides the active question. There is no fairness,
+polling obligation, symmetry, or constraint. It does not model two storage
+reads, Tasks selection, or prove the Worker implementation.
 
 Versions are owned by package.json and package-lock.json. Record observed
 compatibility in issue evidence or local project memory, not as a permanent

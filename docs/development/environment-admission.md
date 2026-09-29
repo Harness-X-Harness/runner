@@ -100,7 +100,10 @@ The new handler implements standard `server/discover` and `ping`. Discovery
 advertises protocol 2026-07-28, tools, resource subscriptions and the Tasks
 extension; it does not advertise directory-change notifications or prompts.
 Discovery and ping do not require the client Tasks capability and cannot start
-execution. The entry's OAuth gate applies to them before protocol handling.
+execution. Ordinary `tools/call` also does not require Tasks, but it can start
+execution and returns an acceptance receipt. Task methods and Task subscriptions
+still require the declared capability. The entry's OAuth gate applies before
+protocol handling.
 
 Output resource capture and reads are described in
 [command runtime](command-runtime.md). A native Durable Object alarm schedules

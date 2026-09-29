@@ -95,14 +95,14 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(catalog.result?.ttlMs, 0);
   assert.equal(catalog.result?.cacheScope, "private");
   const tools = z.array(z.looseObject({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })).parse(catalog.result?.tools);
-  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "open_environment"]);
+  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "inspect_environment", "open_environment"]);
   assert.equal(reservations, 0);
   assert.ok(!JSON.stringify(tools).includes('"kind"'));
   const command = tools.find(tool => tool.name === "command")!;
   const commandSchema = z.fromJSONSchema(command.inputSchema as Parameters<typeof z.fromJSONSchema>[0]);
   assert.doesNotThrow(() => commandSchema.parse(params.arguments));
   assert.throws(() => commandSchema.parse({ ...params.arguments, argv: [] }));
-  assert.ok((await rpc("tools/call", params, false)).error);
+  assert.equal((await rpc("tasks/get", { taskId: `task_${"b".repeat(32)}_${"d".repeat(32)}` }, false)).error?.code, -32021);
   assert.equal(reservations, 0);
   for (const [name, arguments_, field] of [
     ["command", { environmentId, argv: ["PRIVATE_INPUT"] }, "timeoutSeconds"],

@@ -6,31 +6,63 @@ owns authentication and Task state; GitHub owns the execution lifetime.
 
 ## User flow
 
-1. Connect a modern Tasks-capable MCP client and authorize `environments:use`.
-2. GitHub verifies the user through the dedicated GitHub App. Harness derives
-   a user token limited to `Harness-X-Harness/runner` and `Actions: write`.
-3. Call `open_environment` with `executor`. Subscribe to the returned Task and
+Authorize `environments:use`. GitHub verifies the user through the dedicated
+GitHub App. Harness derives a user token limited to `Harness-X-Harness/runner`
+and `Actions: write`.
+
+### Tasks client
+
+1. Connect a client that declares MCP Tasks on protocol 2026-07-28.
+2. Call `open_environment` with `executor`. Subscribe to the returned Task and
    wait for ready. Save its Environment resource link, or discover live owned
    Environments with `resources/list` from another client of the same Principal.
-4. Call `command` with literal argv and a timeout, or `agent` with a prompt.
+3. Call `command` with literal argv and a timeout, or `agent` with a prompt.
    Agent turns share the workspace and native session. Use standard Task
-   subscriptions for state/result, `tasks/update` for requested input and
+   subscriptions for state and result, `tasks/update` for requested input, and
    `tasks/cancel` for cooperative cancellation.
-5. Call `close_environment` and observe completion. A closing status is not
+4. Call `close_environment` and observe completion. A closing status is not
    confirmation of stopped execution or released capacity.
+
+A Tasks client keeps this contract. A missing or failed Task result is not
+replaced with an ordinary receipt.
+
+### Ordinary client
+
+A client that does not declare Tasks calls the same tools. The result is an
+ordinary acceptance receipt and the current status. It is not a Task handle and
+not proof that the work finished.
+
+1. `open_environment` returns the Environment ID and current status, such as
+   `opening`.
+2. `command` returns a finished command result when one is already committed.
+   Otherwise it returns an operation ID and status `working`.
+3. `agent` returns an operation ID and status `working`.
+4. `inspect_environment` reads one Environment. It reports status, the active
+   operation and its pending questions when one exists, and one selected
+   operation when `operationId` is supplied. The selected operation does not
+   hide the active operation.
+5. `close_environment` can return `closing`. Inspect when a person asks. Only
+   status `closed` confirms cleanup.
+
+Call `inspect_environment` when a person asks for the current state. Do not
+poll. This contract has no subscription, streamed output, automatic model
+continuation, card, or answer submission. Waiting for input is visible, but it
+is not success and cannot be answered here.
 
 | Tool | Purpose |
 | --- | --- |
 | `open_environment` | Allocate a bounded workspace for Codex or Grok |
 | `agent` | Send another prompt to its native Agent session |
 | `command` | Run argv directly in the same workspace without a model |
+| `inspect_environment` | Read current Environment and operation state once |
 | `close_environment` | Stop the exact runtime and confirm cleanup |
 
-These tools require fresh `environments:use` consent and the modern MCP Tasks
-capability. Refresh does not add authority. Valid grants are reused across
-deployments. Unsupported clients are rejected before execution, not silently
-changed to polling. This release targets SDK clients; desktop resource display,
-notifications and automatic model continuation require separate host support.
+These tools require fresh `environments:use` consent. Refresh does not add
+authority. Valid grants are reused across deployments. The client declaration
+selects the Tasks contract or the ordinary receipt before execution. There is
+no silent switch and no polling loop. Desktop resource display, notifications,
+cards, and automatic model continuation are outside the ordinary contract and
+still require separate host support.
 
 An Environment permits one active Agent/command operation. Resource links expose
 bounded owner-private state and output; URI change notifications trigger reads.
