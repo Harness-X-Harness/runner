@@ -18,16 +18,12 @@ for (const provider of ["codex", "grok"] as const) {
     assert.deepEqual(parsed.permissions, { contents: "read" });
     assert.match(source, /secrets\.MINI_END_USER_KEY/);
     assert.ok(source.includes(`secrets.MINI_${provider.toUpperCase()}_BASE_URL`));
-    assert.ok(source.includes('env_key = "MINI_END_USER_KEY"'));
-    assert.ok(source.includes("> /dev/null"));
+    assert.ok(source.includes(`node .github/actions/agent-runtime/auth-probe.ts ${provider}`));
+    assert.doesNotMatch(source, /AGENT_GITHUB_TOKEN|GH_TOKEN|config\.toml|mini-agent/);
     if (provider === "codex") {
       assert.ok(source.includes("https://chatgpt.com/codex/install.sh"));
-      assert.ok(source.includes("codex exec --ephemeral --skip-git-repo-check --sandbox read-only"));
     } else {
       assert.ok(source.includes("https://x.ai/cli/install.sh"));
-      assert.ok(source.includes("grok --no-auto-update --always-approve -m mini-agent"));
-      assert.ok(source.includes('model = "grok-4.7"'));
-      assert.ok(source.includes('default_reasoning_effort = "xhigh"'));
     }
   });
 }

@@ -41,8 +41,12 @@ test("the first agent call fixes a reported model and effort", { timeout: 7000 }
   ] };
   await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {
     const selected = { model: "gpt-5.5", reasoningEffort: "xhigh" };
+    assert.deepEqual(environment.agentState?.read().models, report.models);
+    assert.equal(environment.agentState?.read().selection, null);
     assert.deepEqual(await environment.execute("one", { kind: "agent", prompt: "codex-final", ...selected }),
       { ok: true, value: { status: "completed", finalResponse: "FINAL_OK", ...selected } });
+    assert.deepEqual(environment.agentState?.read().selection, selected);
+    assert.equal(environment.agentState?.read().uncertain, false);
     assert.deepEqual(await environment.execute("two", { kind: "agent", prompt: "codex-final" }),
       { ok: true, value: { status: "completed", finalResponse: "FINAL_OK", ...selected } });
     assert.deepEqual(await environment.execute("three", { kind: "agent", prompt: "codex-final", model: "gpt-6-sol" }),

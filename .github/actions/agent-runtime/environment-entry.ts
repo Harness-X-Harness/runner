@@ -35,6 +35,7 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
   const claim = bootstrapSchema.parse(JSON.parse(await readFile(path.join(directory, "claim.json"), "utf8")));
   if (claim.deadline <= Date.now()) return;
   signal.throwIfAborted();
+  if (!env.GH_TOKEN) throw new Error("AGENT_GITHUB_AUTH_REQUIRED");
   await configureProvider(claim.executor, env);
   const workspace = path.join(directory, "workspace");
   await mkdir(workspace, { recursive: true, mode: 0o700 });

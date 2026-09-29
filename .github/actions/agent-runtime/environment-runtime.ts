@@ -1,10 +1,11 @@
 import { methods, type ActiveSession, type ClientContext } from "@agentclientprotocol/sdk";
-import { AGENT_MODEL_DEFAULTS, applyAgentSelection, resolveAgentSelection, type AgentModelReport, type AgentSelection } from "./agent-model.ts";
+import { AGENT_MODEL_DEFAULTS, applyAgentSelection, resolveAgentSelection, type AgentModelReport, type AgentSelection, type AgentModelState } from "./agent-model.ts";
 import { CommandCleanupError, runCommand, type CommandContext, type CommandInput } from "./command.ts";
 import { readAgentTurn } from "./final-response.ts";
 
 type RuntimeContext = Omit<CommandContext, "signal"> & {
   readAgentReport?: (executor: "codex" | "grok", signal: AbortSignal) => Promise<AgentModelReport>;
+  onAgentState?: () => void;
 };
 export type AgentTurn = { prompt: string; model?: string; reasoningEffort?: string };
 
@@ -18,11 +19,28 @@ export class EnvironmentRuntime {
   private locked?: AgentSelection;
   private applied?: AgentSelection;
   private agentConfigUncertain = false;
+  private report?: AgentModelReport;
+  private readonly onAgentState?: () => void;
 
   constructor(context: RuntimeContext) {
-    const { readAgentReport, ...rest } = context;
+    const { readAgentReport, onAgentState, ...rest } = context;
     this.readAgentReport = readAgentReport;
+    this.onAgentState = onAgentState;
     this.context = { ...rest, env: { ...rest.env } };
+  }
+
+  agentState(executor: "codex" | "grok"): AgentModelState {
+    return structuredClone({ defaults: AGENT_MODEL_DEFAULTS[executor], models: this.report?.models ?? null,
+      selection: this.agentConfigUncertain ? null : this.locked ?? null, uncertain: this.agentConfigUncertain });
+  }
+
+  async refreshReport(executor: "codex" | "grok", signal: AbortSignal): Promise<AgentModelReport> {
+    try {
+      if (!this.readAgentReport) throw new Error("AGENT_MODEL_UNAVAILABLE");
+      this.report = await this.readAgentReport(executor, signal);
+      return this.report;
+    } catch (error) { this.report = undefined; throw error; }
+    finally { this.onAgentState?.(); }
   }
 
   command(input: CommandInput) {
@@ -87,7 +105,7 @@ export class EnvironmentRuntime {
     let selection: AgentSelection;
     try {
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
-      selection = resolveAgentSelection({ executor, report: await this.readAgentReport(executor, signal), requested, locked: this.locked });
+      selection = resolveAgentSelection({ executor, report: await this.refreshReport(executor, signal), requested, locked: this.locked });
     } catch (error) {
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
       if (error instanceof Error && (error.message === "AGENT_MODEL_REJECTED" || error.message === "AGENT_MODEL_CONFLICT" || error.message === "AGENT_MODEL_UNAVAILABLE")) throw error;
@@ -101,9 +119,10 @@ export class EnvironmentRuntime {
       }, this.applied === undefined);
       if (!confirmed) throw new Error(started ? "AGENT_MODEL_UNCERTAIN" : "AGENT_MODEL_REJECTED");
       this.applied = this.locked = confirmed;
+      this.onAgentState?.();
       return confirmed;
     } catch (error) {
-      if (started) this.agentConfigUncertain = true;
+      if (started) { this.agentConfigUncertain = true; this.onAgentState?.(); }
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
       if (started) throw new Error("AGENT_MODEL_UNCERTAIN");
       if (error instanceof Error && (error.message === "AGENT_MODEL_REJECTED" || error.message === "AGENT_TURN_CANCELLED")) throw error;

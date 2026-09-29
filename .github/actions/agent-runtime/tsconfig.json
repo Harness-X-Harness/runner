@@ -7,7 +7,7 @@
     "skipLibCheck": true
   },
   "include": [
-    "*.ts", "fixtures/*.ts",
+    "*.ts", "fixtures/*.ts", "../../../apps/chatgpt-app/deploy.ts", "../../../tests/deploy-privacy.test.ts",
     "../../../tests/agent-runtime.test.ts", "../../../tests/command.test.ts",
     "../../../tests/environment-lifetime.test.ts", "../../../tests/environment-runtime.test.ts",
     "../../../tests/environment-connection.test.ts",

@@ -7,9 +7,9 @@ import { mcpAuthorization } from "./mcp-authorization.ts";
 import type { EnvironmentObject, EnvironmentSnapshot } from "./environment-object.ts";
 import { openEnvironment, closeEnvironment, ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { executionPrincipal } from "./execution-authority.ts";
-import { environmentTools, environmentToolDefinitions, inspectInput } from "./environment-tools.ts";
+import { environmentTools, environmentToolDefinitions, inspectInput, updateInput } from "./environment-tools.ts";
 import { listEnvironmentResources, observeEnvironmentResource, readEnvironmentResource, type EnvironmentResources } from "./environment-resources.ts";
-import { lifecycleTaskId, type LifecycleKind } from "./environment-lifecycle-task.ts";
+import { lifecycleTaskId, lifecycleIdentity, type LifecycleKind } from "./environment-lifecycle-task.ts";
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
 import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type OrdinaryTool } from "./environment-ordinary-result.ts";
@@ -69,6 +69,13 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
         return ordinaryError(`Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.`);
       }
       if (name === "inspect_environment") return inspectOrdinary(env, props, inspectInput.parse(parsed.data));
+      if (name === "update_operation") {
+        const update = updateInput.parse(parsed.data);
+        if (update.action === "cancel") await cancelEnvironmentTask(env, props, update.operationId);
+        else await updateEnvironmentTask(env, props, update.operationId, update.inputResponses);
+        return inspectOrdinary(env, props, { environmentId: `env_${update.operationId.slice(5, 37)}`,
+          operationId: update.operationId });
+      }
       const capable = hasTaskClientCapabilityV2(request.params);
       if (name === "open_environment") {
         const opened = await openEnvironment(env, props, args);
@@ -152,7 +159,11 @@ async function inspectOrdinary(env: Environment, props: unknown, input: { enviro
     }
   }
   const historical = operation !== undefined && activeId !== null && activeId !== operation.taskId;
-  return ordinaryToolResult({ tool: "inspect_environment", environment, operation, activeOperation, activeUnreadable, historical });
+  const output = operation && !lifecycleIdentity(operation.taskId)
+    ? await env.ENVIRONMENTS.getByName(input.environmentId).readOutput(executionPrincipal(props, ENVIRONMENT_SCOPE), operation.taskId)
+    : undefined;
+  return ordinaryToolResult({ tool: "inspect_environment", environment, operation, activeOperation, activeUnreadable, historical,
+    output: output ?? undefined });
 }
 
 function readOwnedEnvironment(env: Environment, props: unknown, environmentId: string): Promise<EnvironmentSnapshot | null> {

@@ -11,32 +11,22 @@ permissions:
 jobs:
   auth:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: npm ci --prefix .github/actions/agent-runtime --omit=dev
       - name: Install Codex
         shell: bash
         run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
-
-      - name: Configure Codex
-        shell: bash
-        env:
-          MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
-        run: |
-          install -d -m 0700 "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<EOF
-          model = "gpt-6-sol"
-          model_reasoning_effort = "high"
-          model_provider = "mini_codex"
-
-          [model_providers.mini_codex]
-          name = "Mini Codex"
-          base_url = "$MINI_CODEX_BASE_URL"
-          wire_api = "responses"
-          env_key = "MINI_END_USER_KEY"
-          EOF
-          chmod 600 "$HOME/.codex/config.toml"
 
       - name: Verify Codex authentication
         shell: bash
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-        run: codex exec --ephemeral --skip-git-repo-check --sandbox read-only "Reply exactly OK." > /dev/null
+          MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
+        run: node .github/actions/agent-runtime/auth-probe.ts codex
