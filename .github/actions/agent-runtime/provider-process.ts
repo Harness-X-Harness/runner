@@ -10,7 +10,7 @@ export function providerProcess(executor: "codex" | "grok", workspace: string,
     env: executor === "codex" ? { ...env, CODEX_PATH: "codex", CODEX_CONFIG: JSON.stringify({
       sandbox_mode: "danger-full-access", approval_policy: "never",
       "features.default_mode_request_user_input": true,
-    }) } : env,
+    }) } : { ...env, XAI_API_KEY: env.MINI_END_USER_KEY },
     extensions: executor === "grok" ? "grok" : undefined,
   };
 }

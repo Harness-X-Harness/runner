@@ -35,18 +35,12 @@ wire_api = "responses"
 env_key = "MINI_END_USER_KEY"
 `
     : `[models]
-default = "mini-agent"
+default = ${model}
 default_reasoning_effort = ${effort}
-[model.mini-agent]
-model = ${model}
-base_url = ${baseUrl}
-name = "Mini Grok"
-description = "Grok through Mini"
-env_key = "MINI_END_USER_KEY"
-api_backend = "responses"
+[endpoints]
+models_base_url = ${baseUrl}
 `;
   const file = path.join(directory, "config.toml");
   await fs.writeFile(file, config, { mode: 0o600 });
   await fs.chmod(file, 0o600);
 }
-
