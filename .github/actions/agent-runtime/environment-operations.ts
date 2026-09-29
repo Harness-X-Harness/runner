@@ -18,7 +18,7 @@ export type OperationResult = { ok: true; value: Value } | { ok: false; code: st
 const safeErrors = new Set(["ENVIRONMENT_RUNTIME_BUSY", "ENVIRONMENT_RUNTIME_CLOSING",
   "ENVIRONMENT_DEADLINE_EXPIRED", "COMMAND_DEADLINE_EXPIRED", "COMMAND_CWD_OUTSIDE_WORKSPACE",
   "COMMAND_CLEANUP_UNCONFIRMED", "INVALID_COMMAND_INPUT", "OPERATION_RESULT_TOO_LARGE",
-  "AGENT_MODEL_REJECTED", "AGENT_MODEL_CONFLICT", "AGENT_MODEL_UNAVAILABLE"]);
+  "AGENT_MODEL_REJECTED", "AGENT_MODEL_CONFLICT", "AGENT_MODEL_UNAVAILABLE", "AGENT_MODEL_UNCERTAIN"]);
 
 /** Lives with the process, not its socket. Never restore it in a new runtime. */
 export class EnvironmentOperations {

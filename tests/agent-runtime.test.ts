@@ -133,5 +133,97 @@ test("dependency diagnostics cannot enter parent stdout or stderr", async () => 
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /PRIVATE_FIXTURE_MARKER|Error handling notification|fixture-session/);
   const result = JSON.parse(stdout);
-  assert.ok(result.finalResponse === "FINAL_OK" || result.code === "PROVIDER_PROTOCOL_ERROR" || result.code === "PROVIDER_EXECUTION_ERROR");
+ assert.ok(result.finalResponse === "FINAL_OK" || result.code === "PROVIDER_PROTOCOL_ERROR" || result.code === "PROVIDER_EXECUTION_ERROR");
+});
+
+const reportedModels = { models: [
+  { id: "gpt-6-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-5.5", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
+] };
+
+function modelRuntime() {
+  return new EnvironmentRuntime({ workspace: process.cwd(), deadline: Date.now() + 5000, env: {},
+    readAgentReport: async () => reportedModels });
+}
+
+function configSession() {
+  const updates: Array<{ kind: "session_update"; notification: { sessionId: string; update: object }; update: object } | { kind: "stop"; response: { stopReason: "end_turn" } }> = [];
+  let prompts = 0;
+  const session = {
+    sessionId: "fixture-session",
+    async prompt() {
+      prompts += 1;
+      const update = { sessionUpdate: "agent_message_chunk", messageId: "final",
+        _meta: { codex: { phase: "final_answer" } }, content: { type: "text", text: "FINAL_OK" } };
+      updates.push({ kind: "session_update", notification: { sessionId: "fixture-session", update }, update });
+      updates.push({ kind: "stop", response: { stopReason: "end_turn" } });
+      return { stopReason: "end_turn" as const };
+    },
+    async nextUpdate() {
+      const next = updates.shift();
+      if (!next) throw new Error("prompt must not start");
+      return next;
+    },
+  };
+  return { session, prompts: () => prompts };
+}
+
+test("a rejected agent model can be corrected before the native session changes", async () => {
+  const runtime = modelRuntime();
+  const { session, prompts } = configSession();
+  const requests: string[] = [];
+  const client = { async request(_method: string, params: { configId: string; value: string }) {
+    requests.push(`${params.configId}:${params.value}`);
+    return { configOptions: [] };
+  }, async notify() {} };
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "bad", model: "gpt-reserve" }), /AGENT_MODEL_REJECTED/);
+  assert.deepEqual(requests, []);
+  assert.equal(prompts(), 0);
+  assert.deepEqual(await runtime.agent(client as never, session as never, "codex",
+    { prompt: "use-reported", model: "gpt-5.5", reasoningEffort: "high" }),
+    { status: "completed", finalResponse: "FINAL_OK", model: "gpt-5.5", reasoningEffort: "high" });
+  assert.equal(prompts(), 1);
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "other", model: "gpt-6-sol" }), /AGENT_MODEL_CONFLICT/);
+  assert.deepEqual(await runtime.agent(client as never, session as never, "codex", { prompt: "again" }),
+    { status: "completed", finalResponse: "FINAL_OK", model: "gpt-5.5", reasoningEffort: "high" });
+  assert.equal(prompts(), 2);
+});
+
+test("a partial agent configuration failure does not run another prompt", async () => {
+  const runtime = modelRuntime();
+  const { session, prompts } = configSession();
+  let actual = "gpt-6-sol";
+  const client = { async request(_method: string, params: { configId: string; value: string }) {
+    if (params.configId === "model") { actual = params.value; return { configOptions: [] }; }
+    throw new Error("effort was not applied");
+  }, async notify() {} };
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "switch", model: "gpt-5.5", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+  assert.equal(actual, "gpt-5.5");
+  assert.equal(prompts(), 0);
+  await assert.rejects(runtime.agent(client as never, session as never, "codex", { prompt: "omitted" }),
+    /AGENT_MODEL_UNCERTAIN/);
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "retry", model: "gpt-5.5", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+  assert.equal(prompts(), 0);
+  assert.equal(actual, "gpt-5.5");
+  const command = await runtime.command({ argv: [process.execPath, "-e", "process.stdout.write('COMMAND_OK')"], timeoutSeconds: 2 });
+  assert.equal(command.stdout, "COMMAND_OK");
+  await runtime.close();
+});
+
+test("a failed native model change leaves the agent configuration uncertain", async () => {
+  const runtime = modelRuntime();
+  const { session, prompts } = configSession();
+  const client = { async request(_method: string, params: { configId: string }) {
+    if (params.configId === "model") throw new Error("model was not applied");
+    throw new Error("effort must not be reached");
+  }, async notify() {} };
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "switch", model: "gpt-5.5", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "correct", model: "gpt-6-sol", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+  assert.equal(prompts(), 0);
 });

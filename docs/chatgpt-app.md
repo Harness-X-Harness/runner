@@ -19,8 +19,13 @@ and `Actions: write`.
 3. Call `command` with literal argv and a timeout, or `agent` with a prompt.
    Optional `model` and `reasoningEffort` on `agent` must match that executor's
    current report. Omit both for the deployment default. The first call fixes
-   the pair for the native session. Agent turns share the workspace and native
-   session. Use standard Task
+   the pair for the native session. A rejected candidate does not change that
+   session, so a later call can correct it. If application of an accepted pair
+   fails, or a native configuration request fails after it starts, later
+   `agent` calls fail until a new Environment is opened. `command` and
+   `close_environment` still work.
+   There is no automatic rollback or retry. Agent turns share the workspace and
+   native session. Use standard Task
    subscriptions for state and result, `tasks/update` for requested input, and
    `tasks/cancel` for cooperative cancellation.
 4. Call `close_environment` and observe completion. A closing status is not
