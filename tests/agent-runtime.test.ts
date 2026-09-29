@@ -14,7 +14,8 @@ import { providerProcess } from "../.github/actions/agent-runtime/provider-proce
 test("Codex launch enables native user questions outside plan mode", () => {
   const process = providerProcess("codex", "/workspace", {});
   const config = JSON.parse(process.env.CODEX_CONFIG!);
-  assert.equal(config["features.default_mode_request_user_input"], true);
+  assert.deepEqual(config.features, { default_mode_request_user_input: true });
+  assert.equal(Object.keys(config).some(key => key.startsWith("features.")), false);
   assert.equal(config.approval_policy, "never");
   assert.equal(config.sandbox_mode, "danger-full-access");
 });
