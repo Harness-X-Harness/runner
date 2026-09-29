@@ -49,7 +49,8 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
         ?? (view.operation && view.environment.activeTaskId === view.operation.taskId ? view.operation.status : undefined),
       operationId: view.operation?.taskId, operationStatus: view.operation?.status,
       historical: view.historical === true ? true : undefined, dispatch: view.dispatch,
-      questions: facts.questions.length ? facts.questions : undefined, outcome: facts.outcome,
+      questions: facts.questions.length ? facts.questions : undefined,
+      outcome: outcomeForTool(view.tool, facts.outcome),
     }) });
 }
 
@@ -136,8 +137,10 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   if (assessment.disposition === "result" && facts.resultText && !commandOutcome(facts.outcome)) {
     parts.push("A final response does not certify that the requested objective succeeded.");
   }
-  const selection = agentSelection(facts.outcome);
-  if (selection) parts.push(`Agent model is ${selection.model} with reasoning effort ${selection.reasoningEffort}.`);
+  if (view.tool === "agent") {
+    const selection = agentSelection(facts.outcome);
+    if (selection) parts.push(`Agent model is ${selection.model} with reasoning effort ${selection.reasoningEffort}.`);
+  }
   if (view.dispatch === "unknown") parts.push("Reuse the same idempotency key. Do not open another Environment.");
   if (view.dispatch === "rejected") parts.push("Dispatch was rejected. Do not treat the Environment as ready.");
   return parts.join(" ");
@@ -153,6 +156,13 @@ function agentSelection(outcome: unknown): { model: string; reasoningEffort: str
   const reasoningEffort = outcome.reasoningEffort;
   if (typeof model !== "string" || typeof reasoningEffort !== "string") return undefined;
   return { model, reasoningEffort };
+}
+
+function outcomeForTool(tool: OrdinaryTool, outcome: unknown): unknown {
+  if (tool === "agent" || typeof outcome !== "object" || outcome === null || Array.isArray(outcome)) return outcome;
+  if (!("model" in outcome) && !("reasoningEffort" in outcome)) return outcome;
+  const { model: _model, reasoningEffort: _effort, ...rest } = outcome as Record<string, unknown>;
+  return rest;
 }
 
 function lifecycleKind(view: OrdinaryView): "open" | "close" | undefined {

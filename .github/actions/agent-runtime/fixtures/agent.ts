@@ -8,10 +8,22 @@ const turns = new Map<string, number>();
 const sessionServers = new Map<string, string[]>();
 const serverConfigs = new Map<string, acp.McpServer[]>();
 const cancellations = new Map<string, () => void>();
+const sessionOptions = new Map<string, { model?: string; reasoningEffort?: string }>();
 const connection = acp.agent({ name: "harness-test-agent" })
   .onNotification(acp.methods.agent.session.cancel, ctx => { cancellations.get(ctx.params.sessionId)?.(); })
   .onRequest(acp.methods.agent.initialize, () => ({ protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {} }))
-  .onRequest(acp.methods.agent.session.setConfigOption, () => ({ configOptions: [] }))
+  .onRequest(acp.methods.agent.session.setConfigOption, ctx => {
+    const state = sessionOptions.get(ctx.params.sessionId) ?? {};
+    if (ctx.params.configId === "model" && typeof ctx.params.value === "string") state.model = ctx.params.value;
+    if (ctx.params.configId === "reasoning_effort" && typeof ctx.params.value === "string") state.reasoningEffort = ctx.params.value;
+    sessionOptions.set(ctx.params.sessionId, state);
+    return { configOptions: [
+      state.model ? { id: "model", name: "Model", type: "select" as const, currentValue: state.model,
+        options: [{ value: state.model, name: state.model }] } : undefined,
+      state.reasoningEffort ? { id: "reasoning_effort", name: "Reasoning effort", type: "select" as const,
+        currentValue: state.reasoningEffort, options: [{ value: state.reasoningEffort, name: state.reasoningEffort }] } : undefined,
+    ].filter(option => option !== undefined) };
+  })
   .onRequest(acp.methods.agent.session.new, ctx => {
     const sessionId = ++sessions === 1 ? "fixture-session" : `fixture-session-${sessions}`;
     turns.set(sessionId, 0);

@@ -172,9 +172,15 @@ test("a rejected agent model can be corrected before the native session changes"
   const runtime = modelRuntime();
   const { session, prompts } = configSession();
   const requests: string[] = [];
+  const state: { model?: string; reasoningEffort?: string } = {};
   const client = { async request(_method: string, params: { configId: string; value: string }) {
     requests.push(`${params.configId}:${params.value}`);
-    return { configOptions: [] };
+    if (params.configId === "model") state.model = params.value;
+    if (params.configId === "reasoning_effort") state.reasoningEffort = params.value;
+    return { configOptions: [
+      { id: "model", currentValue: state.model },
+      { id: "reasoning_effort", currentValue: state.reasoningEffort },
+    ].filter(option => option.currentValue !== undefined) };
   }, async notify() {} };
   await assert.rejects(runtime.agent(client as never, session as never, "codex",
     { prompt: "bad", model: "gpt-reserve" }), /AGENT_MODEL_REJECTED/);
@@ -189,6 +195,23 @@ test("a rejected agent model can be corrected before the native session changes"
   assert.deepEqual(await runtime.agent(client as never, session as never, "codex", { prompt: "again" }),
     { status: "completed", finalResponse: "FINAL_OK", model: "gpt-5.5", reasoningEffort: "high" });
   assert.equal(prompts(), 2);
+});
+
+test("an agent receipt uses the executor's current configuration, not a different request", async () => {
+  const runtime = modelRuntime();
+  const { session, prompts } = configSession();
+  const client = { async request() {
+    return { configOptions: [
+      { id: "model", currentValue: "gpt-6-sol" },
+      { id: "reasoning_effort", currentValue: "high" },
+    ] };
+  }, async notify() {} };
+  await assert.rejects(runtime.agent(client as never, session as never, "codex",
+    { prompt: "switch", model: "gpt-5.5", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+  assert.equal(prompts(), 0);
+  await assert.rejects(runtime.agent(client as never, session as never, "codex", { prompt: "again" }),
+    /AGENT_MODEL_UNCERTAIN/);
+  assert.equal(prompts(), 0);
 });
 
 test("a partial agent configuration failure does not run another prompt", async () => {
