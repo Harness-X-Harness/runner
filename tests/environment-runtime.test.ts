@@ -34,6 +34,26 @@ for (const active of [false, true]) test(`provider exit closes Environment witho
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
+test("the first agent call fixes a reported model and effort", { timeout: 7000 }, async () => {
+  const report = { models: [
+    { id: "gpt-6-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+    { id: "gpt-5.5", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
+  ] };
+  await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {
+    const selected = { model: "gpt-5.5", reasoningEffort: "xhigh" };
+    assert.deepEqual(await environment.execute("one", { kind: "agent", prompt: "codex-final", ...selected }),
+      { ok: true, value: { status: "completed", finalResponse: "FINAL_OK", ...selected } });
+    assert.deepEqual(await environment.execute("two", { kind: "agent", prompt: "codex-final" }),
+      { ok: true, value: { status: "completed", finalResponse: "FINAL_OK", ...selected } });
+    assert.deepEqual(await environment.execute("three", { kind: "agent", prompt: "codex-final", model: "gpt-6-sol" }),
+      { ok: false, code: "AGENT_MODEL_CONFLICT" });
+  }, undefined, { readAgentReport: async () => report });
+  await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {
+    assert.deepEqual(await environment.execute("hidden", { kind: "agent", prompt: "codex-final", model: "gpt-reserve" }),
+      { ok: false, code: "AGENT_MODEL_REJECTED" });
+  }, undefined, { readAgentReport: async () => report });
+});
+
 test("lost CI completion ends at the Environment deadline and late delivery cannot revive the wait", { timeout: 8000 }, async () => {
   const originalFetch = globalThis.fetch;
   let reads = 0;

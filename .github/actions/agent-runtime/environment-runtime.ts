@@ -1,16 +1,27 @@
 import { methods, type ActiveSession, type ClientContext } from "@agentclientprotocol/sdk";
+import { AGENT_MODEL_DEFAULTS, applyAgentSelection, resolveAgentSelection, type AgentModelReport, type AgentSelection } from "./agent-model.ts";
 import { CommandCleanupError, runCommand, type CommandContext, type CommandInput } from "./command.ts";
 import { readAgentTurn } from "./final-response.ts";
+
+type RuntimeContext = Omit<CommandContext, "signal"> & {
+  readAgentReport?: (executor: "codex" | "grok", signal: AbortSignal) => Promise<AgentModelReport>;
+};
+export type AgentTurn = { prompt: string; model?: string; reasoningEffort?: string };
 
 /** One shared local slot. The caller owns the enclosing ACP process scope. */
 export class EnvironmentRuntime {
   private readonly context: Omit<CommandContext, "signal">;
+  private readonly readAgentReport?: RuntimeContext["readAgentReport"];
   private active?: { cancel: () => Promise<void>; result: Promise<unknown> };
   private closing?: Promise<void>;
   private cleanupFailure?: Error;
+  private locked?: AgentSelection;
+  private applied?: AgentSelection;
 
-  constructor(context: Omit<CommandContext, "signal">) {
-    this.context = { ...context, env: { ...context.env } };
+  constructor(context: RuntimeContext) {
+    const { readAgentReport, ...rest } = context;
+    this.readAgentReport = readAgentReport;
+    this.context = { ...rest, env: { ...rest.env } };
   }
 
   command(input: CommandInput) {
@@ -19,13 +30,25 @@ export class EnvironmentRuntime {
       async () => { controller.abort(); });
   }
 
-  agent(client: ClientContext, session: ActiveSession, executor: "codex" | "grok", prompt: string) {
+  agent(client: ClientContext, session: ActiveSession, executor: "codex" | "grok", input: string | AgentTurn) {
+    const turn = typeof input === "string" ? { prompt: input } : input;
     let cancelRequested = false;
-    const cancel = () => client.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+    const selectionAbort = new AbortController();
+    const cancel = () => {
+      selectionAbort.abort();
+      return client.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+    };
     return this.execute(async () => {
-      if (!prompt.trim()) throw new Error("INVALID_AGENT_PROMPT");
+      if (!turn.prompt.trim()) throw new Error("INVALID_AGENT_PROMPT");
       if (Date.now() >= this.context.deadline) throw new Error("ENVIRONMENT_DEADLINE_EXPIRED");
-      const results = await Promise.allSettled([session.prompt(prompt), readAgentTurn(session, executor, async notification => {
+      const selection = await this.selectModel(executor, turn, selectionAbort.signal, async (configId, value) => {
+        await client.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId, value });
+      }).catch((error: unknown) => {
+        if (error instanceof Error && error.message === "AGENT_TURN_CANCELLED") return undefined;
+        throw error;
+      });
+      if (!selection) return { status: "cancelled" as const };
+      const results = await Promise.allSettled([session.prompt(turn.prompt), readAgentTurn(session, executor, async notification => {
         // A native update proves the prompt reached the agent. Reassert an early
         // cancellation that may have arrived before its handler was installed.
         if (cancelRequested) await cancel();
@@ -43,8 +66,34 @@ export class EnvironmentRuntime {
       }
       const result = results[1];
       if (result.status !== "fulfilled") throw new Error("AGENT_TURN_UNCONFIRMED");
-      return result.value;
+      if (result.value.status === "cancelled") return result.value;
+      return { ...result.value, model: selection.model, reasoningEffort: selection.reasoningEffort };
     }, () => { cancelRequested = true; return cancel(); });
+  }
+
+  private async selectModel(executor: "codex" | "grok", turn: AgentTurn, signal: AbortSignal,
+    setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<void>): Promise<AgentSelection> {
+    const requested = { model: turn.model, reasoningEffort: turn.reasoningEffort };
+    const explicit = requested.model !== undefined || requested.reasoningEffort !== undefined;
+    if (this.locked && !explicit) return this.locked;
+    if (!this.readAgentReport) {
+      if (explicit) throw new Error("AGENT_MODEL_UNAVAILABLE");
+      const selection = AGENT_MODEL_DEFAULTS[executor];
+      this.locked = this.applied = selection;
+      return selection;
+    }
+    let selection: AgentSelection;
+    try {
+      if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
+      selection = resolveAgentSelection({ executor, report: await this.readAgentReport(executor, signal), requested, locked: this.locked });
+      await applyAgentSelection(this.applied ?? AGENT_MODEL_DEFAULTS[executor], selection, setOption);
+    } catch (error) {
+      if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
+      if (error instanceof Error && (error.message === "AGENT_MODEL_REJECTED" || error.message === "AGENT_MODEL_CONFLICT" || error.message === "AGENT_MODEL_UNAVAILABLE")) throw error;
+      throw new Error("AGENT_MODEL_REJECTED");
+    }
+    this.applied = this.locked = selection;
+    return selection;
   }
 
   private execute<T>(start: () => Promise<T>, cancel: () => Promise<void>): Promise<T> {

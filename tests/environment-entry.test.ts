@@ -19,6 +19,12 @@ test("provider configuration stays private and Agent child does not inherit job 
     assert.equal((await stat(file)).mode & 0o777, 0o600);
     const config = await readFile(file, "utf8");
     assert.match(config, /env_key = "MINI_END_USER_KEY"/);
+    if (executor === "codex") {
+      assert.match(config, /model = "gpt-6-sol"\nmodel_reasoning_effort = "high"/);
+    } else {
+      assert.match(config, /default_reasoning_effort = "xhigh"/);
+      assert.match(config, /model = "grok-4.7"/);
+    }
     assert.doesNotMatch(config, /PRIVATE_/);
   }
   const child = agentEnvironment(env);

@@ -11,6 +11,7 @@ const cancellations = new Map<string, () => void>();
 const connection = acp.agent({ name: "harness-test-agent" })
   .onNotification(acp.methods.agent.session.cancel, ctx => { cancellations.get(ctx.params.sessionId)?.(); })
   .onRequest(acp.methods.agent.initialize, () => ({ protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: {} }))
+  .onRequest(acp.methods.agent.session.setConfigOption, () => ({ configOptions: [] }))
   .onRequest(acp.methods.agent.session.new, ctx => {
     const sessionId = ++sessions === 1 ? "fixture-session" : `fixture-session-${sessions}`;
     turns.set(sessionId, 0);

@@ -24,12 +24,13 @@ jobs:
           install -d -m 0700 "$HOME/.grok"
           cat > "$HOME/.grok/config.toml" <<EOF
           [models]
-          default = "mini-grok-4-6"
+          default = "mini-agent"
+          default_reasoning_effort = "xhigh"
 
-          [model.mini-grok-4-6]
-          model = "grok-4.6"
+          [model.mini-agent]
+          model = "grok-4.7"
           base_url = "$MINI_GROK_BASE_URL"
-          name = "Mini Grok 4.6"
+          name = "Mini Grok"
           description = "Grok through Mini"
           env_key = "MINI_END_USER_KEY"
           api_backend = "responses"
@@ -40,4 +41,4 @@ jobs:
         shell: bash
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-        run: grok --no-auto-update --always-approve -m mini-grok-4-6 -p "Reply exactly OK." > /dev/null
+        run: grok --no-auto-update --always-approve -m mini-agent -p "Reply exactly OK." > /dev/null

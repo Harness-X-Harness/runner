@@ -10,7 +10,8 @@ const commandResult = z.object({ exitCode: z.number().int().nullable(), signal: 
   stdout: z.string(), stderr: z.string(), truncated: z.boolean(),
   stopReason: z.enum(["cancelled", "timeout"]).optional() }).strict();
 const agentResult = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("completed"), finalResponse: z.string() }).strict(),
+  z.object({ status: z.literal("completed"), finalResponse: z.string(),
+    model: z.string().min(1).max(200).optional(), reasoningEffort: z.string().min(1).max(32).optional() }).strict(),
   z.object({ status: z.literal("cancelled") }).strict(),
 ]);
 
