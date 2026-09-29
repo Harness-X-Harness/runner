@@ -39,6 +39,8 @@ default = ${model}
 default_reasoning_effort = ${effort}
 [endpoints]
 models_base_url = ${baseUrl}
+[model.${model}]
+env_key = "MINI_END_USER_KEY"
 `;
   const file = path.join(directory, "config.toml");
   await fs.writeFile(file, config, { mode: 0o600 });
