@@ -9,7 +9,8 @@ export function providerProcess(executor: "codex" | "grok", workspace: string,
     workspace,
     env: executor === "codex" ? { ...env, CODEX_PATH: "codex", CODEX_CONFIG: JSON.stringify({
       sandbox_mode: "danger-full-access", approval_policy: "never",
-      "features.default_mode_request_user_input": true,
+      // ACP also merges feature flags; keep one nested table, not overlapping dotted keys.
+      features: { default_mode_request_user_input: true },
     }) } : { ...env, XAI_API_KEY: env.MINI_END_USER_KEY },
     extensions: executor === "grok" ? "grok" : undefined,
   };
