@@ -89,6 +89,9 @@ still require separate host support.
 
 `inspect_environment.agent` is the runner's last reported model state, with an
 observation time and a `current` flag bound to the ready runtime generation.
+The full model directory is returned on inspection and Environment resources,
+not repeated in mutation receipts. Completed operation outcomes still include
+their native-confirmed model and effort.
 `models` comes from the provider directory; it is not proof of CLI acceptance.
 Null means discovery is unavailable, not that a fallback model was selected.
 `defaults` is the deployment pair; `selection` is the native-confirmed locked

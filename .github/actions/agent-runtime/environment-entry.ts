@@ -58,7 +58,12 @@ async function main() {
   if (process.argv[2] === "claim") return claimEnvironment();
   if (process.argv[2] !== "serve") throw new Error("INVALID_ENVIRONMENT_INPUT");
   const worker = new Worker(new URL(import.meta.url), { workerData: true, stdout: true, stderr: true });
-  worker.stdout.resume(); worker.stderr.resume();
+  return superviseEnvironmentWorker(worker);
+}
+
+/** Keep native diagnostics private while forwarding stop to the runtime owner. */
+export async function superviseEnvironmentWorker(worker: Worker): Promise<void> {
+  worker.stdout!.resume(); worker.stderr!.resume();
   const stop = () => worker.postMessage("close");
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
   try {

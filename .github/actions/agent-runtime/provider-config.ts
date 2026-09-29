@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import { AGENT_MODEL_DEFAULTS, type AgentSelection } from "./agent-model.ts";
-import type { Executor } from "./index.ts";
 import { TaskError } from "../../../shared/task-errors.ts";
 
 export function agentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -12,7 +11,7 @@ export function agentEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return child;
 }
 
-export async function configureProvider(executor: Executor, env: NodeJS.ProcessEnv,
+export async function configureProvider(executor: "codex" | "grok", env: NodeJS.ProcessEnv,
   selection: AgentSelection = AGENT_MODEL_DEFAULTS[executor]): Promise<void> {
   const codex = executor === "codex";
   const endpoint = env[codex ? "MINI_CODEX_BASE_URL" : "MINI_GROK_BASE_URL"];

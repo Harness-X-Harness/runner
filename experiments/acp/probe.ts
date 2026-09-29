@@ -9,7 +9,6 @@ import * as acp from "@agentclientprotocol/sdk";
 import { withAcpAgent } from "../../.github/actions/agent-runtime/acp-client.ts";
 import { startWaitTool } from "./wait-tool.ts";
 import { readFinalResponse } from "../../.github/actions/agent-runtime/final-response.ts";
-import { AgentRuntime } from "../../.github/actions/agent-runtime/index.ts";
 import { withEnvironment } from "../../.github/actions/agent-runtime/environment.ts";
 import { providerProcess } from "../../.github/actions/agent-runtime/provider-process.ts";
 
@@ -25,7 +24,7 @@ async function main() {
   assert.ok(executor === "grok" || executor === "codex");
   const source = process.argv[3];
   const mode = process.argv[4] ?? "continuity";
-  assert.ok(["continuity", "runtime", "environment", "environment-ci", "final", "wait", "wait-cancel", "long-wait", "timeout", "question", "question-later", "question-cancel"].includes(mode));
+  assert.ok(["continuity", "environment", "environment-ci", "final", "wait", "wait-cancel", "long-wait", "timeout", "question", "question-later", "question-cancel"].includes(mode));
   const nativeToolConfig = mode === "timeout" || mode === "long-wait";
   const longWaitMs = 600000;
   const longWaitTimeoutSeconds = 660;
@@ -43,7 +42,7 @@ async function main() {
   const checks: string[] = [];
   let tool: Awaited<ReturnType<typeof startWaitTool>> | undefined;
   try {
-    if (!["continuity", "runtime", "environment", "environment-ci"].includes(mode)) tool = await startWaitTool();
+    if (!["continuity", "environment", "environment-ci"].includes(mode)) tool = await startWaitTool();
     if (nativeToolConfig && tool) config.mcp_servers = {
       probe: { url: tool.url, tool_timeout_sec: mode === "timeout" ? 2 : longWaitTimeoutSeconds },
     };
@@ -156,19 +155,6 @@ async function main() {
         assert.equal(environment.signal.aborted, true);
       });
       delete evidence.phase;
-    } else if (mode === "runtime") {
-      const marker = `RUNTIME_${randomUUID()}`;
-      await writeFile(join(temporary, "workspace", "README.md"), `${marker}\n`, { mode: 0o600 });
-      const runtime = new AgentRuntime(executor, { env: { PATH: process.env.PATH, HOME: temporary, TMPDIR: temporary } });
-      const deadline = setTimeout(() => { void runtime.close(); }, 90000);
-      try {
-        const result = await runtime.run({ workingDirectory: join(temporary, "workspace"),
-          prompt: "Read the first line of README.md in this working directory using your file tools. Do not change files. Return exactly that line as your final answer, with no other text.",
-        });
-        assert.equal(result.finalResponse.trim(), marker);
-        assert.equal(runtime.closed, true);
-        checks.push("production_runtime_read_file_exact_result");
-      } finally { clearTimeout(deadline); await runtime.close(); }
     } else await withAcpAgent({
       command: executor === "grok" ? "grok" : fileURLToPath(new URL("./node_modules/.bin/codex-acp", import.meta.url)),
       args: executor === "grok" ? ["agent", "--no-leader", "stdio"] : [],

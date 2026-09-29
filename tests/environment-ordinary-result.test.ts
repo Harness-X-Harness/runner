@@ -17,6 +17,25 @@ function content(result: ReturnType<typeof ordinaryToolResult>): string {
   return result.content.map(block => block.type === "text" ? block.text : "").join("\n");
 }
 
+test("only explicit inspection includes the model directory; outcomes keep native selection", () => {
+  const selection = { model: "fixture-model", reasoningEffort: "high" };
+  const agent = { state: { defaults: selection, selection, uncertain: false,
+    models: [{ id: "fixture-model", effort: "high", efforts: ["high"] }] }, observedAt: 1, current: true };
+  const snapshot = environment("ready", { agent });
+  const result = operation({ request: JSON.stringify({ kind: "agent" }), result: {
+    ok: true, value: { status: "completed", finalResponse: "DONE", ...selection },
+  } });
+  for (const tool of ["open_environment", "command", "agent", "update_operation", "close_environment"] as const) {
+    const receipt = ordinaryToolResult({ tool, environment: snapshot, operation: result });
+    assert.equal(receipt.structuredContent?.agent, undefined);
+    assert.equal(receipt.structuredContent?.tool, tool);
+    assert.deepEqual(receipt.structuredContent?.outcome,
+      { status: "completed", finalResponse: "DONE", ...selection });
+  }
+  const inspected = ordinaryToolResult({ tool: "inspect_environment", environment: snapshot, operation: result });
+  assert.deepEqual(inspected.structuredContent?.agent, agent);
+});
+
 test("ordinary receipts keep acceptance, input, and completion distinct", () => {
   const opening = ordinaryToolResult({ tool: "open_environment", dispatch: "accepted", environment: environment("opening"),
     operation: lifecycleTask(environmentId, "open", { createdAt: 1, updatedAt: 2, status: "working" }) });
