@@ -25,7 +25,8 @@ test("provider configuration stays private and Agent child does not inherit job 
       assert.match(config, /default_reasoning_effort = "xhigh"/);
       assert.match(config, /default = "grok-4.7"/);
       assert.match(config, /\[endpoints\]\nmodels_base_url = "https:\/\/grok.example"/);
-      assert.doesNotMatch(config, /mini-agent|\[model\./);
+      assert.match(config, /\[model\."grok-4.7"\]\nenv_key = "MINI_END_USER_KEY"/);
+      assert.doesNotMatch(config, /mini-agent/);
     }
     assert.doesNotMatch(config, /PRIVATE_/);
   }
