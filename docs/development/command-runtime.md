@@ -117,6 +117,15 @@ turns in the same native session and verify process exit after leaving the
 scope. This is protocol-fixture evidence, not a real model continuity or turn
 cancellation acceptance result.
 
+Agent model selection is applied to that same session with
+`session/set_config_option` before the prompt. Candidate rejection happens
+before any option is sent, so another agent call can correct it. Once an option
+request has started and the full pair is not confirmed, the runtime marks the
+Agent configuration uncertain and rejects every later agent prompt. It does not
+roll back, retry, or infer that the untouched default is still active. Command
+and close remain available. The local fault injection is not production
+evidence that a provider has failed this way.
+
 `readAgentTurn` consumes SDK updates through the native stop marker and returns
 either a completed semantic final response or cancellation. It does not cancel
 the prompt request locally, close the session, or infer stopped work from a sent

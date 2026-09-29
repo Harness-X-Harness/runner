@@ -42,3 +42,12 @@ test("failure receipts do not expose diagnostics or evict replay protection", as
   assert.deepEqual(await operations.execute("op-0", input), { ok: false, code: "OPERATION_FAILED" });
   assert.equal(executions, 256);
 });
+
+test("an uncertain agent configuration stays a safe operation error", async () => {
+  const operations = new EnvironmentOperations({ signal: new AbortController().signal, close: async () => {},
+    command: async () => { throw new Error("must not run"); },
+    agent: async () => { throw new Error("AGENT_MODEL_UNCERTAIN"); },
+  }, async () => {});
+  assert.deepEqual(await operations.execute("agent", { kind: "agent", prompt: "again" }),
+    { ok: false, code: "AGENT_MODEL_UNCERTAIN" });
+});

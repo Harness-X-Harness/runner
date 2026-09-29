@@ -17,6 +17,7 @@ export class EnvironmentRuntime {
   private cleanupFailure?: Error;
   private locked?: AgentSelection;
   private applied?: AgentSelection;
+  private agentConfigUncertain = false;
 
   constructor(context: RuntimeContext) {
     const { readAgentReport, ...rest } = context;
@@ -73,6 +74,7 @@ export class EnvironmentRuntime {
 
   private async selectModel(executor: "codex" | "grok", turn: AgentTurn, signal: AbortSignal,
     setOption: (configId: "model" | "reasoning_effort", value: string) => Promise<void>): Promise<AgentSelection> {
+    if (this.agentConfigUncertain) throw new Error("AGENT_MODEL_UNCERTAIN");
     const requested = { model: turn.model, reasoningEffort: turn.reasoningEffort };
     const explicit = requested.model !== undefined || requested.reasoningEffort !== undefined;
     if (this.locked && !explicit) return this.locked;
@@ -86,10 +88,22 @@ export class EnvironmentRuntime {
     try {
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
       selection = resolveAgentSelection({ executor, report: await this.readAgentReport(executor, signal), requested, locked: this.locked });
-      await applyAgentSelection(this.applied ?? AGENT_MODEL_DEFAULTS[executor], selection, setOption);
     } catch (error) {
       if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
       if (error instanceof Error && (error.message === "AGENT_MODEL_REJECTED" || error.message === "AGENT_MODEL_CONFLICT" || error.message === "AGENT_MODEL_UNAVAILABLE")) throw error;
+      throw new Error("AGENT_MODEL_REJECTED");
+    }
+    let started = false;
+    try {
+      await applyAgentSelection(this.applied ?? AGENT_MODEL_DEFAULTS[executor], selection, async (configId, value) => {
+        started = true;
+        await setOption(configId, value);
+      });
+    } catch (error) {
+      if (started) this.agentConfigUncertain = true;
+      if (signal.aborted) throw new Error("AGENT_TURN_CANCELLED");
+      if (started) throw new Error("AGENT_MODEL_UNCERTAIN");
+      if (error instanceof Error && error.message === "AGENT_TURN_CANCELLED") throw error;
       throw new Error("AGENT_MODEL_REJECTED");
     }
     this.applied = this.locked = selection;
