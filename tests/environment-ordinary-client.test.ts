@@ -20,7 +20,9 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
         async readEnvironment(owner: string): Promise<EnvironmentSnapshot | null> {
           if (state.failRead) throw new Error("PRIVATE_STORAGE_FAILURE");
           if (owner !== "123") return null;
-          return { environmentId: id, executor: "codex", status: state.status, createdAt: 1, expiresAt: 1000, activeTaskId: state.activeTaskId };
+          return { environmentId: id, executor: "codex", status: state.status, createdAt: 1, expiresAt: 1000, activeTaskId: state.activeTaskId,
+            agent: { state: { defaults: { model: "fixture", reasoningEffort: "high" }, models: [], selection: null, uncertain: false },
+              observedAt: 1, current: true } };
         },
         async initialize(value: { environmentId: string; executor: "codex" | "grok" }) {
           state.opens++;
@@ -137,6 +139,8 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   state.activeTaskId = ask;
   const inspected = await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId } }, true);
   assert.equal(inspected.result?.resultType, "complete");
+  assert.ok(z.object({ agent: z.object({ state: z.object({ models: z.array(z.unknown()) }) }) })
+    .parse(inspected.result?.structuredContent).agent);
   assert.equal(z.object({ disposition: z.literal("waiting_for_input"), questions: z.array(z.object({ message: z.string() })) })
     .parse(inspected.result?.structuredContent).questions[0]?.message, "Which name?");
   assert.match(text(inspected), /not success/);
@@ -183,6 +187,8 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
     inputResponses: { ask: { action: "accept", content: { name: "chosen" } } } } };
   const answered = await rpc("tools/call", answer);
   assert.equal(answered.error, undefined);
+  assert.deepEqual(z.object({ tool: z.literal("update_operation"), agent: z.undefined().optional() })
+    .parse(answered.result?.structuredContent), { tool: "update_operation" });
   assert.equal(state.answers, 1);
   assert.equal(state.reservations, 3);
   for (const arguments_ of [

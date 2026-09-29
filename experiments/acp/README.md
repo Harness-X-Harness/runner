@@ -47,12 +47,6 @@ using Codex message identity/phase or Grok response boundaries. Native tool
 discovery is permitted; exactly one target-tool call is still required. This does not
 replace the production runtime and does not count as a pass if the tool is not called.
 
-Use `runtime` to test the production AgentRuntime entry point, including its
-log-isolated Node Worker and default CLI selection. It creates one private
-README with a random first line, asks the Agent to read it without changing
-files, and requires that exact final result. A 90-second outer deadline closes
-the runtime. This is a local provider test, not GitHub/Cloudflare acceptance.
-
 Use `environment` to test the production `withEnvironment` and provider-process
 selection. Two direct command operations write/read a private random marker;
 an Agent operation reads that same workspace and the next recalls it without

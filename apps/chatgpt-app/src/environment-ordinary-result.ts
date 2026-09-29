@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { EnvironmentSnapshot } from "./environment-object.ts";
 import type { OutputSnapshot } from "../../../shared/environment-output.ts";
 
-export type OrdinaryTool = "agent" | "close_environment" | "command" | "inspect_environment" | "open_environment";
+export type OrdinaryTool = "agent" | "close_environment" | "command" | "inspect_environment" | "open_environment" | "update_operation";
 export type OrdinaryDispatch = "accepted" | "unknown" | "rejected" | "already-issued";
 export type OrdinaryView = {
   tool: OrdinaryTool;
@@ -48,7 +48,7 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,
       expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
       executor: view.environment.executor,
-      agent: view.environment.agent,
+      agent: view.tool === "inspect_environment" ? view.environment.agent : undefined,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,
       activeOperationStatus: view.activeOperation?.status
         ?? (view.operation && view.environment.activeTaskId === view.operation.taskId ? view.operation.status : undefined),

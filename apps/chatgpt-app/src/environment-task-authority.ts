@@ -74,7 +74,7 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
         if (update.action === "cancel") await cancelEnvironmentTask(env, props, update.operationId);
         else await updateEnvironmentTask(env, props, update.operationId, update.inputResponses);
         return inspectOrdinary(env, props, { environmentId: `env_${update.operationId.slice(5, 37)}`,
-          operationId: update.operationId });
+          operationId: update.operationId }, "update_operation");
       }
       const capable = hasTaskClientCapabilityV2(request.params);
       if (name === "open_environment") {
@@ -128,7 +128,8 @@ async function projectLifecycle(env: Environment, props: unknown, capable: boole
   return ordinaryToolResult({ tool, operation, dispatch, environment });
 }
 
-async function inspectOrdinary(env: Environment, props: unknown, input: { environmentId: string; operationId?: string }) {
+async function inspectOrdinary(env: Environment, props: unknown, input: { environmentId: string; operationId?: string },
+  tool: "inspect_environment" | "update_operation" = "inspect_environment") {
   if (input.operationId && !input.operationId.startsWith(`task_${input.environmentId.slice(4)}_`)) {
     return ordinaryError("Invalid inspect_environment input: operationId. Follow the tool input schema.");
   }
@@ -162,7 +163,7 @@ async function inspectOrdinary(env: Environment, props: unknown, input: { enviro
   const output = operation && !lifecycleIdentity(operation.taskId)
     ? await env.ENVIRONMENTS.getByName(input.environmentId).readOutput(executionPrincipal(props, ENVIRONMENT_SCOPE), operation.taskId)
     : undefined;
-  return ordinaryToolResult({ tool: "inspect_environment", environment, operation, activeOperation, activeUnreadable, historical,
+  return ordinaryToolResult({ tool, environment, operation, activeOperation, activeUnreadable, historical,
     output: output ?? undefined });
 }
 

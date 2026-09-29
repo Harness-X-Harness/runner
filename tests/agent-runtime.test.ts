@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { AgentRuntime, type Executor } from "../.github/actions/agent-runtime/index.ts";
-import { TaskError } from "../shared/task-errors.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { withAcpAgent } from "../.github/actions/agent-runtime/acp-client.ts";
@@ -10,6 +8,7 @@ import { readAgentTurn, readFinalResponse } from "../.github/actions/agent-runti
 import { methods } from "../.github/actions/agent-runtime/node_modules/@agentclientprotocol/sdk/dist/acp.js";
 import { EnvironmentRuntime } from "../.github/actions/agent-runtime/environment-runtime.ts";
 import { providerProcess } from "../.github/actions/agent-runtime/provider-process.ts";
+import { withEnvironment } from "../.github/actions/agent-runtime/environment.ts";
 
 test("Codex launch enables native user questions outside plan mode", () => {
   const process = providerProcess("codex", "/workspace", {});
@@ -28,9 +27,6 @@ test("Grok authenticates its native model catalog with the configured provider k
   assert.equal(providerProcess("codex", "/workspace", env).env.XAI_API_KEY, undefined);
   assert.deepEqual(env, { MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY" });
 });
-const runtime = (executor: Executor) => new AgentRuntime(executor, { env: {}, agentProcess: {
-  command: process.execPath, args: [fixturePath], workspace: process.cwd(), env: {},
-} });
 
 test("Environment ACP scope keeps one native session across turns and observes process close", async () => {
   const results = await withAcpAgent({ command: process.execPath, args: [fixturePath],
@@ -95,53 +91,34 @@ test("native turn cancellation drains its stop marker and preserves the same ses
   }));
 });
 
-test("both production ACP runtimes return only final text and close before resolving", async () => {
+test("Environment returns final text and native permission works for both providers", async () => {
   for (const executor of ["codex", "grok"] as const) {
-    const agent = runtime(executor);
-    assert.deepEqual(await agent.run({ prompt: `${executor}-final`, workingDirectory: process.cwd() }), { finalResponse: "FINAL_OK" });
-    assert.equal(agent.closed, true);
-    await agent.close();
-    await assert.rejects(agent.run({ prompt: "again", workingDirectory: process.cwd() }), { code: "PROVIDER_PROTOCOL_ERROR" });
+    await withEnvironment({ command: process.execPath, args: [fixturePath], workspace: process.cwd(), env: {},
+      extensions: executor === "grok" ? "grok" : undefined }, executor, Date.now() + 10000, {}, {
+      sessionUpdate: () => {}, requestPermission: request => ({ outcome: {
+        outcome: "selected", optionId: request.options.find(option => option.kind === "allow_once")!.optionId,
+      } }),
+    }, async environment => {
+      for (const prompt of [`${executor}-final`, "permission"]) {
+        const result = await environment.agent(prompt);
+        assert.equal(result.status, "completed");
+        if (result.status === "completed") assert.equal(result.finalResponse, "FINAL_OK");
+      }
+    });
   }
 });
 
-test("autonomous approval uses ACP; new human input produces a safe one-shot failure", async () => {
-  assert.deepEqual(await runtime("grok").run({ prompt: "permission", workingDirectory: process.cwd() }), { finalResponse: "FINAL_OK" });
-  for (const [executor, prompt] of [["codex", "question"], ["grok", "grok-question"]] as const) {
-    await assert.rejects(runtime(executor).run({ prompt, workingDirectory: process.cwd() }), { code: "USER_INPUT_REQUIRED" });
+test("production Environment supervisor suppresses diagnostics and forwards stop", async () => {
+  for (const mode of ["malformed", "crash", "missing", "stop"] as const) {
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL(
+      "../.github/actions/agent-runtime/fixtures/run.ts", import.meta.url)), mode], { timeout: 10000 });
+    assert.equal(stderr, "");
+    assert.doesNotMatch(stdout, /PRIVATE_FIXTURE_MARKER|Error handling notification|fixture-session/);
+    const result = JSON.parse(stdout);
+    if (mode === "crash" || mode === "missing") assert.deepEqual(result, { error: "ENVIRONMENT_RUNTIME_FAILED" });
+    else if (mode === "stop") assert.deepEqual(result, { stopped: true });
+    else assert.ok(result.completed === true || result.error === "ENVIRONMENT_RUNTIME_FAILED");
   }
-});
-
-test("startup and child failure are canonical and contain no native diagnostics", async () => {
-  const absent = new AgentRuntime("grok", { env: {}, agentProcess: { command: "/missing-agent", args: [], workspace: process.cwd(), env: {} } });
-  await assert.rejects(absent.run({ prompt: "test", workingDirectory: process.cwd() }), { code: "PROVIDER_UNAVAILABLE" });
-  await assert.rejects(runtime("grok").run({ prompt: "crash", workingDirectory: process.cwd() }), error => {
-    assert.ok(error instanceof TaskError);
-    assert.equal(error.code, "PROVIDER_EXECUTION_ERROR");
-    assert.doesNotMatch(JSON.stringify(error), /PRIVATE|fixture-session/);
-    return true;
-  });
-});
-
-test("close is idempotent and interrupts an active connection", { timeout: 7000 }, async () => {
-  const agent = runtime("grok");
-  const pending = agent.run({ prompt: "hold", workingDirectory: process.cwd() });
-  pending.catch(() => {});
-  await agent.close();
-  await agent.close();
-  await assert.rejects(pending, { code: "PROVIDER_EXECUTION_ERROR" });
-  assert.equal(agent.closed, true);
-});
-
-test("dependency diagnostics cannot enter parent stdout or stderr", async () => {
-  // Either provider completion or a canonical failure is allowed after invalid input;
-  // the property here is that raw dependency diagnostics never reach public logs.
-  const { stdout, stderr } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL(
-    "../.github/actions/agent-runtime/fixtures/run.ts", import.meta.url))], { timeout: 7000 });
-  assert.equal(stderr, "");
-  assert.doesNotMatch(stdout, /PRIVATE_FIXTURE_MARKER|Error handling notification|fixture-session/);
-  const result = JSON.parse(stdout);
- assert.ok(result.finalResponse === "FINAL_OK" || result.code === "PROVIDER_PROTOCOL_ERROR" || result.code === "PROVIDER_EXECUTION_ERROR");
 });
 
 const reportedModels = { models: [
