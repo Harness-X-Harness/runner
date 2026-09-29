@@ -40,7 +40,7 @@ test('official high-level client discovers and reads owner-private catalogs', as
     new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`)));
   assert.equal(client.getServerVersion()?.name, 'harness-x-harness');
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map(tool => tool.name), ['agent', 'close_environment', 'command', 'open_environment']);
+  assert.deepEqual(tools.tools.map(tool => tool.name), ['agent', 'close_environment', 'command', 'inspect_environment', 'open_environment']);
   const resources = await client.listResources();
   const uri = `harness://environments/${environmentId}`;
   assert.deepEqual(resources.resources.map(resource => resource.uri), [uri]);

@@ -9,6 +9,18 @@
   ],
   "workers_dev": false,
   "preview_urls": false,
+  // Request URLs can contain OAuth codes. Keep invocation logs and tracing off.
+  // redact_query_string is also enabled via script-settings API; this Wrangler
+  // version does not expose that setting.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": false
+    },
+    "traces": { "enabled": false }
+  },
   "routes": [
     {
       "pattern": "runners.trustedtunnel.app",

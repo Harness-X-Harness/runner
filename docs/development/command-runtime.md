@@ -58,9 +58,12 @@ control-plane deadline alarms that commit close intent. Closed-Environment conte
 expires after seven days using the same native alarm; expiry denies reads and
 deletes stored operation/output content. The Worker mounts this handler at `/mcp`
 for Environment grants. Protocol support does not imply that every host can
-display resources or resume its model after a Task notification. Clients must
-support the advertised Tasks extension for effectful tools; there is no polling
-or cross-product fallback for hosts without that capability.
+display resources or resume its model after a Task notification. A client that
+declares Tasks uses Task handles for these tools. A client that does not
+declare Tasks receives an ordinary acceptance receipt and can read
+`inspect_environment` once. That path does not poll, subscribe, or turn a
+failed call into the other contract. Task subscription filters still require
+the Tasks capability.
 
 The POSIX child has its own process group. Cancellation and timeout send SIGKILL;
 normal leader exit also stops remaining group members. Result delivery waits for

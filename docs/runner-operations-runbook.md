@@ -9,6 +9,11 @@ Authorize `environments:use` with a modern Tasks-capable client. Use
 exact Environment and Task handles. Uncertain delivery does not permit a new
 creation key. See the [MCP contract](chatgpt-app.md).
 
+An ordinary MCP client uses the same tools but receives acceptance receipts.
+Read `inspect_environment` when a person asks for status. Do not poll. Do not
+treat `closing` or waiting for input as success. The Tasks flow above remains
+the subscription contract.
+
 ## Storage lifecycle
 
 Applied migration tags are append-only. Check the deployed Worker and its exact

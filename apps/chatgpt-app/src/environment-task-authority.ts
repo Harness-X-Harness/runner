@@ -1,19 +1,21 @@
 import { bearerAuthChallengeResponse, getOAuthProtectedResourceMetadataUrl, OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
+import { hasTaskClientCapabilityV2, type DetailedTaskV2 } from "@modelcontextprotocol/ext-tasks/core/v2";
 import { TaskError } from "../../../shared/task-errors.ts";
 import { canonicalMcpResource } from "./oauth-resource.ts";
 import { serveTaskRequest, type TaskAuthority } from "./task-methods.ts";
 import { mcpAuthorization } from "./mcp-authorization.ts";
-import type { EnvironmentObject } from "./environment-object.ts";
+import type { EnvironmentObject, EnvironmentSnapshot } from "./environment-object.ts";
 import { openEnvironment, closeEnvironment, ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { executionPrincipal } from "./execution-authority.ts";
-import { environmentTools, environmentToolDefinitions } from "./environment-tools.ts";
+import { environmentTools, environmentToolDefinitions, inspectInput } from "./environment-tools.ts";
 import { listEnvironmentResources, observeEnvironmentResource, readEnvironmentResource, type EnvironmentResources } from "./environment-resources.ts";
-import { lifecycleTaskId } from "./environment-lifecycle-task.ts";
+import { lifecycleTaskId, type LifecycleKind } from "./environment-lifecycle-task.ts";
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
+import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type OrdinaryTool } from "./environment-ordinary-result.ts";
 
 type Environment = EnvironmentResources & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
-  "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" |
+  "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment" |
   "readLifecycleTask" | "cancelLifecycleTask" | "observeLifecycleTask" |
   "reserveOperation" | "readOperation" | "cancelOperation" | "observeOperation" | "observeOutput" | "observeEnvironment" | "answerOperation"> } };
 
@@ -37,9 +39,10 @@ export async function handleEnvironmentTaskRequest(request: Request,
   return serveTaskRequest(request, environmentTaskAuthority(env, authorize));
 }
 
-/** The transport checks client capabilities before entering this effectful authority. */
+/** Task methods still stop before this authority. Ordinary tool calls opt in, then select one contract. */
 export function environmentTaskAuthority(env: Environment, authorize: () => Promise<Record<string, unknown>>): TaskAuthority {
   return {
+    ordinaryToolCalls: true,
     async tools() {
       executionPrincipal(await authorize(), ENVIRONMENT_SCOPE);
       return { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: environmentTools() };
@@ -63,26 +66,31 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
         const fields = Object.keys(definition.schema.shape);
         const invalid = [...new Set(parsed.error.issues.map(issue =>
           fields.includes(String(issue.path[0])) ? String(issue.path[0]) : "arguments"))];
-        return { resultType: "complete", isError: true,
-          content: [{ type: "text", text: `Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.` }] };
+        return ordinaryError(`Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.`);
       }
-      if (name === "open_environment" || name === "close_environment") {
-        const kind = name === "open_environment" ? "open" : "close";
-        let value: { environmentId: string };
-        try {
-          value = kind === "open" ? await openEnvironment(env, props, args) : await closeEnvironment(env, props, args);
-        } catch (error) {
+      if (name === "inspect_environment") return inspectOrdinary(env, props, inspectInput.parse(parsed.data));
+      const capable = hasTaskClientCapabilityV2(request.params);
+      if (name === "open_environment") {
+        const opened = await openEnvironment(env, props, args);
+        return projectLifecycle(env, props, capable, name, opened.environmentId, "open", opened.dispatch);
+      }
+      if (name === "close_environment") {
+        let closed: { environmentId: string };
+        try { closed = await closeEnvironment(env, props, args); }
+        catch (error) {
           if (!(error instanceof TaskError) || error.code !== "ENVIRONMENT_NOT_FOUND") throw error;
-          return { resultType: "complete", isError: true,
-            content: [{ type: "text", text: error.message }] };
+          return ordinaryError(error.message);
         }
-        const task = await getEnvironmentTask(env, props, lifecycleTaskId(value.environmentId, kind));
-        return task.status === "completed" ? task.result : { ...task, resultType: "task" };
+        return projectLifecycle(env, props, capable, name, closed.environmentId, "close");
       }
       if (name !== "command" && name !== "agent") throw new Error("UNKNOWN_TOOL");
+      const environmentId = operationEnvironmentId(parsed.data);
       const { taskId } = await startEnvironmentOperation(env, props, { ...parsed.data, kind: name });
-      const snapshot = await getEnvironmentTask(env, props, taskId);
-      return snapshot.status === "completed" ? snapshot.result : { ...snapshot, resultType: "task" };
+      const operation = await getEnvironmentTask(env, props, taskId);
+      if (capable) return operation.status === "completed" ? operation.result : { ...operation, resultType: "task" };
+      const environment = await readOwnedEnvironment(env, props, environmentId);
+      if (!environment) return ordinaryError(`Operation ${taskId} was accepted, but Environment ${environmentId} could not be read. Inspect that ID before submitting more work.`);
+      return ordinaryToolResult({ tool: name, operation, environment });
     },
     async handle(request) {
       const props = await authorize();
@@ -102,4 +110,58 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       ] as const)));
     },
   };
+}
+
+async function projectLifecycle(env: Environment, props: unknown, capable: boolean, tool: OrdinaryTool,
+  environmentId: string, kind: LifecycleKind, dispatch?: OrdinaryDispatch) {
+  const operation = await getEnvironmentTask(env, props, lifecycleTaskId(environmentId, kind));
+  if (capable) return operation.status === "completed" ? operation.result : { ...operation, resultType: "task" as const };
+  const environment = await readOwnedEnvironment(env, props, environmentId);
+  if (!environment) return ordinaryError(`Environment ${environmentId} was accepted, but its current status could not be read. Inspect that ID before submitting more work.`);
+  return ordinaryToolResult({ tool, operation, dispatch, environment });
+}
+
+async function inspectOrdinary(env: Environment, props: unknown, input: { environmentId: string; operationId?: string }) {
+  if (input.operationId && !input.operationId.startsWith(`task_${input.environmentId.slice(4)}_`)) {
+    return ordinaryError("Invalid inspect_environment input: operationId. Follow the tool input schema.");
+  }
+  const environment = await readOwnedEnvironment(env, props, input.environmentId);
+  if (!environment) return ordinaryError(new TaskError("ENVIRONMENT_NOT_FOUND").message);
+  const activeId = environment.activeTaskId;
+  let operation: DetailedTaskV2 | undefined;
+  let activeOperation: DetailedTaskV2 | undefined;
+  let activeUnreadable = false;
+  if (input.operationId) {
+    try { operation = await getEnvironmentTask(env, props, input.operationId); }
+    catch (error) {
+      if (!(error instanceof TaskError) || error.code !== "TASK_NOT_FOUND") throw error;
+      return ordinaryError(new TaskError("TASK_NOT_FOUND").message);
+    }
+    if (activeId && activeId !== input.operationId) {
+      try { activeOperation = await getEnvironmentTask(env, props, activeId); }
+      catch (error) {
+        if (!(error instanceof TaskError) || error.code !== "TASK_NOT_FOUND") throw error;
+        activeUnreadable = true;
+      }
+    }
+  } else if (activeId) {
+    try { operation = await getEnvironmentTask(env, props, activeId); }
+    catch (error) {
+      if (!(error instanceof TaskError) || error.code !== "TASK_NOT_FOUND") throw error;
+      activeUnreadable = true;
+    }
+  }
+  const historical = operation !== undefined && activeId !== null && activeId !== operation.taskId;
+  return ordinaryToolResult({ tool: "inspect_environment", environment, operation, activeOperation, activeUnreadable, historical });
+}
+
+function readOwnedEnvironment(env: Environment, props: unknown, environmentId: string): Promise<EnvironmentSnapshot | null> {
+  return env.ENVIRONMENTS.getByName(environmentId).readEnvironment(executionPrincipal(props, ENVIRONMENT_SCOPE));
+}
+
+function operationEnvironmentId(value: unknown): string {
+  if (typeof value !== "object" || value === null || !("environmentId" in value) || typeof value.environmentId !== "string") {
+    throw new TaskError("ENVIRONMENT_NOT_FOUND");
+  }
+  return value.environmentId;
 }

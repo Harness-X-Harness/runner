@@ -4,18 +4,16 @@ import test from "node:test";
 import { z } from "../apps/chatgpt-app/node_modules/zod/index.js";
 
 test("control plane uses one fixed Custom Domain without workers.dev", async () => {
+  // wrangler.jsonc uses full-line comments. Do not treat // inside values as comments.
+  const source = (await readFile(new URL("../apps/chatgpt-app/wrangler.jsonc", import.meta.url), "utf8"))
+    .replace(/^\s*\/\/.*$/gm, "");
   const configuration = z.object({
     workers_dev: z.boolean(), preview_urls: z.boolean(),
     routes: z.array(z.looseObject({ pattern: z.string(), custom_domain: z.boolean() })),
     vars: z.record(z.string(), z.unknown()),
     durable_objects: z.object({ bindings: z.array(z.looseObject({ name: z.string(), class_name: z.string() })) }),
     migrations: z.array(z.looseObject({ tag: z.string() })),
-  }).parse(JSON.parse(
-    await readFile(
-      new URL("../apps/chatgpt-app/wrangler.jsonc", import.meta.url),
-      "utf8",
-    ),
-  ));
+  }).parse(JSON.parse(source));
 
   assert.equal(configuration.workers_dev, false);
   assert.equal(configuration.preview_urls, false);

@@ -12,7 +12,7 @@ export const openInput = z.object({ executor: z.enum(["codex", "grok"]),
   idempotencyKey: z.string().min(1).max(256).optional() }).strict();
 export const environmentIdentity = z.object({ environmentId: z.string().regex(/^env_[a-f0-9]{32}$/) }).strict();
 
-/** Internal service; public MCP capability checking must precede this effectful call. */
+/** Internal service. The MCP authority selects the client contract before this call. */
 export async function openEnvironment(env: EnvironmentService, props: unknown, value: unknown) {
   const ownerId = executionPrincipal(props, ENVIRONMENT_SCOPE);
   const token = executionToken(props);

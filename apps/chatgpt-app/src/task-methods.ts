@@ -38,6 +38,8 @@ export interface TaskAuthority {
   // Return only requested, authorized IDs. Each source rechecks rights on read.
   observe(taskIds: readonly string[], signal: AbortSignal): Promise<ReadonlyMap<string, AsyncIterable<DetailedTaskV2>>>;
   observeResources(uris: readonly string[], signal: AbortSignal): Promise<ReadonlyMap<string, AsyncIterable<void>>>;
+  // Environment sets this. Other authorities keep the pre-effect Tasks gate.
+  readonly ordinaryToolCalls?: boolean;
 }
 const listenSchema = z.intersection(z.object({ jsonrpc: z.literal('2.0'), id: RequestIdV2Schema,
   method: z.literal('subscriptions/listen'),
@@ -127,7 +129,9 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
     return error(400, -32020, 'MCP header mismatch');
   }
   const resourceOnly = parsed.data.method === 'subscriptions/listen' && !parsed.data.params.notifications.taskIds?.length;
-  if (!resourceOnly && !['server/discover', 'ping', 'tools/list', 'resources/list', 'resources/read'].includes(parsed.data.method) && !hasTaskClientCapabilityV2(route.message.params)) {
+  // Declared capability selects the contract before effects. There is no second attempt.
+  const ordinaryToolCall = parsed.data.method === 'tools/call' && authority.ordinaryToolCalls === true;
+  if (!resourceOnly && !ordinaryToolCall && !['server/discover', 'ping', 'tools/list', 'resources/list', 'resources/read'].includes(parsed.data.method) && !hasTaskClientCapabilityV2(route.message.params)) {
     return error(400, ProtocolErrorCode.MissingRequiredClientCapability, 'Tasks capability required', {
       requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } },
     });

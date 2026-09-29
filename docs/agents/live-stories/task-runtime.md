@@ -6,6 +6,9 @@ As an authorized Harness Principal using a modern Tasks-capable MCP client, I
 can run a command and continue a coding-agent conversation in one temporary
 workspace, observe their results, and close that Environment.
 
+An ordinary client that does not declare Tasks is outside this story. Its
+receipt and inspect contract is in [the MCP contract](../../chatgpt-app.md).
+
 This is development-time acceptance, not CI automation. Use existing scoped
 evidence for unchanged boundaries; do not repeat a full provider matrix for
 every deployment.
