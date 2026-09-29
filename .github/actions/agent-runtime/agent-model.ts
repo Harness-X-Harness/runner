@@ -59,7 +59,7 @@ export async function readExecutorReport(executor: AgentExecutor, env: NodeJS.Pr
   const path = url.pathname.replace(/\/$/, "");
   url.pathname = path.endsWith("/models") ? path : `${path}/models`;
   url.hash = "";
-  url.search = executor === "codex" ? "?client_version=mini-live" : "";
+  url.search = "";
   try {
     const response = await fetchImpl(url, { headers: { authorization: `Bearer ${key}`, accept: "application/json" }, signal });
     if (!response.ok) throw new Error("AGENT_MODEL_UNAVAILABLE");

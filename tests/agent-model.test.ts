@@ -75,7 +75,9 @@ test("model report reads use the runner credential and do not echo it", async ()
   const report = await readExecutorReport("codex", {
     MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY", MINI_CODEX_BASE_URL: "https://codex.example/v1",
   }, async (input, init) => {
-    assert.equal(String(input), "https://codex.example/v1/models?client_version=mini-live");
+    assert.equal(String(input), "https://codex.example/v1/models");
+    assert.equal(new Headers(init?.headers).has("originator"), false);
+    assert.equal(new Headers(init?.headers).has("user-agent"), false);
     authorization = new Headers(init?.headers).get("authorization") ?? "";
     return Response.json({ models: [{ slug: "gpt-6-sol", visibility: "list", default_reasoning_level: "medium",
       supported_reasoning_levels: [{ effort: "high" }, { effort: "medium" }] }] });
