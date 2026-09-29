@@ -20,6 +20,13 @@ test("Codex launch enables native user questions outside plan mode", () => {
 });
 
 const fixturePath = fileURLToPath(new URL("../.github/actions/agent-runtime/fixtures/agent.ts", import.meta.url));
+test("Grok authenticates its native model catalog with the configured provider key", () => {
+  const env = { MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY" };
+  const child = providerProcess("grok", "/workspace", env);
+  assert.equal(child.env.XAI_API_KEY, env.MINI_END_USER_KEY);
+  assert.equal(providerProcess("codex", "/workspace", env).env.XAI_API_KEY, undefined);
+  assert.deepEqual(env, { MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY" });
+});
 const runtime = (executor: Executor) => new AgentRuntime(executor, { env: {}, agentProcess: {
   command: process.execPath, args: [fixturePath], workspace: process.cwd(), env: {},
 } });
