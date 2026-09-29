@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, appendFile, chmod } from "node:fs/promises"
 import path from "node:path";
 import { z } from "zod";
 import { claimRunnerEnvironment, serveRunnerEnvironment } from "./environment-identity.ts";
+import { readExecutorReport } from "./agent-model.ts";
 import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
 
@@ -47,7 +48,9 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
         return { outcome: option ? { outcome: "selected", optionId: option.optionId } : { outcome: "cancelled" } };
       },
       grokExitPlan: async () => ({ outcome: "approved", feedback: null }),
-    }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline, env), signal);
+    }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline, env), signal, {
+      readAgentReport: (executor, reportSignal) => readExecutorReport(executor, env, fetch, reportSignal),
+    });
 }
 
 async function main() {

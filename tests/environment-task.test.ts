@@ -14,6 +14,9 @@ test("standard Task projection uses durable timestamps and excludes private exec
   const complete = environmentTask("task_one", { ...record, result: { ok: true, value } });
   assert.equal(complete.status, "completed");
   if (complete.status === "completed") assert.deepEqual(complete.result.structuredContent, value);
+  const selected = { ...value, model: "gpt-6-sol", reasoningEffort: "high" };
+  const reported = environmentTask("task_one", { ...record, result: { ok: true, value: selected } });
+  if (reported.status === "completed") assert.deepEqual(reported.result.structuredContent, selected);
   const failed = environmentTask("task_one", { ...record, result: { ok: false, code: "OPERATION_FAILED" } });
   assert.equal(failed.status, "failed");
   const ended = environmentTask("task_one", { ...record, cancelRequested: true,

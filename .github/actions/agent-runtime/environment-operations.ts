@@ -8,13 +8,17 @@ const inputSchema = z.discriminatedUnion("kind", [
     argv: z.tuple([z.string().min(1)]).rest(z.string()), cwd: z.string().default("."),
     timeoutSeconds: z.number().positive(),
   }).strict(),
-  z.object({ kind: z.literal("agent"), prompt: z.string().min(1).refine(text => text.trim().length > 0) }).strict(),
+  z.object({ kind: z.literal("agent"), prompt: z.string().min(1).refine(text => text.trim().length > 0),
+    model: z.string().min(1).max(200).regex(/^[A-Za-z0-9._~-]+$/).optional(),
+    reasoningEffort: z.string().min(1).max(32).regex(/^[A-Za-z0-9._~-]+$/).optional(),
+  }).strict(),
 ]);
 type Value = Awaited<ReturnType<EnvironmentPort["command"]>> | Awaited<ReturnType<EnvironmentPort["agent"]>>;
 export type OperationResult = { ok: true; value: Value } | { ok: false; code: string };
 const safeErrors = new Set(["ENVIRONMENT_RUNTIME_BUSY", "ENVIRONMENT_RUNTIME_CLOSING",
   "ENVIRONMENT_DEADLINE_EXPIRED", "COMMAND_DEADLINE_EXPIRED", "COMMAND_CWD_OUTSIDE_WORKSPACE",
-  "COMMAND_CLEANUP_UNCONFIRMED", "INVALID_COMMAND_INPUT", "OPERATION_RESULT_TOO_LARGE"]);
+  "COMMAND_CLEANUP_UNCONFIRMED", "INVALID_COMMAND_INPUT", "OPERATION_RESULT_TOO_LARGE",
+  "AGENT_MODEL_REJECTED", "AGENT_MODEL_CONFLICT", "AGENT_MODEL_UNAVAILABLE"]);
 
 /** Lives with the process, not its socket. Never restore it in a new runtime. */
 export class EnvironmentOperations {
@@ -60,7 +64,8 @@ export class EnvironmentOperations {
     this.output.begin(taskId);
     this.active = active;
     const result = Promise.resolve().then(async () => {
-      const value = input.kind === "agent" ? await this.environment.agent(input.prompt)
+      const value = input.kind === "agent" ? await this.environment.agent({
+        prompt: input.prompt, model: input.model, reasoningEffort: input.reasoningEffort })
         : await this.environment.command({ argv: input.argv, cwd: input.cwd, timeoutSeconds: input.timeoutSeconds });
       const serialized = JSON.stringify({ ok: true, value } satisfies OperationResult);
       if (Buffer.byteLength(serialized) > 512 * 1024) throw new Error("OPERATION_RESULT_TOO_LARGE");

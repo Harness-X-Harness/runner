@@ -25,7 +25,9 @@ for (const provider of ["codex", "grok"] as const) {
       assert.ok(source.includes("codex exec --ephemeral --skip-git-repo-check --sandbox read-only"));
     } else {
       assert.ok(source.includes("https://x.ai/cli/install.sh"));
-      assert.ok(source.includes("grok --no-auto-update --always-approve -m mini-grok-4-6"));
+      assert.ok(source.includes("grok --no-auto-update --always-approve -m mini-agent"));
+      assert.ok(source.includes('model = "grok-4.7"'));
+      assert.ok(source.includes('default_reasoning_effort = "xhigh"'));
     }
   });
 }

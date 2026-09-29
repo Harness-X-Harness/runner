@@ -17,7 +17,10 @@ and `Actions: write`.
    wait for ready. Save its Environment resource link, or discover live owned
    Environments with `resources/list` from another client of the same Principal.
 3. Call `command` with literal argv and a timeout, or `agent` with a prompt.
-   Agent turns share the workspace and native session. Use standard Task
+   Optional `model` and `reasoningEffort` on `agent` must match that executor's
+   current report. Omit both for the deployment default. The first call fixes
+   the pair for the native session. Agent turns share the workspace and native
+   session. Use standard Task
    subscriptions for state and result, `tasks/update` for requested input, and
    `tasks/cancel` for cooperative cancellation.
 4. Call `close_environment` and observe completion. A closing status is not

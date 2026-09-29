@@ -23,7 +23,8 @@ jobs:
         run: |
           install -d -m 0700 "$HOME/.codex"
           cat > "$HOME/.codex/config.toml" <<EOF
-          model = "gpt-5.6-sol"
+          model = "gpt-6-sol"
+          model_reasoning_effort = "high"
           model_provider = "mini_codex"
 
           [model_providers.mini_codex]

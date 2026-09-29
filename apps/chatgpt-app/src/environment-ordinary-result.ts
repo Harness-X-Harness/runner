@@ -136,6 +136,8 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   if (assessment.disposition === "result" && facts.resultText && !commandOutcome(facts.outcome)) {
     parts.push("A final response does not certify that the requested objective succeeded.");
   }
+  const selection = agentSelection(facts.outcome);
+  if (selection) parts.push(`Agent model is ${selection.model} with reasoning effort ${selection.reasoningEffort}.`);
   if (view.dispatch === "unknown") parts.push("Reuse the same idempotency key. Do not open another Environment.");
   if (view.dispatch === "rejected") parts.push("Dispatch was rejected. Do not treat the Environment as ready.");
   return parts.join(" ");
@@ -143,6 +145,14 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
 
 function commandOutcome(outcome: unknown): boolean {
   return typeof outcome === "object" && outcome !== null && "exitCode" in outcome;
+}
+
+function agentSelection(outcome: unknown): { model: string; reasoningEffort: string } | undefined {
+  if (typeof outcome !== "object" || outcome === null || !("model" in outcome) || !("reasoningEffort" in outcome)) return undefined;
+  const model = outcome.model;
+  const reasoningEffort = outcome.reasoningEffort;
+  if (typeof model !== "string" || typeof reasoningEffort !== "string") return undefined;
+  return { model, reasoningEffort };
 }
 
 function lifecycleKind(view: OrdinaryView): "open" | "close" | undefined {

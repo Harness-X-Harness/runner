@@ -109,7 +109,8 @@ test("channel transports a native ACP question and resumes its exact answer", { 
     await serveEnvironmentConnection(connection, environment, () => 1);
   });
   assert.deepEqual(await result.promise, { ok: true, value: { status: "completed",
-    finalResponse: JSON.stringify({ action: "accept", content: { marker: "WIRE_RESUMED" } }) } });
+    finalResponse: JSON.stringify({ action: "accept", content: { marker: "WIRE_RESUMED" } }),
+    model: "gpt-6-sol", reasoningEffort: "high" } });
   assert.ok(outputSnapshots.some(output => output.text === "VISIBLE_BEFORE_INPUT"));
   assert.ok(!JSON.stringify(outputSnapshots).includes("PRIVATE_REASONING"));
   assert.ok(outputSnapshots.at(-1)!.text.includes("WIRE_RESUMED"));

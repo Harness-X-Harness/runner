@@ -13,8 +13,13 @@ const common = { environmentId, idempotencyKey: z.string().min(1).max(256).optio
 export const commandInput = z.object({ ...common,
     argv: z.tuple([z.string().min(1)]).rest(z.string()),
     cwd: z.string().default("."), timeoutSeconds: z.number().positive() }).strict();
+const modelName = z.string().min(1).max(200).regex(/^[A-Za-z0-9._~-]+$/);
+const effortName = z.string().min(1).max(32).regex(/^[A-Za-z0-9._~-]+$/);
 export const agentInput = z.object({ ...common,
-    prompt: z.string().min(1).regex(/\S/) }).strict();
+    prompt: z.string().min(1).regex(/\S/),
+    model: modelName.optional(),
+    reasoningEffort: effortName.optional(),
+  }).strict();
 const input = z.discriminatedUnion("kind", [
   commandInput.extend({ kind: z.literal("command") }),
   agentInput.extend({ kind: z.literal("agent") }),

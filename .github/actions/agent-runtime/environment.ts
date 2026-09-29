@@ -1,6 +1,7 @@
 import { withAcpAgent, type AgentProcess, type ClientHandlers } from "./acp-client.ts";
+import type { AgentModelReport } from "./agent-model.ts";
 import { EnvironmentLifetime } from "./environment-lifetime.ts";
-import { EnvironmentRuntime } from "./environment-runtime.ts";
+import { EnvironmentRuntime, type AgentTurn } from "./environment-runtime.ts";
 import type { CommandContext, CommandInput } from "./command.ts";
 import { EnvironmentOperations, type OperationResult } from "./environment-operations.ts";
 import { EnvironmentInput } from "./environment-input.ts";
@@ -17,7 +18,7 @@ export type EnvironmentPort = {
   ciWaits: EnvironmentCiWaits;
   output: EnvironmentOutput;
   command(input: CommandInput): ReturnType<EnvironmentRuntime["command"]>;
-  agent(prompt: string): ReturnType<EnvironmentRuntime["agent"]>;
+  agent(input: string | AgentTurn): ReturnType<EnvironmentRuntime["agent"]>;
   /** Seals admission and awaits the active operation, not the outer process scope. */
   close(): Promise<void>;
   signal: AbortSignal;
@@ -32,12 +33,14 @@ export async function withEnvironment<T>(
   handlers: ClientHandlers,
   serve: (environment: EnvironmentPort) => Promise<T>,
   signal?: AbortSignal,
+  dependencies?: { readAgentReport?: (executor: "codex" | "grok", signal: AbortSignal) => Promise<AgentModelReport> },
 ): Promise<T> {
   const inputs = new EnvironmentInput();
   const ciWaits = new EnvironmentCiWaits();
   let ciTool: Awaited<ReturnType<typeof startGithubWaitTool>> | undefined;
   let operations: EnvironmentOperations | undefined;
   const runtime = new EnvironmentRuntime({ workspace: process.workspace, deadline, env: commandEnv,
+    readAgentReport: dependencies?.readAgentReport,
     onOutput(text, truncated) {
       const active = operations?.current();
       if (active) operations!.output.append(active.taskId, text, truncated);
@@ -85,9 +88,9 @@ export async function withEnvironment<T>(
             if (lifetime.signal.aborted) return Promise.reject(new Error("ENVIRONMENT_RUNTIME_CLOSING"));
             return runtime.command(input);
           },
-          agent: prompt => {
+          agent: input => {
             if (lifetime.signal.aborted) return Promise.reject(new Error("ENVIRONMENT_RUNTIME_CLOSING"));
-            return runtime.agent(client, session, executor, prompt);
+            return runtime.agent(client, session, executor, input);
           },
           close: () => lifetime.close(), signal: lifetime.signal,
         };
