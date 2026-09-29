@@ -1,6 +1,7 @@
 import { CallToolResultV2Schema, type CallToolResultV2, type DetailedTaskV2 } from "@modelcontextprotocol/ext-tasks/core/v2";
 import { z } from "zod";
 import type { EnvironmentSnapshot } from "./environment-object.ts";
+import type { OutputSnapshot } from "../../../shared/environment-output.ts";
 
 export type OrdinaryTool = "agent" | "close_environment" | "command" | "inspect_environment" | "open_environment";
 export type OrdinaryDispatch = "accepted" | "unknown" | "rejected" | "already-issued";
@@ -13,6 +14,7 @@ export type OrdinaryView = {
   activeUnreadable?: boolean;
   historical?: boolean;
   dispatch?: OrdinaryDispatch;
+  output?: OutputSnapshot;
 };
 type Assessment = {
   workFinished: boolean;
@@ -44,13 +46,16 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
     structuredContent: defined({ contract: "ordinary", tool: view.tool,
       workFinished: assessment.workFinished, disposition: assessment.disposition,
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,
+      expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
+      executor: view.environment.executor,
+      agent: view.environment.agent,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,
       activeOperationStatus: view.activeOperation?.status
         ?? (view.operation && view.environment.activeTaskId === view.operation.taskId ? view.operation.status : undefined),
       operationId: view.operation?.taskId, operationStatus: view.operation?.status,
       historical: view.historical === true ? true : undefined, dispatch: view.dispatch,
       questions: facts.questions.length ? facts.questions : undefined,
-      outcome: outcomeForTool(view.tool, facts.outcome),
+      outcome: facts.outcome, output: view.output,
     }) });
 }
 
@@ -94,11 +99,13 @@ function assessSelected(view: OrdinaryView, commandError: boolean): Assessment {
 }
 
 function operationFacts(task: DetailedTaskV2 | undefined) {
-  const empty = { questions: [] as { id: string; message: string }[], commandError: false,
+  const empty = { questions: [] as { id: string; operationId: string; message: string; requestedSchema?: unknown }[], commandError: false,
     resultText: undefined as string | undefined, outcome: undefined as unknown };
   if (!task) return empty;
   if (task.status === "input_required") return { ...empty, questions: Object.entries(task.inputRequests).map(([id, request]) => ({
-    id, message: request.method === "elicitation/create" && typeof request.params.message === "string"
+    id, operationId: task.taskId,
+    requestedSchema: request.method === "elicitation/create" && "requestedSchema" in request.params ? request.params.requestedSchema : undefined,
+    message: request.method === "elicitation/create" && typeof request.params.message === "string"
       ? request.params.message : "Input requested.",
   })) };
   if (task.status === "failed") return { ...empty, outcome: { message: task.error.message } };
@@ -128,7 +135,7 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   if (view.activeOperation) parts.push(`Active operation ${view.activeOperation.taskId} is ${view.activeOperation.status}.`);
   if (view.activeUnreadable) parts.push("The active operation could not be read.");
   if (assessment.disposition === "waiting_for_input") {
-    parts.push("Waiting for input is not success. This version cannot submit an answer.");
+    parts.push("Waiting for input is not success. Use update_operation with the question's operationId and inputResponses matching requestedSchema.");
     for (const question of facts.questions) parts.push(`Question ${question.id}: ${question.message}`);
   }
   if (environment.status === "closing") parts.push("closing is not closed.");
@@ -137,9 +144,9 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   if (assessment.disposition === "result" && facts.resultText && !commandOutcome(facts.outcome)) {
     parts.push("A final response does not certify that the requested objective succeeded.");
   }
-  if (view.tool === "agent") {
+  if (view.operation) {
     const selection = agentSelection(facts.outcome);
-    if (selection) parts.push(`Agent model is ${selection.model} with reasoning effort ${selection.reasoningEffort}.`);
+    if (selection) parts.push(`This operation used agent model ${selection.model} with reasoning effort ${selection.reasoningEffort}.`);
   }
   if (view.dispatch === "unknown") parts.push("Reuse the same idempotency key. Do not open another Environment.");
   if (view.dispatch === "rejected") parts.push("Dispatch was rejected. Do not treat the Environment as ready.");
@@ -156,13 +163,6 @@ function agentSelection(outcome: unknown): { model: string; reasoningEffort: str
   const reasoningEffort = outcome.reasoningEffort;
   if (typeof model !== "string" || typeof reasoningEffort !== "string") return undefined;
   return { model, reasoningEffort };
-}
-
-function outcomeForTool(tool: OrdinaryTool, outcome: unknown): unknown {
-  if (tool === "agent" || typeof outcome !== "object" || outcome === null || Array.isArray(outcome)) return outcome;
-  if (!("model" in outcome) && !("reasoningEffort" in outcome)) return outcome;
-  const { model: _model, reasoningEffort: _effort, ...rest } = outcome as Record<string, unknown>;
-  return rest;
 }
 
 function lifecycleKind(view: OrdinaryView): "open" | "close" | undefined {

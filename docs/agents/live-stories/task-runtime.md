@@ -6,8 +6,13 @@ As an authorized Harness Principal using a modern Tasks-capable MCP client, I
 can run a command and continue a coding-agent conversation in one temporary
 workspace, observe their results, and close that Environment.
 
-An ordinary client that does not declare Tasks is outside this story. Its
-receipt and inspect contract is in [the MCP contract](../../chatgpt-app.md).
+The ordinary-client receipt contract is in [the MCP contract](../../chatgpt-app.md).
+When that adapter changes, use the same bounded runtime with no Tasks declaration
+on its tool calls: inspect an exact pending question, answer via `update_operation`,
+and verify that same operation finishes. Separately cancel one operation and
+verify a subsequent command works without recreating the Environment. A capable
+observer may supply event-driven test evidence; that does not prove ordinary host
+subscriptions or automatic model continuation. Never turn inspect into polling.
 
 This is development-time acceptance, not CI automation. Use existing scoped
 evidence for unchanged boundaries; do not repeat a full provider matrix for

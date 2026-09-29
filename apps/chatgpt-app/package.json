@@ -6,7 +6,7 @@
     "test": "node --test ../../tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "node deploy.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.10.3",

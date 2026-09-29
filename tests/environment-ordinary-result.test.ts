@@ -41,12 +41,14 @@ test("ordinary receipts keep acceptance, input, and completion distinct", () => 
 
   const waiting = operation({ request: JSON.stringify({ kind: "agent" }), inputs: { ask: { request: {
     method: "elicitation/create", params: { mode: "form", message: "Which name?",
-      requestedSchema: { secret: "PRIVATE_SCHEMA" } },
+      requestedSchema: { type: "object", properties: { name: { type: "string" } } } },
   } } } });
   const held = ordinaryToolResult({ tool: "agent", environment: environment("ready", { activeTaskId: taskId }), operation: waiting });
   assert.equal(held.isError, undefined);
   assert.equal(held.structuredContent?.disposition, "waiting_for_input");
-  assert.deepEqual(held.structuredContent?.questions, [{ id: "ask", message: "Which name?" }]);
+  const questions = [{ id: "ask", operationId: taskId, message: "Which name?",
+    requestedSchema: { type: "object", properties: { name: { type: "string" } } } }];
+  assert.deepEqual(held.structuredContent?.questions, questions);
   assert.match(content(held), /not success/);
   assert.doesNotMatch(JSON.stringify(held), /PRIVATE_SCHEMA|PRIVATE_RUNTIME/);
 
@@ -67,12 +69,13 @@ test("ordinary receipts keep acceptance, input, and completion distinct", () => 
   const reported = operation({ request: JSON.stringify({ kind: "agent" }), result: { ok: true, value: {
     status: "completed", finalResponse: "AGENT_DONE", model: "gpt-6-sol", reasoningEffort: "high" } } });
   const selectedAgent = ordinaryToolResult({ tool: "agent", environment: environment("ready"), operation: reported });
-  assert.match(content(selectedAgent), /Agent model is gpt-6-sol with reasoning effort high/);
+  assert.match(content(selectedAgent), /This operation used agent model gpt-6-sol with reasoning effort high/);
   assert.equal(selectedAgent.structuredContent?.outcome && typeof selectedAgent.structuredContent.outcome === "object"
     && "model" in selectedAgent.structuredContent.outcome ? selectedAgent.structuredContent.outcome.model : undefined, "gpt-6-sol");
   const inspected = ordinaryToolResult({ tool: "inspect_environment", environment: environment("ready"), operation: reported });
   assert.match(content(inspected), /AGENT_DONE/);
-  assert.doesNotMatch(JSON.stringify(inspected), /Agent model is|gpt-6-sol|reasoningEffort/);
+  assert.deepEqual(inspected.structuredContent?.outcome, selectedAgent.structuredContent?.outcome);
+  assert.equal(inspected.structuredContent?.expiresAt, 1000);
 
   const rejected = ordinaryToolResult({ tool: "open_environment", dispatch: "rejected",
     environment: environment("closing"), operation: lifecycleTask(environmentId, "open",
@@ -92,7 +95,7 @@ test("ordinary receipts keep acceptance, input, and completion distinct", () => 
   assert.equal(both.structuredContent?.operationId, selectedId);
   assert.equal(both.structuredContent?.operationStatus, "completed");
   assert.equal(both.structuredContent?.activeOperationStatus, "input_required");
-  assert.deepEqual(both.structuredContent?.questions, [{ id: "ask", message: "Which name?" }]);
+  assert.deepEqual(both.structuredContent?.questions, questions);
   assert.match(content(both), /OLD_RESULT/);
   assert.match(content(both), /Which name\?/);
   assert.match(content(both), /not success/);

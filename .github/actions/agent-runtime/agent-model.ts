@@ -10,6 +10,14 @@ export const AGENT_MODEL_DEFAULTS: Record<AgentExecutor, AgentSelection> = {
 };
 
 const identifier = z.string().min(1).max(200).regex(/^[A-Za-z0-9._~-]+$/);
+const selectionSchema = z.object({ model: identifier, reasoningEffort: identifier }).strict();
+export const agentModelState = z.object({
+  defaults: selectionSchema,
+  models: z.array(z.object({ id: identifier, effort: identifier, efforts: z.array(identifier).max(32) }).strict()).max(256).nullable(),
+  selection: selectionSchema.nullable(),
+  uncertain: z.boolean(),
+}).strict();
+export type AgentModelState = z.infer<typeof agentModelState>;
 const level = z.object({ effort: identifier }).passthrough();
 const grokLevel = z.object({ value: identifier }).passthrough();
 
@@ -48,7 +56,7 @@ export function resolveAgentSelection(input: {
   return { model, reasoningEffort };
 }
 
-export async function readExecutorReport(executor: AgentExecutor, env: NodeJS.ProcessEnv,
+export async function readExecutorReport(executor: AgentExecutor, env: Record<string, string | undefined>,
   fetchImpl: typeof fetch, signal: AbortSignal): Promise<AgentModelReport> {
   const key = env.MINI_END_USER_KEY;
   const base = env[executor === "codex" ? "MINI_CODEX_BASE_URL" : "MINI_GROK_BASE_URL"];
@@ -110,6 +118,7 @@ function reportedModel(id: string, effort: string, efforts: string[]): AgentMode
 function parseReport<T>(parsed: z.ZodSafeParseResult<T>, select: (value: T) => AgentModel[]): AgentModelReport {
   if (!parsed.success) throw new Error("AGENT_MODEL_UNAVAILABLE");
   const models = select(parsed.data);
-  if (models.length === 0) throw new Error("AGENT_MODEL_UNAVAILABLE");
+  if (models.length === 0 || models.length > 256 || models.some(model => model.efforts.length > 32) ||
+      new TextEncoder().encode(JSON.stringify(models)).length > 65536) throw new Error("AGENT_MODEL_UNAVAILABLE");
   return { models };
 }

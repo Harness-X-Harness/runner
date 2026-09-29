@@ -13,6 +13,8 @@ An ordinary MCP client uses the same tools but receives acceptance receipts.
 Read `inspect_environment` when a person asks for status. Do not poll. Do not
 treat `closing` or waiting for input as success. The Tasks flow above remains
 the subscription contract.
+Use `update_operation` with exact operation/question IDs for answers or operation
+cancellation. It does not close the Environment or create another Agent turn.
 
 ## Storage lifecycle
 
@@ -30,27 +32,11 @@ cleaning unrelated product code.
 From the repository root, use the ignored `.secrets.env` file described by
 [the credential example](../.secrets.env.example). Load only the two Cloudflare
 deployment variables from that file; do not source or export the entire file.
-With Node.js 22 or newer:
+With Node.js 24 or newer:
 
 ```bash
 npm ci --prefix apps/chatgpt-app
-node --input-type=module <<'NODE'
-import { readFileSync } from "node:fs";
-import { parseEnv } from "node:util";
-import { spawnSync } from "node:child_process";
-
-const local = parseEnv(readFileSync(".secrets.env", "utf8"));
-const env = { ...process.env };
-for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"]) {
-  if (!local[name]) throw new Error(`${name} is missing from .secrets.env`);
-  env[name] = local[name];
-}
-const result = spawnSync("npx", ["wrangler", "deploy", "--dry-run"], {
-  cwd: "apps/chatgpt-app", env, stdio: "inherit",
-});
-if (result.error) throw result.error;
-process.exit(result.status ?? 1);
-NODE
+npm run deploy --prefix apps/chatgpt-app -- --dry-run
 ```
 
 Remove `--dry-run` only for an authorized deployment. The configured Worker,
@@ -59,6 +45,12 @@ route, bindings and variables are owned by
 the [Worker source](../apps/chatgpt-app/src/) and
 [Environment workflow](../.github/workflows/run-environment.yml),
 not a second configuration list in this runbook.
+Use this deployment command rather than invoking Wrangler directly. After a real
+deployment it sets and reads back query-string redaction, disabled invocation
+logs and disabled traces. If verification fails, code may already be deployed:
+report that partial result, repair/read back the setting, and do not blindly
+redeploy. Dry-run performs no settings writes. The owning implementation is
+[deploy.ts](../apps/chatgpt-app/deploy.ts).
 
 ## Private acceptance credentials
 

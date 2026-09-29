@@ -284,6 +284,18 @@ test("Environment DO identity and cross-object admission use committed creation"
   sockets[1]!.send(JSON.stringify({ type: "ready" }));
   assert.deepEqual(await duplicateReady, { type: "ready-accepted" });
   assert.equal(await (await call(environmentId, input, "alarm-time")).json(), firstIdle);
+  const agentState = { defaults: { model: "fixture-model", reasoningEffort: "high" },
+    models: [{ id: "fixture-model", effort: "high", efforts: ["low", "high"] }], selection: null, uncertain: false };
+  const modelReply = nextMessage(sockets[1]!);
+  sockets[1]!.send(JSON.stringify({ type: "agent-state", generation: 4, state: agentState }));
+  assert.deepEqual(await modelReply, { type: "agent-state-accepted", generation: 4 });
+  const modelView = await (await call(environmentId, input, "read-environment")).json() as {
+    agent: { state: unknown; current: boolean }; idleExpiresAt: number;
+  };
+  assert.deepEqual(modelView.agent.state, agentState);
+  assert.equal(modelView.agent.current, true);
+  assert.equal(modelView.idleExpiresAt, firstIdle);
+  assert.equal(await (await call(environmentId, input, "alarm-time")).json(), firstIdle);
   const operation = { ownerId: "1", taskId: "operation-one", request: JSON.stringify({ kind: "agent", prompt: "hello" }) };
   assert.equal((await call(environmentId, { ...operation, ownerId: "2" }, "reserve-operation")).status, 409);
   for (let repeat = 0; repeat < 2; repeat++) {
@@ -497,6 +509,11 @@ test("Environment DO identity and cross-object admission use committed creation"
   const replayClosed = new Promise<void>(resolve => replaySocket.addEventListener("close", () => resolve(), { once: true }));
   replaySocket.close(1000, "Controlled disconnect before cancellation");
   await replayClosed;
+  const disconnectedAgent = await (await call(environmentId, input, "read-environment")).json() as {
+    agent: { current: boolean; state: unknown };
+  };
+  assert.equal(disconnectedAgent.agent.current, false);
+  assert.deepEqual(disconnectedAgent.agent.state, agentState);
   const cancelledOperation = { ...operation, taskId: "operation-two" };
   assert.equal((await call(environmentId, { ...cancelledOperation, ownerId: "2" }, "cancel-operation")).status, 409);
   for (let attempt = 0; attempt < 2; attempt++) {

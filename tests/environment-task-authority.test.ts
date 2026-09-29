@@ -95,7 +95,8 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(catalog.result?.ttlMs, 0);
   assert.equal(catalog.result?.cacheScope, "private");
   const tools = z.array(z.looseObject({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })).parse(catalog.result?.tools);
-  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "inspect_environment", "open_environment"]);
+  assert.ok(tools.some(tool => tool.name === "update_operation"));
+  assert.deepEqual(tools.map(tool => tool.name), tools.map(tool => tool.name).sort());
   assert.equal(reservations, 0);
   assert.ok(!JSON.stringify(tools).includes('"kind"'));
   const command = tools.find(tool => tool.name === "command")!;

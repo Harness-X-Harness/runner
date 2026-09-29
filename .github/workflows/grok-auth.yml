@@ -11,34 +11,22 @@ permissions:
 jobs:
   auth:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: npm ci --prefix .github/actions/agent-runtime --omit=dev
       - name: Install Grok Build
         shell: bash
         run: curl -fsSL https://x.ai/cli/install.sh | bash
-
-      - name: Configure Grok Build
-        shell: bash
-        env:
-          MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
-        run: |
-          install -d -m 0700 "$HOME/.grok"
-          cat > "$HOME/.grok/config.toml" <<EOF
-          [models]
-          default = "mini-agent"
-          default_reasoning_effort = "xhigh"
-
-          [model.mini-agent]
-          model = "grok-4.7"
-          base_url = "$MINI_GROK_BASE_URL"
-          name = "Mini Grok"
-          description = "Grok through Mini"
-          env_key = "MINI_END_USER_KEY"
-          api_backend = "responses"
-          EOF
-          chmod 600 "$HOME/.grok/config.toml"
 
       - name: Verify Grok authentication
         shell: bash
         env:
           MINI_END_USER_KEY: ${{ secrets.MINI_END_USER_KEY }}
-        run: grok --no-auto-update --always-approve -m mini-agent -p "Reply exactly OK." > /dev/null
+          MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
+        run: node .github/actions/agent-runtime/auth-probe.ts grok

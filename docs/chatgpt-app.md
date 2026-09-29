@@ -26,8 +26,9 @@ and `Actions: write`.
    that model's reported effort. An effort alone uses the deployment default
    model, including after the pair is fixed; a different resulting pair is
    rejected. The completed agent result reports the model and effort returned
-   by the executor, not an unconfirmed request. `inspect_environment` does not
-   return that pair. `command` and `close_environment` still work.
+   by the executor, not an unconfirmed request. `inspect_environment` returns
+   that operation's pair and the runner's last reported configuration separately.
+   `command` and `close_environment` still work.
    There is no automatic rollback or retry. Agent turns share the workspace and
    native session. Use standard Task
    subscriptions for state and result, `tasks/update` for requested input, and
@@ -49,17 +50,26 @@ not proof that the work finished.
 2. `command` returns a finished command result when one is already committed.
    Otherwise it returns an operation ID and status `working`.
 3. `agent` returns an operation ID and status `working`.
-4. `inspect_environment` reads one Environment. It reports status, the active
-   operation and its pending questions when one exists, and one selected
-   operation when `operationId` is supplied. The selected operation does not
-   hide the active operation.
-5. `close_environment` can return `closing`. Inspect when a person asks. Only
+4. `inspect_environment` reads one Environment. It reports status, hard and idle
+   deadlines, the active operation and its pending questions (including their
+   schema and exact operation ID), and one selected operation when `operationId`
+   is supplied. The selected operation does not hide the active operation.
+   Its bounded output is a snapshot, not a token stream; replace previous output
+   rather than append it. Final response and progress remain distinct.
+5. `update_operation` accepts `operationId` and `action: "answer" | "cancel"`.
+   For answers, `inputResponses` maps question IDs to `{action: "accept", content}`,
+   `{action: "decline"}`, or `{action: "cancel"}`. Content must match the reported
+   `requestedSchema`. First accepted answers win; repeated or late replies never
+   reopen completed work. To stop the entire operation use `action: "cancel"`
+   without `inputResponses`. The current status is returned after the request;
+   cancellation is not confirmed until the operation is terminal. This tool uses
+   the same owner checks, input records and cancellation as standard Tasks.
+6. `close_environment` can return `closing`. Inspect when a person asks. Only
    status `closed` confirms cleanup.
 
 Call `inspect_environment` when a person asks for the current state. Do not
-poll. This contract has no subscription, streamed output, automatic model
-continuation, card, or answer submission. Waiting for input is visible, but it
-is not success and cannot be answered here.
+poll. This contract has no subscription, automatic model continuation or card.
+Waiting for input is visible and answerable, but it is not success.
 
 | Tool | Purpose |
 | --- | --- |
@@ -67,6 +77,7 @@ is not success and cannot be answered here.
 | `agent` | Send another prompt to its native Agent session |
 | `command` | Run argv directly in the same workspace without a model |
 | `inspect_environment` | Read current Environment and operation state once |
+| `update_operation` | Answer questions or cancel one operation, keeping the Environment |
 | `close_environment` | Stop the exact runtime and confirm cleanup |
 
 These tools require fresh `environments:use` consent. Refresh does not add
@@ -75,6 +86,16 @@ selects the Tasks contract or the ordinary receipt before execution. There is
 no silent switch and no polling loop. Desktop resource display, notifications,
 cards, and automatic model continuation are outside the ordinary contract and
 still require separate host support.
+
+`inspect_environment.agent` is the runner's last reported model state, with an
+observation time and a `current` flag bound to the ready runtime generation.
+`models` comes from the provider directory; it is not proof of CLI acceptance.
+Null means discovery is unavailable, not that a fallback model was selected.
+`defaults` is the deployment pair; `selection` is the native-confirmed locked
+pair. `uncertain` means native configuration may have partially changed and a
+new Environment is needed for agent work. Disconnected/closed snapshots are
+historical. A selected operation's result still describes that operation only.
+Neither inspection nor these observations renews idle or hard deadlines.
 
 An Environment permits one active Agent/command operation. Resource links expose
 bounded owner-private state and output; URI change notifications trigger reads.

@@ -11,6 +11,7 @@ import { lifecycleTask, type LifecycleKind, type LifecycleReceipt } from "./envi
 import { inputRequest, inputAnswer, type InputRecord } from "./environment-task-input.ts";
 import { emptyOutput, ENVIRONMENT_OUTPUT_BYTES, type OutputSnapshot } from "../../../shared/environment-output.ts";
 import { githubRunInput, githubRunCompletion, exactCompletion, type GithubRunInput, type GithubRunCompletion } from "../../../.github/actions/agent-runtime/github-run-contract.ts";
+import { agentModelState, type AgentModelState } from "../../../.github/actions/agent-runtime/agent-model.ts";
 
 type Bindings = {
   ENVIRONMENTS: DurableObjectNamespace<EnvironmentObject>;
@@ -38,6 +39,8 @@ export type EnvironmentSnapshot = {
   reason?: "startup_expired" | "runtime_expired" | "idle_expired" | "runtime_disconnected";
   createdAt: number;
   expiresAt: number | null;
+  idleExpiresAt?: number | null;
+  agent?: { state: AgentModelState; observedAt: number; current: boolean };
   activeTaskId: string | null;
 };
 const operationId = z.string().regex(/^[\w-]{1,128}$/);
@@ -45,6 +48,7 @@ const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text
   .refine(value => new TextEncoder().encode(value.text).length <= ENVIRONMENT_OUTPUT_BYTES &&
     (value.revision !== 0 || (value.text === "" && !value.truncated)));
 const runtimeMessage = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("agent-state"), generation: z.number().int().positive(), state: agentModelState }).strict(),
   z.object({ type: z.literal("ci-register"), generation: z.number().int().positive(), taskId: operationId,
     waitId: z.string().uuid(), target: githubRunInput }).strict(),
   z.object({ type: z.literal("ci-observed"), generation: z.number().int().positive(), taskId: operationId,
@@ -85,7 +89,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const idle = await this.ctx.storage.get<number>("environment-idle-deadline");
       const snapshot: EnvironmentSnapshot = {
         environmentId: creation.environmentId, executor: creation.executor,
-        status: "opening", createdAt: creation.createdAt, expiresAt: deadline ?? null,
+        status: "opening", createdAt: creation.createdAt, expiresAt: deadline ?? null, idleExpiresAt: idle ?? null,
         activeTaskId: await this.ctx.storage.get<string>("environment-active-operation") ?? null,
       };
       if (await this.ctx.storage.get("environment-capacity-released") === true) snapshot.status = "closed";
@@ -101,6 +105,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       } else if (ready !== undefined) {
         snapshot.status = "unavailable"; snapshot.reason = "runtime_disconnected";
       }
+      const agent = await this.ctx.storage.get<{ state: AgentModelState; observedAt: number; generation: number }>("environment-agent-state");
+      if (agent) snapshot.agent = { state: agent.state, observedAt: agent.observedAt,
+        current: snapshot.status === "ready" && agent.generation === current?.generation };
       return snapshot;
     });
   }
@@ -186,6 +193,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             await this.ctx.storage.delete([...records.keys()]);
           }
         }
+        await this.ctx.storage.delete("environment-agent-state");
         await this.ctx.storage.deleteAlarm();
       });
       for (const observers of [...this.operationObservers.values(), ...this.outputObservers.values()]) {
@@ -275,6 +283,12 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         await this.ctx.storage.setAlarm(await this.nextDeadline());
         return { type: "ready-accepted" };
       }
+      if (incoming.type === "agent-state") {
+        if (incoming.generation !== current.generation ||
+            await this.ctx.storage.get("environment-ready-generation") !== current.generation) return false;
+        await this.ctx.storage.put("environment-agent-state", { state: incoming.state, observedAt: Date.now(), generation: current.generation });
+        return { type: "agent-state-accepted", generation: current.generation };
+      }
       if (incoming.type === "ci-register" || incoming.type === "ci-observed") {
         if (incoming.generation !== current.generation) return false;
         if (incoming.type === "ci-register") {
@@ -343,7 +357,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     if (acknowledgement.taskId !== undefined && ["output-accepted", "result-accepted"].includes(acknowledgement.type)) {
       for (const changed of this.outputObservers.get(acknowledgement.taskId) ?? []) changed();
     }
-    if (["ready-accepted", "result-accepted"].includes(acknowledgement.type)) this.environmentChanged();
+    if (["ready-accepted", "result-accepted", "agent-state-accepted"].includes(acknowledgement.type)) this.environmentChanged();
     socket.send(JSON.stringify(acknowledgement));
     if (acknowledgement.type === "ready-accepted") await this.deliverRuntimeMessage();
   }

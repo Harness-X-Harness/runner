@@ -1,5 +1,5 @@
 import { withAcpAgent, type AgentProcess, type ClientHandlers } from "./acp-client.ts";
-import type { AgentModelReport } from "./agent-model.ts";
+import type { AgentModelReport, AgentModelState } from "./agent-model.ts";
 import { EnvironmentLifetime } from "./environment-lifetime.ts";
 import { EnvironmentRuntime, type AgentTurn } from "./environment-runtime.ts";
 import type { CommandContext, CommandInput } from "./command.ts";
@@ -17,6 +17,7 @@ export type EnvironmentPort = {
   inputs: EnvironmentInput;
   ciWaits: EnvironmentCiWaits;
   output: EnvironmentOutput;
+  agentState?: { read(): AgentModelState; subscribe(changed: () => void): () => void };
   command(input: CommandInput): ReturnType<EnvironmentRuntime["command"]>;
   agent(input: string | AgentTurn): ReturnType<EnvironmentRuntime["agent"]>;
   /** Seals admission and awaits the active operation, not the outer process scope. */
@@ -39,8 +40,10 @@ export async function withEnvironment<T>(
   const ciWaits = new EnvironmentCiWaits();
   let ciTool: Awaited<ReturnType<typeof startGithubWaitTool>> | undefined;
   let operations: EnvironmentOperations | undefined;
+  const agentObservers = new Set<() => void>();
   const runtime = new EnvironmentRuntime({ workspace: process.workspace, deadline, env: commandEnv,
     readAgentReport: dependencies?.readAgentReport,
+    onAgentState: () => { for (const changed of agentObservers) changed(); },
     onOutput(text, truncated) {
       const active = operations?.current();
       if (active) operations!.output.append(active.taskId, text, truncated);
@@ -78,11 +81,19 @@ export async function withEnvironment<T>(
     },
       client => client.buildSession({ cwd: process.workspace, mcpServers: [...(process.mcpServers ?? []), ciTool!.config] }).withSession(async session => {
         lifetime.signal.throwIfAborted();
+        if (dependencies?.readAgentReport) {
+          // Unavailable discovery is reported, not replaced by another directory.
+          // Commands remain usable; an agent call still validates its own selection.
+          await runtime.refreshReport(executor, AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])).catch(() => {});
+        }
         serving = true;
         const port: EnvironmentPort = {
           execute: (taskId, input) => operations!.execute(taskId, input),
           cancel: taskId => { inputs.cancel(taskId); ciWaits.cancel(taskId); return operations!.cancel(taskId); },
           inputs, ciWaits,
+          agentState: { read: () => runtime.agentState(executor), subscribe: changed => {
+            agentObservers.add(changed); return () => { agentObservers.delete(changed); };
+          } },
           get output() { return operations!.output; },
           command: input => {
             if (lifetime.signal.aborted) return Promise.reject(new Error("ENVIRONMENT_RUNTIME_CLOSING"));

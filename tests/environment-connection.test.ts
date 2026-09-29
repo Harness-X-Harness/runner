@@ -65,6 +65,7 @@ test("channel transports a native ACP question and resumes its exact answer", { 
   const deadline = Date.now() + 5000;
   const result = Promise.withResolvers<unknown>();
   const outputSnapshots: Array<{ revision: number; text: string; truncated: boolean }> = [];
+  const modelStates: Array<{ selection: unknown; models: unknown }> = [];
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   t.after(async () => {
     for (const socket of server.clients) socket.terminate();
@@ -88,6 +89,9 @@ test("channel transports a native ACP question and resumes its exact answer", { 
         socket.send(JSON.stringify({ type: "ready-accepted" }));
         socket.send(JSON.stringify({ type: "execute", generation: 1, taskId: "question",
           input: { kind: "agent", prompt: "stream-question" } }));
+      } else if (message.type === "agent-state") {
+        modelStates.push(message.state);
+        socket.send(JSON.stringify({ type: "agent-state-accepted", generation: 1 }));
       } else if (message.type === "input") {
         question = { taskId: message.taskId, inputId: message.inputId }; answer();
       } else if (message.type === "output") {
@@ -107,7 +111,9 @@ test("channel transports a native ACP question and resumes its exact answer", { 
     const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
       "00000000-0000-4000-8000-000000000001", async () => "fixture", AbortSignal.timeout(3000));
     await serveEnvironmentConnection(connection, environment, () => 1);
-  });
+  }, undefined, { readAgentReport: async () => ({ models: [{ id: "gpt-6-sol", effort: "high", efforts: ["high"] }] }) });
+  assert.equal(modelStates[0]?.selection, null);
+  assert.deepEqual(modelStates.at(-1)?.selection, { model: "gpt-6-sol", reasoningEffort: "high" });
   assert.deepEqual(await result.promise, { ok: true, value: { status: "completed",
     finalResponse: JSON.stringify({ action: "accept", content: { marker: "WIRE_RESUMED" } }),
     model: "gpt-6-sol", reasoningEffort: "high" } });

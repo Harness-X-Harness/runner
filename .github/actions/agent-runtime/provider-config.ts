@@ -16,7 +16,7 @@ export async function configureProvider(executor: Executor, env: NodeJS.ProcessE
   selection: AgentSelection = AGENT_MODEL_DEFAULTS[executor]): Promise<void> {
   const codex = executor === "codex";
   const endpoint = env[codex ? "MINI_CODEX_BASE_URL" : "MINI_GROK_BASE_URL"];
-  if (!env.MINI_END_USER_KEY || !env.GH_TOKEN || !endpoint || !env.HOME || !path.isAbsolute(env.HOME)) {
+  if (!env.MINI_END_USER_KEY || !endpoint || !env.HOME || !path.isAbsolute(env.HOME)) {
     throw new TaskError("PROVIDER_UNAVAILABLE");
   }
   const directory = path.join(env.HOME, codex ? ".codex" : ".grok");

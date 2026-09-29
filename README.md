@@ -15,8 +15,9 @@ The protocol is MCP 2026-07-28. A client that declares Tasks receives Task
 handles: subscribe to changes, answer input with `tasks/update`, and cancel
 with `tasks/cancel`. A client that does not declare Tasks receives an ordinary
 acceptance receipt and current status. Call `inspect_environment` when a person
-asks; do not poll. That contract has no subscription, streamed output, answer
-submission, card, or automatic continuation. `closing` is not `closed`, and
+asks; do not poll. Use `update_operation` to answer a question or cancel one
+operation without closing the workspace. That contract has no subscription,
+card, or automatic continuation. `closing` is not `closed`, and
 waiting for input is not success. The declared capability is selected before
 execution and is not switched after an error. Tool discovery does not prove
 host support for Tasks, resources, or model continuation.
@@ -73,8 +74,10 @@ access only to users trusted with that fixed identity's authority. See
 [SECURITY.md](SECURITY.md).
 
 The auth badges run separate daily native-CLI checks. Each installs the current
-official CLI, uses native configuration, executes a minimal request and discards
-the model output. Grok does not use first-party login. Provider endpoints and
+official CLI, uses the production configuration and ACP adapter, confirms the
+default model/effort, executes a minimal request and discards the model output.
+These checks have no Agent GitHub token and do not prove GitHub writes or all
+interactive behavior. Grok does not use first-party login. Provider endpoints and
 keys are secrets, not public configuration or Task results.
 
 ## Lifetime and cancellation

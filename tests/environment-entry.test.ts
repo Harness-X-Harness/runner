@@ -14,7 +14,8 @@ test("provider configuration stays private and Agent child does not inherit job 
     GITHUB_TOKEN: "PRIVATE_JOB_TOKEN", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "PRIVATE_OIDC",
     ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example" };
   for (const executor of ["codex", "grok"] as const) {
-    await configureProvider(executor, env);
+    // Provider authentication does not require target-repository authority.
+    await configureProvider(executor, { ...env, GH_TOKEN: undefined });
     const file = join(directory, `.${executor}`, "config.toml");
     assert.equal((await stat(file)).mode & 0o777, 0o600);
     const config = await readFile(file, "utf8");

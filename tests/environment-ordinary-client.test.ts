@@ -10,7 +10,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   const environmentId = `env_${"a".repeat(32)}`;
   const records = new Map<string, OperationRecord>();
   const state = { reservations: 0, opens: 0, dispatches: 0, closes: 0, answers: 0, names: [] as string[],
-    reads: [] as string[],
+    reads: [] as string[], cancellations: 0,
     status: "ready" as EnvironmentSnapshot["status"], activeTaskId: null as string | null, failRead: false,
     immediateResult: undefined as OperationRecord["result"] };
   const env = { ENVIRONMENT_ADMISSION: { getByName() { return { async list() { return [environmentId]; } }; } },
@@ -48,8 +48,20 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
           state.reads.push(taskId);
           return owner === "123" ? records.get(taskId) ?? null : null;
         },
-        async answerOperation() { state.answers++; },
-        async cancelOperation() { throw new Error("unexpected cancel"); },
+        async readOutput(owner: string) { return owner === "123" ? { revision: 1, text: "PROGRESS", truncated: false } : null; },
+        async answerOperation(owner: string, taskId: string, responses: unknown) {
+          assert.equal(owner, "123");
+          assert.ok(records.has(taskId));
+          assert.deepEqual(responses, { ask: { action: "accept", content: { name: "chosen" } } });
+          state.answers++;
+        },
+        async cancelOperation(owner: string, taskId: string) {
+          assert.equal(owner, "123");
+          const record = records.get(taskId);
+          assert.ok(record);
+          record.cancelRequested = true;
+          state.cancellations++;
+        },
         async cancelLifecycleTask() { throw new Error("unexpected lifecycle cancel"); },
         async observeLifecycleTask() { throw new Error("unexpected lifecycle stream"); },
         async observeOperation() { throw new Error("unexpected stream"); },
@@ -86,7 +98,8 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   const catalog = await rpc("tools/list", {});
   const tools = z.array(z.looseObject({ name: z.string(), annotations: z.looseObject({ readOnlyHint: z.boolean() }) }))
     .parse(catalog.result?.tools);
-  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "inspect_environment", "open_environment"]);
+  assert.ok(tools.some(tool => tool.name === "update_operation" && !tool.annotations.readOnlyHint));
+  assert.deepEqual(tools.map(tool => tool.name), tools.map(tool => tool.name).sort());
   assert.equal(tools.find(tool => tool.name === "inspect_environment")?.annotations.readOnlyHint, true);
 
   const command = { name: "command", arguments: { environmentId, argv: ["pwd"], timeoutSeconds: 5 } };
@@ -120,14 +133,18 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   const ask = `task_${environmentId.slice(4)}_${"1".repeat(32)}`;
   records.set(ask, { request: JSON.stringify({ kind: "agent", prompt: "PRIVATE_PROMPT" }), runtimeId: "PRIVATE_RUNTIME",
     createdAt: 1, updatedAt: 2, inputs: { ask: { request: { method: "elicitation/create", params: { mode: "form",
-      message: "Which name?", requestedSchema: { secret: "PRIVATE_SCHEMA" } } } } } });
+      message: "Which name?", requestedSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } } } } });
   state.activeTaskId = ask;
   const inspected = await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId } }, true);
   assert.equal(inspected.result?.resultType, "complete");
   assert.equal(z.object({ disposition: z.literal("waiting_for_input"), questions: z.array(z.object({ message: z.string() })) })
     .parse(inspected.result?.structuredContent).questions[0]?.message, "Which name?");
   assert.match(text(inspected), /not success/);
-  assert.doesNotMatch(body(inspected), /PRIVATE_SCHEMA|PRIVATE_PROMPT|PRIVATE_RUNTIME/);
+  assert.doesNotMatch(body(inspected), /PRIVATE_PROMPT|PRIVATE_RUNTIME/);
+  const inputView = z.object({ expiresAt: z.literal(1000), output: z.object({ text: z.literal("PROGRESS") }),
+    questions: z.array(z.object({ operationId: z.literal(ask), requestedSchema: z.object({ type: z.literal("object") }) })) })
+    .parse(inspected.result?.structuredContent);
+  assert.equal(inputView.questions.length, 1);
 
   const oldId = `task_${environmentId.slice(4)}_${"2".repeat(32)}`;
   records.set(oldId, { request: JSON.stringify({ kind: "command" }), runtimeId: "PRIVATE_RUNTIME", createdAt: 1, updatedAt: 3,
@@ -161,6 +178,24 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   assert.equal(absent.result?.isError, true);
   assert.match(text(absent), /not found or no longer available/);
   assert.doesNotMatch(body(absent), /PRIVATE_PROMPT|OLD_RESULT/);
+
+  const answer = { name: "update_operation", arguments: { operationId: ask, action: "answer",
+    inputResponses: { ask: { action: "accept", content: { name: "chosen" } } } } };
+  const answered = await rpc("tools/call", answer);
+  assert.equal(answered.error, undefined);
+  assert.equal(state.answers, 1);
+  assert.equal(state.reservations, 3);
+  for (const arguments_ of [
+    { operationId: ask, action: "answer" },
+    { operationId: ask, action: "cancel", inputResponses: {} },
+    { operationId: `task_${environmentId.slice(4)}_close`, action: "cancel" },
+  ]) assert.equal((await rpc("tools/call", { name: "update_operation", arguments: arguments_ })).result?.isError, true);
+  assert.equal(state.cancellations, 0);
+  const cancelled = await rpc("tools/call", { name: "update_operation", arguments: { operationId: ask, action: "cancel" } });
+  assert.equal(state.cancellations, 1);
+  assert.equal(state.closes, 0);
+  assert.equal(z.object({ operationStatus: z.literal("working"), workFinished: z.literal(false) })
+    .parse(cancelled.result?.structuredContent).workFinished, false);
 
   state.status = "opening";
   state.activeTaskId = null;
