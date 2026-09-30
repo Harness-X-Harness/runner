@@ -206,7 +206,7 @@ HTTPS request header, after obtaining fresh OIDC. The control plane validates
 OIDC before using this token to observe the bound job start; it does not store
 the token or forward it through the runtime WebSocket. The claim returns only
 stop, or the stored executor and absolute deadline. The internal budget is a
-60-minute job with one minute reserved for cleanup; the Environment workflow
+360-minute job with ten minutes reserved for cleanup; the Environment workflow
 must use the same budget and the job name `Environment`. Repeated claims do not
 extend the stored deadline. Agent and command children must not inherit this
 bootstrap credential. User Actions authority still owns dispatch and cancel.

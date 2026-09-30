@@ -18,7 +18,7 @@ jobs:
   environment:
     name: Environment
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 360
     env:
       ENVIRONMENT_ID: ${{ inputs.environment_id }}
       TASK_CONTROL_PLANE_URL: ${{ vars.TASK_CONTROL_PLANE_URL }}

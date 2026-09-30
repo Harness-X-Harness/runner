@@ -765,7 +765,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     if (!token) throw new Error("RUNNER_IDENTITY_UNAVAILABLE");
     if (await this.bindExecution(execution) === "stop") return { decision: "stop" };
     const deadline = await this.establishRuntimeDeadline(execution.ownerId, token,
-      { jobName: "Environment", jobBudgetMs: 60 * 60 * 1000, cleanupMs: 60 * 1000 });
+      { jobName: "Environment", jobBudgetMs: 360 * 60 * 1000, cleanupMs: 10 * 60 * 1000 });
     const result = await this.ctx.storage.transaction(async () => {
       const creation = await this.creation.read(execution.ownerId);
       if (await this.ctx.storage.get("environment-close-requested") === true || deadline <= Date.now() ||
