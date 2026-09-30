@@ -260,6 +260,17 @@ workerd tests open two real sockets and reject the older connection's ready
 message. The Worker routes the authenticated upgrade to this object. Advancing
 a generation does not prove readiness or delivery of any operation.
 
+Current-generation socket close/error and local message rejection store one
+bounded reconnect diagnostic: category and server observation time. It is
+owner-private and contains no socket reason, exception, token or URL. Generic
+closure does not overwrite a known rejection/error for the same generation.
+Late events from older generations cannot update it. A new connection alone
+does not clear the observation; accepted ready clears it without renewing idle
+or hard deadlines. Confirmed closure removes it. Diagnostics never supply
+lifecycle or capacity-release authority, and failure to store an observation
+cannot change the existing transport decision. Unauthenticated identity or
+unobserved handshake failures cannot be inferred from disconnection.
+
 The runner's `connectEnvironment` uses the `ws` package for framing and upgrade.
 It requests a token for each explicit connection attempt, sends credentials only
 in headers, disables redirects and validates the connected generation/deadline.

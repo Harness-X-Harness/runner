@@ -7,6 +7,17 @@ import type { EnvironmentSnapshot, OperationRecord } from "../apps/chatgpt-app/s
 
 const environmentId = `env_${"a".repeat(32)}`;
 const taskId = `task_${"a".repeat(32)}_${"b".repeat(32)}`;
+test("inspection exposes the current reconnect fact as observation, without a terminal outcome", () => {
+  const diagnostic = { category: "transport_failure" as const, observedAt: 123 };
+  const inspected = ordinaryToolResult({ tool: "inspect_environment", environment: environment("unavailable", {
+    reason: "runtime_disconnected", reconnectDiagnostic: diagnostic,
+  }) });
+  assert.deepEqual(inspected.structuredContent?.reconnectDiagnostic, diagnostic);
+  assert.equal(inspected.structuredContent?.workFinished, false);
+  assert.equal(inspected.structuredContent?.outcome, undefined);
+  assert.match(content(inspected), /transport_failure.*123/);
+  assert.match(content(inspected), /observation.*not.*stop/i);
+});
 function environment(status: EnvironmentSnapshot["status"], extra: Partial<EnvironmentSnapshot> = {}): EnvironmentSnapshot {
   return { environmentId, executor: "codex", status, createdAt: 1, expiresAt: 1000, activeTaskId: null, ...extra };
 }

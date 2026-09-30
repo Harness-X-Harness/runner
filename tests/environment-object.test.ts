@@ -19,6 +19,7 @@ test("Environment DO identity and cross-object admission use committed creation"
       const reserveStarted = Promise.withResolvers<void>();
       const reserveReleased = Promise.withResolvers<void>();
       export class TestEnvironment extends EnvironmentObject {
+        async lateSocketError(binding) { await this.webSocketError({ close() {}, deserializeAttachment() { return binding; } } as WebSocket); }
         async waitForLookup() { await lookupStarted.promise; }
         async releaseLookup() { lookupReleased.resolve(); }
         async expireRuntime() { await this.ctx.storage.put('environment-runtime-deadline', 1); }
@@ -100,6 +101,7 @@ test("Environment DO identity and cross-object admission use committed creation"
           if (operation === 'observe-lifecycle-task') return new Response(await object.observeLifecycleTask(input.ownerId, input.kind), { headers: { 'content-type': 'text/event-stream' } });
           if (operation === 'cancel-lifecycle-task') { await object.cancelLifecycleTask(input.ownerId, input.kind); return new Response(null, { status: 204 }); }
           if (operation === 'read-environment') return Response.json(await object.readEnvironment(input.ownerId));
+          if (operation === 'late-socket-error') { await object.lateSocketError(input); return new Response(null, { status: 204 }); }
           if (operation === 'observe-environment') return new Response(await object.observeEnvironment(input.ownerId), { headers: { 'content-type': 'text/event-stream' } });
           if (operation === 'expire-runtime') { await object.expireRuntime(); return new Response(null, { status: 204 }); }
           if (operation === 'set-idle') { await object.idleDeadline(input.deadline); return new Response(null, { status: 204 }); }
@@ -182,6 +184,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(await (await call(environmentId)).json(), first);
   const readEnvironment = () => call(environmentId, { ownerId: "1" }, "read-environment").then(response => response.json()) as Promise<{
     status: string; reason?: string; expiresAt: number | null; activeTaskId: string | null;
+    reconnectDiagnostic?: { category: string; observedAt: number }; idleExpiresAt?: number | null;
   }>;
   assert.equal((await readEnvironment()).status, "opening");
   assert.equal((await readEnvironment()).expiresAt, null);
@@ -488,6 +491,11 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await readEnvironment()).status, "unavailable");
   assert.deepEqual(await lifecycleTask(environmentId, "1", "open"), opened);
   assert.equal((await readEnvironment()).reason, "runtime_disconnected");
+  const disconnected = await readEnvironment();
+  assert.equal(disconnected.reconnectDiagnostic?.category, "control_plane_rejected");
+  assert.ok(Number.isSafeInteger(disconnected.reconnectDiagnostic?.observedAt));
+  assert.deepEqual(Object.keys(disconnected.reconnectDiagnostic!).sort(), ["category", "observedAt"]);
+  const reconnectIdle = disconnected.idleExpiresAt;
   assert.equal((await untilLifecycle("unavailable")).status, "unavailable");
   // Commit while disconnected, then require delivery from the stored receipt on the next generation.
   assert.equal(await (await call(environmentId, ciResult, "complete-ci")).json(), 1);
@@ -499,6 +507,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   const replayHello = nextMessage(replaySocket);
   replaySocket.accept();
   assert.deepEqual(await replayHello, { type: "connected", generation: 5, deadline: expectedDeadline });
+  assert.deepEqual((await readEnvironment()).reconnectDiagnostic, disconnected.reconnectDiagnostic);
   const replayMessages: unknown[] = [];
   const replayed = new Promise<void>(resolve => {
     const listener = (event: MessageEvent) => {
@@ -515,9 +524,16 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(replayMessages, [{ type: "ready-accepted" },
     { type: "execute", generation: 5, taskId: "operation-two", input: JSON.parse(operation.request) },
     { type: "ci-result", generation: 5, taskId: "operation-two", waitId: retainedWait.waitId, result: ciResult }]);
+  assert.equal((await readEnvironment()).reconnectDiagnostic, undefined);
+  assert.equal((await readEnvironment()).idleExpiresAt, reconnectIdle);
+  assert.equal((await readEnvironment()).expiresAt, expectedDeadline);
+  await call(environmentId, { ...runtimeClaim, generation: 4 }, "late-socket-error");
+  assert.equal((await readEnvironment()).status, "ready");
+  assert.equal((await readEnvironment()).reconnectDiagnostic, undefined);
   const replayClosed = new Promise<void>(resolve => replaySocket.addEventListener("close", () => resolve(), { once: true }));
   replaySocket.close(1000, "Controlled disconnect before cancellation");
   await replayClosed;
+  assert.equal((await readEnvironment()).reconnectDiagnostic?.category, "transport_closed");
   const disconnectedAgent = await (await call(environmentId, input, "read-environment")).json() as {
     agent: { current: boolean; state: unknown };
   };
@@ -736,4 +752,48 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal(await (await call(replacementId, rejectedInput, "dispatch-execution")).json(), "already-issued");
   assert.equal((await call(replacementId, { ...execution, ownerId: "6", runId: "701" }, "bind")).status, 409);
   assert.equal(await (await call(replacementId, rejectedInput, "observe")).json(), "closed");
+
+  // A real idle socket disconnect/error/reconnect must keep the exact idle alarm.
+  const idleId = `env_${"8".repeat(32)}`;
+  const idleInput = { ...input, environmentId: idleId, ownerId: "10" };
+  const idleExecution = { ...execution, ownerId: "10" };
+  const idleClaim = { ...runtimeClaim, ownerId: "10" };
+  await call(idleId, idleInput);
+  await call(idleId, idleInput, "dispatch");
+  await call(idleId, idleExecution, "bind");
+  await call(idleId, { ...deadlineInput, ownerId: "10" }, "deadline");
+  const idleSocket = (await call(idleId, idleClaim, "upgrade")).webSocket!;
+  const idleHello = nextMessage(idleSocket);
+  idleSocket.accept(); await idleHello;
+  const idleReady = nextMessage(idleSocket);
+  idleSocket.send(JSON.stringify({ type: "ready" })); await idleReady;
+  const idleAlarm = await (await call(idleId, idleInput, "alarm-time")).json();
+  const idleSnapshot = () => call(idleId, idleInput, "read-environment").then(response => response.json()) as ReturnType<typeof readEnvironment>;
+  const idleClosed = new Promise<void>(resolve => idleSocket.addEventListener("close", () => resolve(), { once: true }));
+  idleSocket.close(1000, "PRIVATE_TOKEN https://private.example/provider"); await idleClosed;
+  assert.equal((await idleSnapshot()).reconnectDiagnostic?.category, "transport_closed");
+  assert.equal(await (await call(idleId, idleInput, "alarm-time")).json(), idleAlarm);
+  await call(idleId, { ...idleClaim, generation: 1 }, "late-socket-error");
+  assert.equal((await idleSnapshot()).reconnectDiagnostic?.category, "transport_failure");
+  assert.doesNotMatch(JSON.stringify(await idleSnapshot()), /PRIVATE|private.example|runtimeId|generation/);
+  // A rejected replacement identity supplies no fact about this runtime's reconnect cause.
+  assert.equal((await call(idleId, { ...idleClaim, runtimeId: "00000000-0000-4000-8000-000000000002" }, "upgrade")).status, 409);
+  const idleReconnect = (await call(idleId, idleClaim, "upgrade")).webSocket!;
+  const idleReconnectHello = nextMessage(idleReconnect);
+  idleReconnect.accept(); await idleReconnectHello;
+  const idleReconnectReady = nextMessage(idleReconnect);
+  idleReconnect.send(JSON.stringify({ type: "ready" })); await idleReconnectReady;
+  assert.equal((await idleSnapshot()).reconnectDiagnostic, undefined);
+  assert.equal((await idleSnapshot()).idleExpiresAt, idleAlarm);
+  assert.equal((await idleSnapshot()).expiresAt, expectedDeadline);
+  assert.equal(await (await call(idleId, idleInput, "alarm-time")).json(), idleAlarm);
+  await call(idleId, { ...idleClaim, generation: 1 }, "late-socket-error");
+  assert.equal((await idleSnapshot()).reconnectDiagnostic, undefined);
+  await call(idleId, { deadline: 1 }, "set-idle");
+  assert.equal((await idleSnapshot()).reason, "idle_expired");
+  await call(idleId, idleInput, "alarm");
+  assert.equal((await idleSnapshot()).status, "closing");
+  assert.deepEqual(await (await call("global", { ownerId: "10" }, "list-environments")).json(), [idleId]);
+  assert.equal(await (await call(idleId, idleExecution, "stopped")).json(), "closed");
+  assert.equal((await idleSnapshot()).reconnectDiagnostic, undefined);
 });
