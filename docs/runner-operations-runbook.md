@@ -130,6 +130,14 @@ separate user-side check. Subscription expiry and queued retries share the
 Environment alarm with lifecycle and retention; do not replace that alarm with
 an independent timer or add client polling.
 
+For connection diagnosis, application logs use `mcp.events.wire` for discovery
+and Events requests. They contain only an allowlisted method, processing phase,
+protocol category, HTTP status, numeric RPC error code, and discovery capability
+or event count. `unlabelled` means the HTTP method header was absent; it does not
+identify a client. No request body, identity, URL, callback, secret or result text
+is recorded. These observations do not establish that ChatGPT consumed the
+catalog or resumed a conversation. Keep invocation logs and traces disabled.
+
 Record private evidence in ignored local project memory. Confirm that created
 runs have ended and clean up only the exact test branches, Issues and draft
 PRs. Never publish prompts, raw protocol data, full logs, keys or provider URLs.

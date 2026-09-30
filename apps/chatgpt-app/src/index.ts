@@ -20,6 +20,7 @@ import { environmentWebhook } from "./environment-webhook.ts";
 export { EnvironmentObject as BoundedEnvironmentObject, EnvironmentAdmissionObject } from "./environment-object.ts";
 import authorizationStyles from "@radix-ui/themes/styles.css";
 import { AUTH_STYLES_PATH } from "./authorization-view.ts";
+import { observeMcpEventRequest } from "./mcp-event-diagnostics.ts";
 
 export { AuthorizationStateObject };
 export { EventDeliveryContainer } from "./event-delivery.ts";
@@ -36,9 +37,11 @@ export class McpApi extends WorkerEntrypoint<WorkerEnvironment, Record<string, u
 
 export default {
   async fetch(request: Request, env: WorkerEnvironment, ctx: ExecutionContext): Promise<Response> {
-    const resourceError = await requireCanonicalResourceParameter(request);
-    if (resourceError) return resourceError;
-    return createOAuthProvider(env).fetch(request, env, ctx);
+    return observeMcpEventRequest(request, async () => {
+      const resourceError = await requireCanonicalResourceParameter(request);
+      if (resourceError) return resourceError;
+      return createOAuthProvider(env).fetch(request, env, ctx);
+    });
   },
 } satisfies ExportedHandler<WorkerEnvironment>;
 
