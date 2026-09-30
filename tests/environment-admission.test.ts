@@ -6,11 +6,20 @@ import { taskStorage } from "./helpers/task-storage.ts";
 const id = (value: number) => `env_${value.toString(16).padStart(32, "0")}`;
 const deadline = Date.now() + 60000;
 
+test("owner capacity is a non-retryable result with the held Environment identity", async () => {
+  const admission = new EnvironmentAdmission(taskStorage());
+  assert.deepEqual(await admission.reserve("1", id(1), deadline), { admitted: true });
+  assert.deepEqual(await admission.reserve("1", id(2), deadline), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: id(1),
+  });
+  assert.deepEqual(await admission.list("1"), [id(1)]);
+});
+
 test("concurrent owner admission commits exactly one reservation and duplicate delivery is stable", async () => {
   const storage = taskStorage();
   const admission = new EnvironmentAdmission(storage);
-  const results = await Promise.allSettled([admission.reserve("1", id(1), deadline), admission.reserve("1", id(2), deadline)]);
-  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  const results = await Promise.all([admission.reserve("1", id(1), deadline), admission.reserve("1", id(2), deadline)]);
+  assert.equal(results.filter(result => result.admitted).length, 1);
   assert.deepEqual(await admission.list("1"), [id(1)]);
   await new EnvironmentAdmission(storage).reserve("1", id(1), deadline);
   assert.deepEqual(await admission.list("2"), []);
@@ -21,11 +30,13 @@ test("concurrent owner admission commits exactly one reservation and duplicate d
 
 test("global admission rejects a fifth owner; confirmed release cannot be revived by late reserve", async () => {
   const admission = new EnvironmentAdmission(taskStorage());
-  const results = await Promise.allSettled(Array.from({ length: 5 }, (_, n) => admission.reserve(String(n + 1), id(n + 1), deadline)));
-  assert.equal(results.filter(result => result.status === "fulfilled").length, 4);
-  await assert.rejects(admission.reserve("5", id(5), deadline), /GLOBAL_CAPACITY/);
+  const results = await Promise.all(Array.from({ length: 5 }, (_, n) => admission.reserve(String(n + 1), id(n + 1), deadline)));
+  assert.equal(results.filter(result => result.admitted).length, 4);
+  assert.deepEqual(await admission.reserve("5", id(5), deadline), { admitted: false, capacityKind: "global", retryable: true });
   // Close intent has no release API: keep the reservation until evidence exists.
-  await assert.rejects(admission.reserve("1", id(6), deadline), /OWNER_CAPACITY/);
+  assert.deepEqual(await admission.reserve("1", id(6), deadline), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: id(1),
+  });
   await assert.rejects(admission.releaseConfirmed("2", id(1)), /NOT_FOUND/);
   await admission.releaseConfirmed("1", id(1));
   await admission.releaseConfirmed("1", id(1));

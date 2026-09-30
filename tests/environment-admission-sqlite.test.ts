@@ -16,7 +16,7 @@ test("Environment capacity is atomic on workerd SQLite", async t => {
           const admission = new EnvironmentAdmission(this.ctx.storage);
           try {
             switch (new URL(request.url).pathname) {
-              case '/reserve': await admission.reserve(ownerId, environmentId, admitUntil); break;
+              case '/reserve': return Response.json(await admission.reserve(ownerId, environmentId, admitUntil));
               case '/release': await admission.releaseConfirmed(ownerId, environmentId); break;
               case '/list': return Response.json(await admission.list(ownerId));
               default: return new Response(null, { status: 404 });
@@ -43,16 +43,20 @@ test("Environment capacity is atomic on workerd SQLite", async t => {
       headers: { "content-type": "application/json" },
     });
   const responses = await Promise.all(Array.from({ length: 5 }, (_, n) => call("reserve", String(n + 1), id(n + 1))));
-  assert.equal(responses.filter(response => response.status === 204).length, 4);
-  assert.equal(responses.filter(response => response.status === 409).length, 1);
-  const winner = responses.findIndex(response => response.status === 204) + 1;
-  const loser = responses.findIndex(response => response.status === 409) + 1;
+  const results = await Promise.all(responses.map(response => response.json() as Promise<{ admitted: boolean }>));
+  assert.equal(results.filter(result => result.admitted).length, 4);
+  assert.equal(results.filter(result => !result.admitted).length, 1);
+  const winner = results.findIndex(result => result.admitted) + 1;
+  const loser = results.findIndex(result => !result.admitted) + 1;
+  assert.deepEqual(results[loser - 1], { admitted: false, capacityKind: "global", retryable: true });
   assert.deepEqual(await (await call("list", String(winner))).json(), [id(winner)]);
   assert.deepEqual(await (await call("list", String(loser))).json(), []);
-  assert.equal((await call("reserve", String(winner), id(winner))).status, 204);
-  assert.equal((await call("reserve", String(winner), id(99))).status, 409);
+  assert.deepEqual(await (await call("reserve", String(winner), id(winner))).json(), { admitted: true });
+  assert.deepEqual(await (await call("reserve", String(winner), id(99))).json(), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: id(winner),
+  });
   assert.equal((await call("release", String(loser), id(winner))).status, 409);
   assert.equal((await call("release", String(winner), id(winner))).status, 204);
   assert.equal((await call("reserve", String(winner), id(winner))).status, 409);
-  assert.equal((await call("reserve", String(loser), id(loser))).status, 204);
+  assert.deepEqual(await (await call("reserve", String(loser), id(loser))).json(), { admitted: true });
 });

@@ -39,6 +39,17 @@ and `Actions: write`.
 A Tasks client keeps this contract. A missing or failed Task result is not
 replaced with an ordinary receipt.
 
+Capacity rejection is a tool-level product result for both client types:
+`resultType: "complete"`, `isError: true`, and `structuredContent.outcome:
+"capacity_rejected"`. It creates no lifecycle Task and dispatches no workflow.
+`capacityKind: "owner"` has `retryable: false` and reports the existing owned
+Environment ID in `existingEnvironment.environmentId`, with `status` when
+readable. Explicitly continue with or close that Environment first.
+`capacityKind: "global"` has `retryable: true` because global capacity can become
+available. Neither case automatically closes, reconciles, reuses, queues or
+retries work. Do not poll. The policy is one held Environment per Principal and
+four globally. A repeated idempotency key retains its original admission deadline.
+
 ### Ordinary client
 
 A client that does not declare Tasks calls the same tools. The result is an

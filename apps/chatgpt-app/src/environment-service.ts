@@ -1,13 +1,17 @@
 import { z } from "zod";
 import { executionPrincipal, executionToken } from "./execution-authority.ts";
-import type { EnvironmentObject } from "./environment-object.ts";
+import type { EnvironmentObject, EnvironmentSnapshot } from "./environment-object.ts";
 import { TaskError } from "../../../shared/task-errors.ts";
 
 // A fresh product scope. Neither legacy environments:manage nor tasks:manage implies it.
 import { ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
 export { ENVIRONMENT_SCOPE } from "./oauth-scopes.ts";
 type EnvironmentService = { ENVIRONMENTS: { getByName(name: string):
-  Pick<EnvironmentObject, "initialize" | "dispatchExecution" | "requestClose" | "closeExecution"> } };
+  Pick<EnvironmentObject, "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment"> } };
+export type OpenCapacityRejection =
+  | { admitted: false; capacityKind: "owner"; retryable: false;
+      existingEnvironment: { environmentId: string; status?: EnvironmentSnapshot["status"] } }
+  | { admitted: false; capacityKind: "global"; retryable: true };
 export const openInput = z.object({ executor: z.enum(["codex", "grok"]),
   idempotencyKey: z.string().min(1).max(256).optional() }).strict();
 export const environmentIdentity = z.object({ environmentId: z.string().regex(/^env_[a-f0-9]{32}$/) }).strict();
@@ -23,8 +27,15 @@ export async function openEnvironment(env: EnvironmentService, props: unknown, v
   const environmentId = `env_${[...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
   const object = env.ENVIRONMENTS.getByName(environmentId);
   const creation = await object.initialize({ environmentId, ownerId, executor: input.executor });
+  if (!creation.admitted) {
+    if (creation.capacityKind === "global") return creation;
+    const existing = await env.ENVIRONMENTS.getByName(creation.existingEnvironmentId).readEnvironment(ownerId);
+    return { admitted: false, capacityKind: "owner", retryable: false, existingEnvironment: {
+      environmentId: creation.existingEnvironmentId, ...(existing ? { status: existing.status } : {}),
+    } } satisfies OpenCapacityRejection;
+  }
   const dispatch = await object.dispatchExecution(ownerId, token);
-  return { environmentId, executor: creation.executor, createdAt: creation.createdAt, dispatch };
+  return { admitted: true as const, environmentId, executor: creation.executor, createdAt: creation.createdAt, dispatch };
 }
 
 export async function closeEnvironment(env: EnvironmentService, props: unknown, value: unknown) {
