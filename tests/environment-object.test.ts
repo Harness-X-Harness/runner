@@ -188,12 +188,21 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal(await (await call(environmentId, { ownerId: "2" }, "read-environment")).json(), null);
   assert.deepEqual(await (await call("global", { ownerId: "1" }, "list-environments")).json(), [environmentId]);
   assert.deepEqual(await (await call("global", { ownerId: "2" }, "list-environments")).json(), []);
+  const refusedId = `env_${"c".repeat(32)}`;
+  assert.deepEqual(await (await call(refusedId, { ...input, environmentId: refusedId })).json(), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: environmentId,
+  });
+  assert.equal(await lifecycleTask(refusedId, "1", "open"), null);
+  assert.equal((await call(refusedId, input, "dispatch")).status, 409);
+  assert.deepEqual(await (await call("global", { ownerId: "1" }, "list-environments")).json(), [environmentId]);
   assert.equal((await call("other", { ownerId: "1" }, "list-environments")).status, 409);
   assert.equal((await call("global", { ownerId: "01" }, "list-environments")).status, 409);
   assert.equal((await call(environmentId, { ...input, executor: "grok" })).status, 409);
   assert.equal((await call(environmentId, { ...input, ownerId: "2" })).status, 409);
   const second = `env_${"c".repeat(32)}`;
-  assert.equal((await call(second, { ...input, environmentId: second })).status, 409);
+  assert.deepEqual(await (await call(second, { ...input, environmentId: second })).json(), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: environmentId,
+  });
   assert.equal((await call(second, input, "dispatch")).status, 409);
   assert.equal((await call(environmentId, { ...input, ownerId: "2" }, "dispatch")).status, 409);
   const dispatch = await Promise.all([call(environmentId, input, "dispatch"), call(environmentId, input, "dispatch")]);
@@ -608,7 +617,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await call(environmentId, input, "dispatch")).status, 409);
   assert.equal(await (await call(environmentId, execution, "bind")).json(), "stop");
   assert.deepEqual(await (await call(environmentId, execution, "claim-runtime")).json(), { decision: "stop" });
-  assert.equal((await call(second, { ...input, environmentId: second })).status, 409);
+  assert.deepEqual(await (await call(second, { ...input, environmentId: second })).json(), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: environmentId,
+  });
 
   const third = `env_${"d".repeat(32)}`;
   const beforeDispatch = { ...input, environmentId: third, ownerId: "2" };
@@ -654,7 +665,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await completedEvent(2)).status, 503);
   const readUnfinished = async () => await (await call(environmentId, unfinished, "read-operation")).json() as { result?: unknown; updatedAt: number };
   assert.equal((await readUnfinished()).result, undefined);
-  assert.equal((await call(second, { ...input, environmentId: second })).status, 409);
+  assert.deepEqual(await (await call(second, { ...input, environmentId: second })).json(), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironmentId: environmentId,
+  });
   assert.equal((await completedEvent(1)).status, 204);
   const ended = await readUnfinished();
   assert.deepEqual(ended.result, { ok: false, code: "ENVIRONMENT_ENDED_OUTCOME_UNKNOWN" });

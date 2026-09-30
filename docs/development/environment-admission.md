@@ -51,6 +51,15 @@ four globally. Its owner-filtered list contains only held memberships, not Task
 history or runtime state. Repeated reservation is idempotent for the same owner
 and identity; a released identity cannot be reserved again.
 
+Owner and global capacity are typed admission results, not exceptions. Owner
+capacity includes the held owner's Environment ID and is non-retryable; global
+capacity is temporarily retryable. The service reads the existing Environment's
+status through its owner check. An absent snapshot omits status; storage faults
+remain internal errors. Both MCP client types receive the same complete tool
+error and machine-readable facts. Rejection does not create an open lifecycle
+receipt, consume capacity, dispatch, reconcile or queue. The immutable creation
+record remains for idempotency; its admission deadline does not restart.
+
 The internal Environment MCP handler uses this same membership for
 `resources/list`; there is no second owner directory. It reads each member's
 owner-checked Environment snapshot and excludes closed environments. The current

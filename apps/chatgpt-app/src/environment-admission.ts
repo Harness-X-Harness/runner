@@ -3,6 +3,10 @@ import type { DurableObjectStorage } from "@cloudflare/workers-types";
 type Storage = Pick<DurableObjectStorage, "get" | "put" | "transaction">;
 type Reservation = { environmentId: string; ownerId: string; released: boolean; admitUntil: number };
 const KEY = "environment-admission";
+export type CapacityRejection =
+  | { admitted: false; capacityKind: "owner"; retryable: false; existingEnvironmentId: string }
+  | { admitted: false; capacityKind: "global"; retryable: true };
+export type AdmissionResult = { admitted: true } | CapacityRejection;
 
 /** Internal capacity authority. No workflow I/O or lifecycle copies in transactions. */
 export class EnvironmentAdmission {
@@ -11,12 +15,12 @@ export class EnvironmentAdmission {
   constructor(storage: Storage, now = Date.now) { this.storage = storage; this.now = now; }
 
   // admitUntil belongs to the immutable Environment creation record, not the client.
-  async reserve(ownerId: string, environmentId: string, admitUntil: number): Promise<void> {
+  async reserve(ownerId: string, environmentId: string, admitUntil: number): Promise<AdmissionResult> {
     if (!/^[1-9]\d{0,19}$/.test(ownerId) || !/^env_[a-f0-9]{32}$/.test(environmentId) ||
         !Number.isSafeInteger(admitUntil) || admitUntil <= 0) {
       throw new Error("INVALID_ENVIRONMENT_RESERVATION");
     }
-    await this.storage.transaction(async () => {
+    return this.storage.transaction<AdmissionResult>(async () => {
       const now = this.now();
       if (admitUntil <= now) throw new Error("ENVIRONMENT_ADMISSION_EXPIRED");
       const records = (await this.storage.get<Reservation[]>(KEY) ?? [])
@@ -26,15 +30,18 @@ export class EnvironmentAdmission {
         if (existing.ownerId !== ownerId) throw new Error("ENVIRONMENT_OWNER_MISMATCH");
         if (existing.admitUntil !== admitUntil) throw new Error("ENVIRONMENT_ADMISSION_CONFLICT");
         if (existing.released) throw new Error("ENVIRONMENT_RESERVATION_RELEASED");
-        return;
+        return { admitted: true };
       }
       const held = records.filter(record => !record.released);
-      if (held.some(record => record.ownerId === ownerId)) throw new Error("ENVIRONMENT_OWNER_CAPACITY");
-      if (held.length >= 4) throw new Error("ENVIRONMENT_GLOBAL_CAPACITY");
+      const owned = held.find(record => record.ownerId === ownerId);
+      if (owned) return { admitted: false, capacityKind: "owner", retryable: false,
+        existingEnvironmentId: owned.environmentId };
+      if (held.length >= 4) return { admitted: false, capacityKind: "global", retryable: true };
       // Bound the single stored value without evicting replay protection.
       if (records.length >= 256) throw new Error("ENVIRONMENT_RECEIPT_CAPACITY");
       records.push({ ownerId, environmentId, released: false, admitUntil });
       await this.storage.put(KEY, records);
+      return { admitted: true };
     });
   }
 

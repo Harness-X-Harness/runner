@@ -16,7 +16,7 @@ test("new Environment scope gates admission; deterministic identity is owner sco
         const existing = records.get(name);
         if (existing && existing.executor !== input.executor) throw new Error("ENVIRONMENT_CREATION_CONFLICT");
         const record = existing ?? { ...input, createdAt: 1, admitUntil: 100 };
-        records.set(name, record); return record;
+        records.set(name, record); return { ...record, admitted: true as const };
       },
       async dispatchExecution(owner: string, token: string) {
         assert.equal(records.get(name)?.ownerId, owner);
@@ -26,6 +26,7 @@ test("new Environment scope gates admission; deterministic identity is owner sco
       },
       async requestClose() { return "closing" as const; },
       async closeExecution() { return "closing" as const; },
+      async readEnvironment() { return null; },
     };
   } } };
   for (const oauthScopes of [[], ["tasks:manage"], ["environments:manage"]]) {
@@ -53,8 +54,38 @@ test("close preserves intent before expired external authority is rejected", asy
     async dispatchExecution(): Promise<never> { throw new Error(); },
     async requestClose(owner: string) { assert.equal(owner, "123"); intent = true; return "closing" as const; },
     async closeExecution(): Promise<never> { throw new Error("must not call GitHub"); },
+    async readEnvironment() { return null; },
   }; } } };
   await assert.rejects(closeEnvironment(env, { ...props, environmentGithubAccessTokenExpiresAt: 1 },
     { environmentId: `env_${"a".repeat(32)}` }));
   assert.equal(intent, true);
+});
+
+test("owner capacity returns only owner-authorized identity and status without dispatch or close", async () => {
+  const environmentId = `env_${"a".repeat(32)}`;
+  let readMode: "visible" | "missing" | "fault" = "visible";
+  const env = { ENVIRONMENTS: { getByName(id: string) { return {
+    async initialize() { return { admitted: false as const, capacityKind: "owner" as const,
+      retryable: false as const, existingEnvironmentId: environmentId }; },
+    async readEnvironment(owner: string) {
+      assert.equal(owner, "123"); assert.equal(id, environmentId);
+      if (readMode === "fault") throw new Error("PRIVATE_STORAGE_FAILURE");
+      if (readMode === "missing") return null;
+      return { environmentId, status: "closing" as const, executor: "codex" as const,
+        createdAt: 1, expiresAt: null, activeTaskId: null };
+    },
+    async dispatchExecution(): Promise<never> { throw new Error("must not dispatch"); },
+    async requestClose(): Promise<never> { throw new Error("must not close"); },
+    async closeExecution(): Promise<never> { throw new Error("must not reconcile"); },
+  }; } } };
+  assert.deepEqual(await openEnvironment(env, props, { executor: "codex" }), {
+    admitted: false, capacityKind: "owner", retryable: false,
+    existingEnvironment: { environmentId, status: "closing" },
+  });
+  readMode = "missing";
+  assert.deepEqual(await openEnvironment(env, props, { executor: "codex" }), {
+    admitted: false, capacityKind: "owner", retryable: false, existingEnvironment: { environmentId },
+  });
+  readMode = "fault";
+  await assert.rejects(openEnvironment(env, props, { executor: "codex" }), /PRIVATE_STORAGE_FAILURE/);
 });

@@ -1,5 +1,5 @@
 import { bearerAuthChallengeResponse, getOAuthProtectedResourceMetadataUrl, OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
-import { hasTaskClientCapabilityV2, type DetailedTaskV2 } from "@modelcontextprotocol/ext-tasks/core/v2";
+import { CallToolResultV2Schema, hasTaskClientCapabilityV2, type DetailedTaskV2 } from "@modelcontextprotocol/ext-tasks/core/v2";
 import { TaskError } from "../../../shared/task-errors.ts";
 import { canonicalMcpResource } from "./oauth-resource.ts";
 import { serveTaskRequest, type TaskAuthority } from "./task-methods.ts";
@@ -79,6 +79,16 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       const capable = hasTaskClientCapabilityV2(request.params);
       if (name === "open_environment") {
         const opened = await openEnvironment(env, props, args);
+        if (!opened.admitted) {
+          const existing = opened.capacityKind === "owner" ? opened.existingEnvironment : undefined;
+          return CallToolResultV2Schema.parse({ resultType: "complete", isError: true,
+            structuredContent: { outcome: "capacity_rejected", capacityKind: opened.capacityKind,
+              retryable: opened.retryable, ...(existing ? { existingEnvironment: existing } : {}) },
+            content: [{ type: "text", text: existing
+              ? `Principal Environment capacity reached. Existing Environment ${existing.environmentId}${existing.status ? ` is ${existing.status}` : ""}. This open is not retryable. Explicitly continue with or close that Environment first.`
+              : "Global Environment capacity reached. This open is temporarily retryable. No work was queued. Do not poll or automatically retry." }],
+          });
+        }
         return projectLifecycle(env, props, capable, name, opened.environmentId, "open", opened.dispatch);
       }
       if (name === "close_environment") {

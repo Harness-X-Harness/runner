@@ -26,7 +26,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
         },
         async initialize(value: { environmentId: string; executor: "codex" | "grok" }) {
           state.opens++;
-          return { environmentId: value.environmentId, executor: value.executor, createdAt: 1 };
+          return { environmentId: value.environmentId, executor: value.executor, createdAt: 1, admitted: true as const };
         },
         async dispatchExecution() { state.dispatches++; return "accepted" as const; },
         async requestClose(owner: string) {

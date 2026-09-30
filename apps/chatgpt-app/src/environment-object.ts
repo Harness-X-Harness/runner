@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { dispatchEnvironmentWorkflow, observeJobStart, observeWorkflowExecution, requestWorkflowStop } from "./task-github.ts";
 import { ENVIRONMENT_WORKFLOW } from "./environment-callback.ts";
-import { EnvironmentAdmission } from "./environment-admission.ts";
+import { EnvironmentAdmission, type AdmissionResult, type CapacityRejection } from "./environment-admission.ts";
 import { EnvironmentCreation, environmentCreationInput, type EnvironmentCreationRecord } from "./environment-creation.ts";
 import { observeTask, observeSnapshots } from "./task-observation.ts";
 import { snapshotStream } from "./snapshot-stream.ts";
@@ -644,13 +644,17 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     }, signal));
   }
 
-  async initialize(value: unknown): Promise<EnvironmentCreationRecord> {
+  async initialize(value: unknown): Promise<(EnvironmentCreationRecord & { admitted: true }) | CapacityRejection> {
     const input = environmentCreationInput.parse(value);
     const expectedId = this.env.ENVIRONMENTS.idFromName(input.environmentId);
     if (!this.ctx.id.equals(expectedId)) throw new Error("ENVIRONMENT_ID_MISMATCH");
     const record = await this.creation.create(input);
+    if (await this.ctx.storage.get("environment-close-requested") === true) throw new Error("ENVIRONMENT_CLOSING");
+    // External I/O follows the committed immutable creation, outside its transaction.
+    const admission = await this.env.ENVIRONMENT_ADMISSION.getByName("global").reserve(record);
+    if (!admission.admitted) return admission;
     await this.ctx.storage.transaction(async () => {
-      if (await this.ctx.storage.get("environment-close-requested") === true) throw new Error("ENVIRONMENT_CLOSING");
+      await this.ctx.storage.put("environment-admitted", true);
       if (!await this.ctx.storage.get("environment-lifecycle:open")) {
         await this.ctx.storage.put("environment-lifecycle:open", {
           status: "working", createdAt: record.createdAt, updatedAt: record.createdAt,
@@ -658,15 +662,11 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       }
       await this.ctx.storage.setAlarm(await this.nextDeadline());
     });
-    // External I/O follows the committed immutable creation, outside its transaction.
-    const admission = this.env.ENVIRONMENT_ADMISSION.getByName("global");
-    await admission.reserve(record);
-    await this.ctx.storage.put("environment-admitted", true);
     if (await this.ctx.storage.get("environment-close-requested") === true) {
       await this.requestClose(record.ownerId);
       throw new Error("ENVIRONMENT_CLOSING");
     }
-    return record;
+    return { ...record, admitted: true };
   }
 
   /** Consume dispatch permission durably before any external workflow request. */
@@ -952,11 +952,11 @@ export class EnvironmentAdmissionObject extends DurableObject<Bindings> {
     return this.admission.list(ownerId);
   }
 
-  async reserve(record: EnvironmentCreationRecord): Promise<void> {
+  async reserve(record: EnvironmentCreationRecord): Promise<AdmissionResult> {
     if (!this.ctx.id.equals(this.env.ENVIRONMENT_ADMISSION.idFromName("global"))) {
       throw new Error("ENVIRONMENT_ADMISSION_ID_MISMATCH");
     }
-    await this.admission.reserve(record.ownerId, record.environmentId, record.admitUntil);
+    return this.admission.reserve(record.ownerId, record.environmentId, record.admitUntil);
   }
 
   async releaseConfirmed(record: EnvironmentCreationRecord): Promise<void> {
