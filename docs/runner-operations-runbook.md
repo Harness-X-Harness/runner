@@ -65,6 +65,8 @@ Containers require Workers Paid and incur resource usage charges; see
 [Cloudflare pricing](https://developers.cloudflare.com/containers/platform/pricing/).
 Worker deployment success does not prove that container provisioning or outbound
 TLS is ready. Verify the actual changed-boundary path before claiming acceptance.
+For this transport, verify a harmless HTTPS delivery, private-address rejection
+and automatic idle exit. Sending a stop signal alone does not confirm exit.
 
 ## Private acceptance credentials
 
