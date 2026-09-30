@@ -47,11 +47,14 @@ the [Worker source](../apps/chatgpt-app/src/) and
 [Environment workflow](../.github/workflows/run-environment.yml),
 not a second configuration list in this runbook.
 Use this deployment command rather than invoking Wrangler directly. After a real
-deployment it sets and reads back query-string redaction, disabled invocation
-logs and disabled traces. If verification fails, code may already be deployed:
+deployment it uses the script-level `/script-settings` API to set and read back
+query-string redaction, disabled invocation logs and disabled traces. If
+verification fails, code may already be deployed:
 report that partial result, repair/read back the setting, and do not blindly
 redeploy. Dry-run performs no settings writes. The owning implementation is
 [deploy.ts](../apps/chatgpt-app/deploy.ts).
+Script-level settings leave the deployed Worker version and Container enablement
+unchanged; do not replace the Worker configuration through the legacy settings API.
 
 The private [event-delivery Container](../apps/event-delivery/) also requires a
 running Docker daemon and the account-scoped Containers and Cloudchamber write

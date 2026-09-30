@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { secureWorkerLogs } from "../apps/chatgpt-app/deploy.ts";
 
-test("deployment preserves log configuration and confirms required privacy settings", async () => {
+test("privacy update uses script-level settings without replacing Worker version configuration", async () => {
   let calls = 0;
   let stored: Record<string, unknown> = { enabled: true, logs: { head_sampling_rate: 0.5 } };
   await secureWorkerLogs("account", "worker", "PRIVATE_TOKEN", async (url, init) => {
-    assert.equal(String(url), "https://api.cloudflare.com/client/v4/accounts/account/workers/scripts/worker/settings");
+    assert.equal(String(url), "https://api.cloudflare.com/client/v4/accounts/account/workers/scripts/worker/script-settings");
     assert.equal(new Headers(init?.headers).get("authorization"), "Bearer PRIVATE_TOKEN");
     calls++;
     if (init?.method === "PATCH") {
-      assert.ok(init.body instanceof FormData);
-      stored = JSON.parse(String(init.body.get("settings"))).observability;
+      assert.equal(new Headers(init.headers).get("content-type"), "application/json");
+      assert.equal(typeof init.body, "string");
+      const body = JSON.parse(init.body as string);
+      assert.deepEqual(Object.keys(body), ["observability"]);
+      stored = body.observability;
     }
     return Response.json({ success: true, result: { observability: stored } });
   });
