@@ -13,7 +13,7 @@ import { lifecycleTaskId, lifecycleIdentity, type LifecycleKind } from "./enviro
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
 import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type OrdinaryTool } from "./environment-ordinary-result.ts";
-import { EVENT_NAME, EventError, eventCatalog, grantIdentity } from "./mcp-events.ts";
+import { EVENT_NAME, EventError, eventCatalog, eventRpcValue, grantIdentity } from "./mcp-events.ts";
 
 type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
   "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment" |
@@ -56,8 +56,8 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       const object = env.ENVIRONMENTS.getByName(request.params.arguments.environmentId);
       const snapshot = await object.readEnvironment(owner);
       if (!snapshot) throw new EventError(-32012, "Environment not found or not owned");
-      if (request.method === "events/unsubscribe") { await object.unsubscribeEvents(owner, request.params); return {}; }
-      return object.subscribeEvents(owner, grantIdentity.parse(props.mcpGrant), request.params);
+      if (request.method === "events/unsubscribe") return eventRpcValue(await object.unsubscribeEvents(owner, request.params));
+      return eventRpcValue(await object.subscribeEvents(owner, grantIdentity.parse(props.mcpGrant), request.params));
     } },
     async tools() {
       executionPrincipal(await authorize(), ENVIRONMENT_SCOPE);

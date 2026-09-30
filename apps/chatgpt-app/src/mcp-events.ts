@@ -54,4 +54,18 @@ export class EventError extends Error {
     super(message); this.code = code; this.data = data;
   }
 }
+export type EventRpcReply = { ok: true; value: Record<string, unknown> } |
+  { ok: false; error: { code: number; message: string; data?: Record<string, unknown> } };
+/** RPC preserves data, not a custom Error's prototype. Carry expected failures as data. */
+export async function eventRpc(action: () => Promise<Record<string, unknown>>): Promise<EventRpcReply> {
+  try { return { ok: true, value: await action() }; }
+  catch (error) {
+    if (!(error instanceof EventError)) throw error;
+    return { ok: false, error: { code: error.code, message: error.message, ...(error.data ? { data: error.data } : {}) } };
+  }
+}
+export function eventRpcValue(reply: EventRpcReply): Record<string, unknown> {
+  if (!reply.ok) throw new EventError(reply.error.code, reply.error.message, reply.error.data);
+  return reply.value;
+}
 export interface EventAuthority { handle(request: EventRequest): Promise<Record<string, unknown>> }
