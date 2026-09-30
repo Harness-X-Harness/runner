@@ -5,21 +5,24 @@ import { fileURLToPath } from "node:url";
 
 /** Deployment owns this setting because Wrangler cannot yet declare it. */
 export async function secureWorkerLogs(account: string, script: string, token: string, fetchImpl: typeof fetch = fetch) {
-  const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/workers/scripts/${encodeURIComponent(script)}/settings`;
+  // Script-level settings do not create a replacement Worker version. The
+  // legacy /settings endpoint can drop version configuration such as containers.
+  const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account)}/workers/scripts/${encodeURIComponent(script)}/script-settings`;
   const request = async (init?: RequestInit) => {
-    const response = await fetchImpl(url, { ...init, headers: { authorization: `Bearer ${token}` } });
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${token}`);
+    const response = await fetchImpl(url, { ...init, headers });
     if (!response.ok) throw new Error(`Worker log settings request failed (${response.status})`);
     const body = await response.json() as { success?: boolean; result?: { observability?: Record<string, unknown> } };
     if (body.success !== true || !body.result) throw new Error("Worker log settings unavailable");
     return body.result.observability ?? {};
   };
   const current = await request();
-  const form = new FormData();
-  form.set("settings", JSON.stringify({ observability: { ...current, redact_query_string: true,
-    logs: { ...(current.logs as object ?? {}), invocation_logs: false },
-    traces: { ...(current.traces as object ?? {}), enabled: false },
-  } }));
-  await request({ method: "PATCH", body: form });
+  await request({ method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({
+    observability: { ...current, redact_query_string: true,
+      logs: { ...(current.logs as object ?? {}), invocation_logs: false },
+      traces: { ...(current.traces as object ?? {}), enabled: false },
+    } }) });
   const verified = await request();
   if (verified.redact_query_string !== true ||
       (verified.logs as { invocation_logs?: boolean } | undefined)?.invocation_logs !== false ||
