@@ -13,6 +13,7 @@ test("OAuth resource metadata binds the control plane to /mcp", async () => {
     new URL("../apps/chatgpt-app/src/index.ts", import.meta.url),
     "utf8",
   );
+  const options = await readFile(new URL("../apps/chatgpt-app/src/oauth-options.ts", import.meta.url), "utf8");
 
   assert.equal(
     canonicalMcpResource("https://runner.example/control-plane"),
@@ -57,8 +58,9 @@ test("OAuth resource metadata binds the control plane to /mcp", async () => {
     ),
     undefined,
   );
-  assert.match(source, /resource: canonicalResource/);
-  assert.match(source, /authorization_servers: \[authorizationServerIssuer\(/);
+  assert.match(source, /\.\.\.oauthOptions\(env\)/);
+  assert.match(options, /resource: canonicalMcpResource\(/);
+  assert.match(options, /authorization_servers: \[authorizationServerIssuer\(/);
   assert.match(source, /requireCanonicalResourceParameter/);
   assert.doesNotMatch(source, /resourceMatchOriginOnly/);
 });

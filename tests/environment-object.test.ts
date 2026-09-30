@@ -25,6 +25,7 @@ test("Environment DO identity and cross-object admission use committed creation"
         async expireRuntime() { await this.ctx.storage.put('environment-runtime-deadline', 1); }
         async idleDeadline(value: number) { await this.ctx.storage.put('environment-idle-deadline', value); }
         async scheduledAlarm() { return this.ctx.storage.getAlarm(); }
+        async latestEvent() { return this.ctx.storage.get('environment-event-latest'); }
         async expireResults() { await this.ctx.storage.put('environment-results-expires-at', 1); }
         async retainedContentCount() { return (await this.ctx.storage.list({ prefix: 'environment-operation:' })).size + (await this.ctx.storage.list({ prefix: 'environment-output:' })).size + (await this.ctx.storage.list({ prefix: 'environment-ci-wait:' })).size; }
         async invokeAlarm() { await this.alarm(); }
@@ -106,6 +107,7 @@ test("Environment DO identity and cross-object admission use committed creation"
           if (operation === 'expire-runtime') { await object.expireRuntime(); return new Response(null, { status: 204 }); }
           if (operation === 'set-idle') { await object.idleDeadline(input.deadline); return new Response(null, { status: 204 }); }
           if (operation === 'alarm-time') return Response.json(await object.scheduledAlarm());
+          if (operation === 'latest-event') return Response.json(await object.latestEvent());
           if (operation === 'expire-results') { await object.expireResults(); return new Response(null, { status: 204 }); }
           if (operation === 'content-count') return Response.json(await object.retainedContentCount());
           if (operation === 'alarm') { await object.invokeAlarm(); return new Response(null, { status: 204 }); }
@@ -279,6 +281,8 @@ test("Environment DO identity and cross-object admission use committed creation"
   sockets[1]!.send(JSON.stringify({ type: "ready" }));
   assert.deepEqual(await readyReply, { type: "ready-accepted" });
   assert.equal((await readEnvironment()).status, "ready");
+  const readyEvent = await (await call(environmentId, input, "latest-event")).json();
+  assert.deepEqual(readyEvent.data, { environmentId, revision: 1, kind: "environment", status: "ready" });
   const opened = await lifecycleTask(environmentId, "1", "open");
   assert.equal(opened.status, "completed");
   assert.equal(opened.result.structuredContent.outcome, "opened");
@@ -295,6 +299,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   const duplicateReady = nextMessage(sockets[1]!);
   sockets[1]!.send(JSON.stringify({ type: "ready" }));
   assert.deepEqual(await duplicateReady, { type: "ready-accepted" });
+  assert.deepEqual(await (await call(environmentId, input, "latest-event")).json(), readyEvent);
   assert.equal(await (await call(environmentId, input, "alarm-time")).json(), firstIdle);
   const agentState = { defaults: { model: "fixture-model", reasoningEffort: "high" },
     models: [{ id: "fixture-model", effort: "high", efforts: ["low", "high"] }], selection: null, uncertain: false };
@@ -379,6 +384,11 @@ test("Environment DO identity and cross-object admission use committed creation"
     const ack = nextMessage(sockets[1]!);
     sockets[1]!.send(JSON.stringify(question));
     assert.deepEqual(await ack, { type: "input-accepted", taskId: operation.taskId, inputId, generation: 4 });
+    const inputEvent = await (await call(environmentId, input, "latest-event")).json();
+    assert.equal(inputEvent.data.kind, "operation");
+    assert.equal(inputEvent.data.status, "input_required");
+    assert.equal(inputEvent.data.operationId, operation.taskId);
+    assert.doesNotMatch(JSON.stringify(inputEvent), /requestedSchema|hello|PRIVATE/);
   };
   await publishQuestion();
   const readRecord = async () => await (await call(environmentId, operation, "read-operation")).json() as OperationRecord;
@@ -444,6 +454,9 @@ test("Environment DO identity and cross-object admission use committed creation"
     const acknowledged = nextMessage(sockets[1]!);
     sockets[1]!.send(JSON.stringify(frame));
     assert.deepEqual(await acknowledged, { type: "result-accepted", generation: 4, taskId: operation.taskId });
+    const finishedEvent = await (await call(environmentId, input, "latest-event")).json();
+    assert.equal(finishedEvent.data.status, "completed");
+    assert.equal(finishedEvent.data.operationId, operation.taskId);
     const alarm = await (await call(environmentId, input, "alarm-time")).json();
     if (repetition === 0) resultIdle = alarm;
     else assert.equal(alarm, resultIdle);
@@ -702,6 +715,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(await (await call("global", { ownerId: "1" }, "list-environments")).json(), []);
   assert.equal(await (await call(environmentId, input, "close-backend")).json(), "closed");
   assert.equal(await (await call(environmentId, execution, "stopped")).json(), "closed");
+  const closedEvent = await (await call(environmentId, input, "latest-event")).json();
+  assert.equal(closedEvent.data.kind, "environment");
+  assert.equal(closedEvent.data.status, "closed");
   assert.deepEqual(await readUnfinished(), ended);
   assert.equal(await (await call(environmentId, input, "close")).json(), "closed");
   assert.equal(await (await call(environmentId, input, "observe")).json(), "closed");

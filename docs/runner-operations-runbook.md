@@ -122,6 +122,14 @@ Verify the exact `run-environment.yml` execution and its terminal state. Test ch
 GitHub write boundaries in the approved disposable repository; do not repeat
 unaffected acceptance matrices on every deployment.
 
+For MCP Events use the Story's bounded webhook check. Rescan the plugin after
+deploying a changed event catalog. No new OAuth scope, endpoint or consent is
+needed. Callback verification and signed lifecycle delivery must pass before
+claiming Events transport acceptance; actual ChatGPT continuation remains a
+separate user-side check. Subscription expiry and queued retries share the
+Environment alarm with lifecycle and retention; do not replace that alarm with
+an independent timer or add client polling.
+
 Record private evidence in ignored local project memory. Confirm that created
 runs have ended and clean up only the exact test branches, Issues and draft
 PRs. Never publish prompts, raw protocol data, full logs, keys or provider URLs.

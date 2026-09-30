@@ -13,11 +13,13 @@ import { lifecycleTaskId, lifecycleIdentity, type LifecycleKind } from "./enviro
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
 import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type OrdinaryTool } from "./environment-ordinary-result.ts";
+import { EVENT_NAME, EventError, eventCatalog, grantIdentity } from "./mcp-events.ts";
 
-type Environment = EnvironmentResources & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
+type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
   "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment" |
   "readLifecycleTask" | "cancelLifecycleTask" | "observeLifecycleTask" |
-  "reserveOperation" | "readOperation" | "cancelOperation" | "observeOperation" | "observeOutput" | "observeEnvironment" | "answerOperation"> } };
+  "reserveOperation" | "readOperation" | "readOutput" | "cancelOperation" | "observeOperation" | "observeOutput" | "observeEnvironment" | "answerOperation" |
+  "subscribeEvents" | "unsubscribeEvents"> } };
 
 export async function handleEnvironmentTaskRequest(request: Request,
   env: Environment & Parameters<typeof mcpAuthorization>[1]): Promise<Response> {
@@ -43,6 +45,20 @@ export async function handleEnvironmentTaskRequest(request: Request,
 export function environmentTaskAuthority(env: Environment, authorize: () => Promise<Record<string, unknown>>): TaskAuthority {
   return {
     ordinaryToolCalls: true,
+    events: { async handle(request) {
+      const props = await authorize();
+      const owner = executionPrincipal(props, ENVIRONMENT_SCOPE);
+      if (request.method === "events/list") {
+        if (request.params?.cursor !== undefined) throw new EventError(-32602, "Invalid event cursor");
+        return eventCatalog;
+      }
+      if (request.params.name !== EVENT_NAME) throw new EventError(-32011, "Event not found", { kind: "event" });
+      const object = env.ENVIRONMENTS.getByName(request.params.arguments.environmentId);
+      const snapshot = await object.readEnvironment(owner);
+      if (!snapshot) throw new EventError(-32012, "Environment not found or not owned");
+      if (request.method === "events/unsubscribe") { await object.unsubscribeEvents(owner, request.params); return {}; }
+      return object.subscribeEvents(owner, grantIdentity.parse(props.mcpGrant), request.params);
+    } },
     async tools() {
       executionPrincipal(await authorize(), ENVIRONMENT_SCOPE);
       return { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: environmentTools() };

@@ -34,6 +34,19 @@ Environment 及其操作按 Principal 检查所有权；ID 和 Resource URI 不�
 
 输出 Resource 只交付有界用户可见文本，不转发 reasoning、原生 RPC 或 metadata。命令输出和 Agent 回复是用户数据，不能保证任意文本绝不包含秘密；平台不得主动写入凭据。关闭环境退出 live discovery，已知结果保留七天，到期后读取拒绝且不能重新执行。
 
+## MCP Events 出站通知
+
+Events 与工具共用认证和 `environments:use`，订阅只属于一个 Principal 的一个 Environment。
+后台仅保存 provider 的 grant identity，不保存短期 Bearer。每次投递用 provider 公开 API
+复核 grant/client、scope 和到期，并检查结果保留边界。OAuth KV 具有最终一致性，不能承诺即时撤销；
+取消后的延迟验证或旧投递响应不能恢复订阅，已经发出的 HTTP 请求不能撤回。
+
+callback 和签名 secret 只保存在私有 Environment 状态中，不进入 MCP 结果或日志。正式 Worker
+不增加公网投递路由；私有 Node Container 每次检查全部 DNS 回答，固定已验证公网 IP，并用
+原 hostname 验证 TLS，拒绝私网、保留地址和重定向。验证 challenge 与实际事件使用相同出站规则。
+Standard Webhooks 签名覆盖实际发送字节；刷新密钥后在一分钟内双签。通知只含 ID、revision 和
+生命周期状态，不含用户正文、输出或连接凭证。订阅和待投递队列有界，不建立历史事件数据库。
+
 ## 保留的一次性任务
 
 Task claim 验证 OIDC 签名、issuer、canonical audience、repository、workflow/ref、受保护分支、GitHub-hosted runner、dispatch event、actor 和 run/attempt。一个 Task 最多释放 prompt 给一个已接纳执行。取消先于领取时，后到 claim 不得释放 prompt。

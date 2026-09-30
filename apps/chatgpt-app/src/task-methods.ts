@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/ext-tasks/core/v2';
 import { z } from 'zod';
 import { TaskError } from '../../../shared/task-errors.ts';
+import { eventRequestSchema, EventError, type EventAuthority } from './mcp-events.ts';
 
 const requestSchema = z.discriminatedUnion('method', [
   GetTaskRequestV2Schema, UpdateTaskRequestV2Schema, CancelTaskRequestV2Schema,
@@ -40,6 +41,7 @@ export interface TaskAuthority {
   observeResources(uris: readonly string[], signal: AbortSignal): Promise<ReadonlyMap<string, AsyncIterable<void>>>;
   // Environment sets this. Other authorities keep the pre-effect Tasks gate.
   readonly ordinaryToolCalls?: boolean;
+  readonly events?: EventAuthority;
 }
 const listenSchema = z.intersection(z.object({ jsonrpc: z.literal('2.0'), id: RequestIdV2Schema,
   method: z.literal('subscriptions/listen'),
@@ -79,7 +81,7 @@ const pingSchema = z.intersection(z.object({ jsonrpc: z.literal('2.0'), id: Requ
     if (result.issues) { ctx.addIssue({ code: 'custom', message: 'Invalid ping request' }); return z.NEVER; }
     return result.value;
   }));
-const extensionRequestSchema = z.union([requestSchema, listenSchema, callSchema, listSchema, resourceListSchema, resourceReadSchema, discoverySchema, pingSchema]);
+const extensionRequestSchema = z.union([requestSchema, listenSchema, callSchema, listSchema, resourceListSchema, resourceReadSchema, discoverySchema, pingSchema, eventRequestSchema]);
 const protocol = '2026-07-28';
 
 // Mcp-Name uses UTF-8 Base64 only when its sentinel is present.
@@ -116,22 +118,23 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
     });
   }
   if (route.messageKind !== 'request') return new Response(null, { status: 202 });
-  if (!['server/discover', 'ping', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'tasks/get', 'tasks/update', 'tasks/cancel', 'subscriptions/listen'].includes(route.message.method)) {
+  if (!['server/discover', 'ping', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'tasks/get', 'tasks/update', 'tasks/cancel', 'subscriptions/listen',
+    ...(authority.events ? ['events/list', 'events/subscribe', 'events/unsubscribe'] : [])].includes(route.message.method)) {
     return error(404, -32601, 'Unknown Task method');
   }
   const parsed = extensionRequestSchema.safeParse(route.message);
   if (!parsed.success) return error(400, -32602, 'Invalid Task request');
   if (request.headers.get('mcp-protocol-version') !== protocol
     || request.headers.get('mcp-method') !== parsed.data.method
-    || (parsed.data.method !== 'server/discover' && parsed.data.method !== 'ping' && parsed.data.method !== 'subscriptions/listen' && parsed.data.method !== 'tools/list' && parsed.data.method !== 'resources/list'
-      && decodeName(request.headers.get('mcp-name')) !== (parsed.data.method === 'tools/call'
+    || (parsed.data.method !== 'server/discover' && parsed.data.method !== 'ping' && parsed.data.method !== 'subscriptions/listen' && parsed.data.method !== 'tools/list' && parsed.data.method !== 'resources/list' && parsed.data.method !== 'events/list'
+      && decodeName(request.headers.get('mcp-name')) !== (parsed.data.method === 'tools/call' || parsed.data.method === 'events/subscribe' || parsed.data.method === 'events/unsubscribe'
         ? parsed.data.params.name : parsed.data.method === 'resources/read' ? parsed.data.params.uri : parsed.data.params.taskId))) {
     return error(400, -32020, 'MCP header mismatch');
   }
   const resourceOnly = parsed.data.method === 'subscriptions/listen' && !parsed.data.params.notifications.taskIds?.length;
   // Declared capability selects the contract before effects. There is no second attempt.
   const ordinaryToolCall = parsed.data.method === 'tools/call' && authority.ordinaryToolCalls === true;
-  if (!resourceOnly && !ordinaryToolCall && !['server/discover', 'ping', 'tools/list', 'resources/list', 'resources/read'].includes(parsed.data.method) && !hasTaskClientCapabilityV2(route.message.params)) {
+  if (!resourceOnly && !ordinaryToolCall && !['server/discover', 'ping', 'tools/list', 'resources/list', 'resources/read', 'events/list', 'events/subscribe', 'events/unsubscribe'].includes(parsed.data.method) && !hasTaskClientCapabilityV2(route.message.params)) {
     return error(400, ProtocolErrorCode.MissingRequiredClientCapability, 'Tasks capability required', {
       requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } },
     });
@@ -168,11 +171,18 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
           _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'harness-x-harness', version: '2.0.0' } },
         });
         if (result.issues) throw new Error('Invalid discovery result');
-        await transport.send({ jsonrpc: '2.0', id: input.id, result: result.value });
+        // SDK 2.0 strips unknown draft capabilities. Extend only this validated
+        // projection, not the SDK's core parser or transport.
+        await transport.send({ jsonrpc: '2.0', id: input.id, result: { ...result.value,
+          capabilities: { ...result.value.capabilities, ...(authority.events ? { events: {} } : {}) } } });
         return;
       }
       if (input.method === 'ping') {
         await transport.send({ jsonrpc: '2.0', id: input.id, result: { resultType: 'complete' } });
+        return;
+      }
+      if (input.method === 'events/list' || input.method === 'events/subscribe' || input.method === 'events/unsubscribe') {
+        await transport.send({ jsonrpc: '2.0', id: input.id, result: await authority.events!.handle(input) });
         return;
       }
       if (input.method === 'tools/list') {
@@ -236,7 +246,9 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
       const notFound = failure instanceof TaskError && failure.code === 'TASK_NOT_FOUND';
       const resourceMissing = failure instanceof TaskError && failure.code === 'RESOURCE_NOT_FOUND';
       await transport.send({ jsonrpc: '2.0', id: input.id,
-        error: notFound ? { code: -32602, message: 'Task not found or no longer available' }
+        error: failure instanceof EventError ? { code: failure.code, message: failure.message,
+            ...(failure.data ? { data: failure.data } : {}) }
+          : notFound ? { code: -32602, message: 'Task not found or no longer available' }
           : resourceMissing ? { code: -32602, message: 'Resource not found or no longer available' }
           : { code: -32603, message: 'Task request failed' } });
     });

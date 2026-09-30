@@ -87,7 +87,7 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(discovered.result?.ttlMs, 0);
   assert.equal(discovered.result?.cacheScope, "private");
   assert.deepEqual(discovered.result?.supportedVersions, ["2026-07-28"]);
-  assert.deepEqual(discovered.result?.capabilities, { tools: {}, resources: { subscribe: true },
+  assert.deepEqual(discovered.result?.capabilities, { tools: {}, events: {}, resources: { subscribe: true },
     extensions: { "io.modelcontextprotocol/tasks": {} } });
   assert.equal((await rpc("ping", {}, false)).result?.resultType, "complete");
   assert.equal(reservations, 0);
