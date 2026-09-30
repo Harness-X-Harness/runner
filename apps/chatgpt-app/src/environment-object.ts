@@ -17,7 +17,7 @@ import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { oauthOptions } from "./oauth-options.ts";
 import { eventGrantAllowed } from "./event-grants.ts";
 import { EnvironmentEvents } from "./environment-events.ts";
-import { EventError, type GrantIdentity, type SubscribeInput, type UnsubscribeInput } from "./mcp-events.ts";
+import { EventError, eventRpc, type EventRpcReply, type GrantIdentity, type SubscribeInput, type UnsubscribeInput } from "./mcp-events.ts";
 import type { EventDeliveryContainer } from "./event-delivery.ts";
 
 type Bindings = {
@@ -99,17 +99,22 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     });
   }
 
-  async subscribeEvents(ownerId: string, grant: GrantIdentity, input: SubscribeInput): Promise<Record<string, unknown>> {
-    const snapshot = await this.readEnvironment(ownerId);
-    if (!snapshot || snapshot.environmentId !== input.arguments.environmentId || grant.userId !== `github-${ownerId}`) {
-      throw new EventError(-32012, "Environment not found or not owned");
-    }
-    return this.events.subscribe(ownerId, grant, input, { kind: "environment", status: snapshot.status });
+  async subscribeEvents(ownerId: string, grant: GrantIdentity, input: SubscribeInput): Promise<EventRpcReply> {
+    return eventRpc(async () => {
+      const snapshot = await this.readEnvironment(ownerId);
+      if (!snapshot || snapshot.environmentId !== input.arguments.environmentId || grant.userId !== `github-${ownerId}`) {
+        throw new EventError(-32012, "Environment not found or not owned");
+      }
+      return this.events.subscribe(ownerId, grant, input, { kind: "environment", status: snapshot.status });
+    });
   }
-  async unsubscribeEvents(ownerId: string, input: UnsubscribeInput): Promise<void> {
-    const creation = await this.findRetainedCreation(ownerId);
-    if (!creation || creation.environmentId !== input.arguments.environmentId) throw new EventError(-32012, "Environment not found or not owned");
-    await this.events.unsubscribe(ownerId, input);
+  async unsubscribeEvents(ownerId: string, input: UnsubscribeInput): Promise<EventRpcReply> {
+    return eventRpc(async () => {
+      const creation = await this.findRetainedCreation(ownerId);
+      if (!creation || creation.environmentId !== input.arguments.environmentId) throw new EventError(-32012, "Environment not found or not owned");
+      await this.events.unsubscribe(ownerId, input);
+      return {};
+    });
   }
 
   private async scheduleAlarm(at: number): Promise<void> {

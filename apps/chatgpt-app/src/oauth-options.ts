@@ -4,10 +4,14 @@ import { OAUTH_SCOPES } from "./oauth-scopes.ts";
 import { authorizationServerIssuer, canonicalMcpResource } from "./oauth-resource.ts";
 
 type Environment = Parameters<typeof githubGrantTokenExchange>[0] & { TASK_CONTROL_PLANE_URL: string };
+const helperOnlyHandler = { fetch(): never { throw new Error("OAUTH_HELPER_ONLY"); } };
 /** One configuration for request handling and the provider's public background API. */
 export function oauthOptions<Env extends Environment>(env: Env): OAuthProviderOptions<Env> {
   return {
-    apiRoute: "/mcp", defaultHandler: {}, authorizeEndpoint: "/authorize", tokenEndpoint: "/oauth/token",
+    // Public background helpers construct a provider too. They require valid
+    // route handlers, although they never fetch them; index.ts overrides both.
+    apiRoute: "/mcp", apiHandler: helperOnlyHandler, defaultHandler: helperOnlyHandler,
+    authorizeEndpoint: "/authorize", tokenEndpoint: "/oauth/token",
     clientRegistrationEndpoint: "/oauth/register", scopesSupported: [...OAUTH_SCOPES],
     resourceMetadata: { resource: canonicalMcpResource(env.TASK_CONTROL_PLANE_URL),
       authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],

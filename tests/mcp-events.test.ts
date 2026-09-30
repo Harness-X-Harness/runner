@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { environmentTaskAuthority } from "../apps/chatgpt-app/src/environment-task-authority.ts";
 import { serveTaskRequest } from "../apps/chatgpt-app/src/task-methods.ts";
-import { EVENT_NAME, EventError } from "../apps/chatgpt-app/src/mcp-events.ts";
+import { EVENT_NAME } from "../apps/chatgpt-app/src/mcp-events.ts";
 import { eventGrantAllowed } from "../apps/chatgpt-app/src/event-grants.ts";
 
 test("Events use the authenticated modern endpoint without Tasks and validate ownership before verification", async () => {
@@ -14,8 +14,8 @@ test("Events use the authenticated modern endpoint without Tasks and validate ow
       return { async readEnvironment(principal: string) { return principal === "1" ? { environmentId, status: "opening" } : null; },
         async subscribeEvents(principal: string, grant: unknown) {
           assert.equal(principal, "1"); assert.deepEqual(grant, { userId: "github-1", grantId: "grant", clientId: "client" });
-          subscriptions++; throw new EventError(-32015, "Callback verification failed", { reason: "challenge_failed" });
-        }, async unsubscribeEvents() { unsubscriptions++; } };
+          subscriptions++; return { ok: false, error: { code: -32015, message: "Callback verification failed", data: { reason: "challenge_failed" } } };
+        }, async unsubscribeEvents() { unsubscriptions++; return { ok: true, value: {} }; } };
     } },
   };
   const authority = environmentTaskAuthority(env as never, async () => ({ githubUserId: owner, oauthScopes: ["environments:use"],
