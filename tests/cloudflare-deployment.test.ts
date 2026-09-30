@@ -39,7 +39,7 @@ test("control plane uses one fixed Custom Domain without workers.dev", async () 
     tag: "v6", deleted_classes: ["EnvironmentObject"],
   });
   assert.deepEqual(configuration.migrations.at(-1), {
-    tag: "v8", deleted_classes: ["TaskRuntimeObject"],
+    tag: "v9", new_sqlite_classes: ["EventDeliveryContainer"],
   });
   assert.equal(configuration.durable_objects.bindings.find(({ name }) => name === "TASKS"), undefined);
   assert.equal(
@@ -49,6 +49,6 @@ test("control plane uses one fixed Custom Domain without workers.dev", async () 
   assert.equal(configuration.vars.GITHUB_WORKFLOW_ID, undefined);
   assert.equal(configuration.vars.LEGACY_DRAIN_MODE, undefined);
   assert.deepEqual(configuration.durable_objects.bindings.map(({name}) => name).sort(),
-    ["AUTHORIZATION_STATES", "ENVIRONMENTS", "ENVIRONMENT_ADMISSION"]);
+    ["AUTHORIZATION_STATES", "ENVIRONMENTS", "ENVIRONMENT_ADMISSION", "EVENT_DELIVERY"]);
   assert.equal(configuration.vars.ENVIRONMENT_STARTUP_MS, 600000);
 });

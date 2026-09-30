@@ -26,6 +26,7 @@ import authorizationStyles from "@radix-ui/themes/styles.css";
 import { AUTH_STYLES_PATH } from "./authorization-view.ts";
 
 export { AuthorizationStateObject };
+export { EventDeliveryContainer } from "./event-delivery.ts";
 
 type WorkerEnvironment = AuthorizationEnvironment & Parameters<typeof internalEnvironmentFetch>[1] &
   Parameters<typeof handleEnvironmentTaskRequest>[1] &

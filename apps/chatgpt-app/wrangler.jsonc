@@ -30,6 +30,10 @@
   "durable_objects": {
     "bindings": [
       {
+        "name": "EVENT_DELIVERY",
+        "class_name": "EventDeliveryContainer"
+      },
+      {
         "name": "AUTHORIZATION_STATES",
         "class_name": "AuthorizationStateObject"
       },
@@ -87,8 +91,18 @@
     {
       "tag": "v8",
       "deleted_classes": ["TaskRuntimeObject"]
+    },
+    {
+      "tag": "v9",
+      "new_sqlite_classes": ["EventDeliveryContainer"]
     }
   ],
+  "containers": [{
+    "class_name": "EventDeliveryContainer",
+    "image": "../event-delivery/Dockerfile",
+    "instance_type": "lite",
+    "max_instances": 1
+  }],
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",

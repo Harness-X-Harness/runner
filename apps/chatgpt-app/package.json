@@ -9,6 +9,7 @@
     "deploy": "node deploy.ts"
   },
   "dependencies": {
+    "@cloudflare/containers": "0.3.7",
     "@cloudflare/workers-oauth-provider": "0.10.3",
     "@modelcontextprotocol/ext-tasks": "0.1.0",
     "@modelcontextprotocol/server": "2.0.0",

@@ -36,6 +36,7 @@ With Node.js 24 or newer:
 
 ```bash
 npm ci --prefix apps/chatgpt-app
+npm ci --prefix apps/event-delivery
 npm run deploy --prefix apps/chatgpt-app -- --dry-run
 ```
 
@@ -51,6 +52,16 @@ logs and disabled traces. If verification fails, code may already be deployed:
 report that partial result, repair/read back the setting, and do not blindly
 redeploy. Dry-run performs no settings writes. The owning implementation is
 [deploy.ts](../apps/chatgpt-app/deploy.ts).
+
+The private [event-delivery Container](../apps/event-delivery/) also requires a
+running Docker daemon and the account-scoped Containers and Cloudchamber write
+permissions. A real deployment builds and publishes its pinned Linux/amd64
+image. It has no public route and does not change the MCP endpoint. Its single
+small instance sleeps after 30 idle seconds; cold startup can delay a delivery.
+Containers require Workers Paid and incur resource usage charges; see
+[Cloudflare pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+Worker deployment success does not prove that container provisioning or outbound
+TLS is ready. Verify the actual changed-boundary path before claiming acceptance.
 
 ## Private acceptance credentials
 
@@ -86,9 +97,11 @@ only because a new version was deployed.
 ```bash
 npm ci --prefix apps/chatgpt-app
 npm ci --prefix .github/actions/agent-runtime
+npm ci --prefix apps/event-delivery
 node --test tests/*.test.ts
 apps/chatgpt-app/node_modules/.bin/tsc --noEmit -p apps/chatgpt-app
 .github/actions/agent-runtime/node_modules/.bin/tsc --noEmit -p .github/actions/agent-runtime
+apps/chatgpt-app/node_modules/.bin/tsc --noEmit -p apps/event-delivery
 actionlint
 git diff --check
 ```
