@@ -15,7 +15,8 @@ The protocol is MCP 2026-07-28. A client that declares Tasks receives Task
 handles: subscribe to changes, answer input with `tasks/update`, and cancel
 with `tasks/cancel`. A client that does not declare Tasks receives an ordinary
 acceptance receipt and current status. Call `inspect_environment` when a person
-asks; do not poll. Use `update_operation` to answer a question or cancel one
+asks; do not poll. Events-capable clients can subscribe to `environment.updated`
+for signed lifecycle notifications without Tasks capability. Use `update_operation` to answer a question or cancel one
 operation without closing the workspace. That contract has no subscription,
 card, or automatic continuation. `closing` is not `closed`, and
 waiting for input is not success. The declared capability is selected before

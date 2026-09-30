@@ -1,21 +1,17 @@
 import {
-  OAuthError,
   OAuthProvider,
 } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { githubGrantTokenExchange } from "./github-user-auth.ts";
+import { oauthOptions } from "./oauth-options.ts";
 import {
   authorizePage,
   completeAuthorizationCallback,
   submitAuthorizationDecision,
 } from "./authorization.ts";
 import type { AuthorizationEnvironment } from "./authorization.ts";
-import { OAUTH_SCOPES } from "./oauth-scopes.ts";
 import { handleEnvironmentTaskRequest } from "./environment-task-authority.ts";
 import {
-  authorizationServerIssuer,
-  canonicalMcpResource,
   requireCanonicalResourceParameter,
 } from "./oauth-resource.ts";
 import { AuthorizationStateObject } from "./authorization-state-object.ts";
@@ -40,41 +36,17 @@ export class McpApi extends WorkerEntrypoint<WorkerEnvironment, Record<string, u
 
 export default {
   async fetch(request: Request, env: WorkerEnvironment, ctx: ExecutionContext): Promise<Response> {
-    const canonicalResource = canonicalMcpResource(env.TASK_CONTROL_PLANE_URL);
     const resourceError = await requireCanonicalResourceParameter(request);
     if (resourceError) return resourceError;
-    return createOAuthProvider(env, canonicalResource).fetch(request, env, ctx);
+    return createOAuthProvider(env).fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<WorkerEnvironment>;
 
-function createOAuthProvider(env: WorkerEnvironment, canonicalResource: string): OAuthProvider<WorkerEnvironment> {
+function createOAuthProvider(env: WorkerEnvironment): OAuthProvider<WorkerEnvironment> {
   return new OAuthProvider<WorkerEnvironment>({
-    apiRoute: "/mcp",
+    ...oauthOptions(env),
     apiHandler: McpApi,
     defaultHandler: { fetch: defaultFetch },
-    authorizeEndpoint: "/authorize",
-    tokenEndpoint: "/oauth/token",
-    clientRegistrationEndpoint: "/oauth/register",
-    scopesSupported: [...OAUTH_SCOPES],
-    resourceMetadata: {
-      resource: canonicalResource,
-      authorization_servers: [authorizationServerIssuer(env.TASK_CONTROL_PLANE_URL)],
-      scopes_supported: [...OAUTH_SCOPES],
-      bearer_methods_supported: ["header"],
-      resource_name: "Harness X Harness",
-    },
-    allowImplicitFlow: false,
-    allowPlainPKCE: false,
-    clientIdMetadataDocumentEnabled: true,
-    tokenExchangeCallback: async (options) => {
-      try {
-        return await githubGrantTokenExchange(env, options);
-      } catch {
-        throw new OAuthError("invalid_grant", {
-          description: "GitHub authorization expired or was revoked",
-        });
-      }
-    },
   });
 }
 

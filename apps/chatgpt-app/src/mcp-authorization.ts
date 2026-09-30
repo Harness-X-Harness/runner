@@ -21,6 +21,7 @@ export function mcpAuthorization(request: Request, env: Environment): () => Prom
     if (!parsed.success || !/^[1-9]\d{0,19}$/.test(String(parsed.data.githubUserId)) ||
         token.userId !== `github-${parsed.data.githubUserId}`) throw new TaskError("TASK_AUTH_REQUIRED");
     // Downscoped access tokens must not inherit broader scopes from encrypted props.
-    return { ...parsed.data, oauthScopes: token.scope };
+    return { ...parsed.data, oauthScopes: token.scope,
+      mcpGrant: { userId: token.userId, grantId: token.grantId, clientId: token.grant.clientId } };
   };
 }

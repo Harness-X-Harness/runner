@@ -79,7 +79,7 @@ not proof that the work finished.
    status `closed` confirms cleanup.
 
 Call `inspect_environment` when a person asks for the current state. Do not
-poll. This contract has no subscription, automatic model continuation or card.
+poll. Without MCP Events support, this contract has no automatic notification or model continuation.
 Waiting for input is visible and answerable, but it is not success.
 
 Use `list_environments` with `{}` to find live owned Environments without
@@ -87,6 +87,50 @@ creating work. It includes opening, ready, unavailable and closing state, and
 omits closed Environments. A failed snapshot read is reported as a failure,
 not an empty list. Known retained resources remain readable after closure.
 Listing and inspecting do not renew either deadline.
+
+### Events client
+
+Clients that support the MCP Events webhook draft can subscribe independently
+of Tasks. `server/discover` advertises `events: {}`; `events/list` describes
+`environment.updated`. Use `events/subscribe` with `arguments.environmentId`,
+`delivery: {mode: "webhook", url, secret}`, and `cursor: null` on the same
+authenticated `/mcp` endpoint. `secret` is a Standard Webhooks `whsec_` key
+containing 24–64 decoded bytes. `Mcp-Name` matches the event name for subscribe
+and unsubscribe.
+
+Harness checks ownership and verifies the HTTPS callback with a fresh signed
+challenge before activation. The ID is deterministic for the Principal,
+callback URL, event name and canonical arguments. Repeated subscription calls
+refresh that ID. The default lifetime is one hour, with a one-minute minimum
+and 24-hour maximum; `ttlMs: null` still receives a finite lifetime. Refresh
+before the returned `refreshBefore`. Unsubscribe uses the same name, arguments
+and callback URL, without a signing secret, and returns `{}` idempotently.
+
+Notifications contain only Environment ID, revision, kind and state, plus an
+operation ID for input-required or terminal operations. They report initial
+state, first readiness, confirmed closure, and operation input-required,
+completed, failed or cancelled changes. They contain no prompt, question body,
+output, credential or T3 pairing link. Read `inspect_environment` for current
+details when a notification arrives. Completed means native execution finished,
+not that the business objective was certified.
+
+Subscription state and the outbox persist in the existing Environment object.
+The source transition and notification commit together. There are at most eight
+subscriptions and 256 pending deliveries per Environment. Overflow drops the
+oldest notification, not business state. Events are non-replayable (`cursor:
+null`); authoritative results remain readable under the normal retention rule.
+Delivery is best effort, can be duplicated or reordered, and makes at most five
+attempts with exponential backoff. `410`, `413` and permanent client errors are
+not retried. Event IDs and occurrence times stay fixed across attempts;
+signing time and signature are fresh. Grant expiry, observed revocation,
+subscription expiry or unsubscribe stops later delivery. OAuth KV revocation
+visibility is eventual. An already-started network request cannot be recalled.
+
+ChatGPT supports this webhook subset. A `2xx` proves callback receipt, not
+that ChatGPT followed the user's instructions. Rescan the plugin after an event
+catalog change and verify actual conversation continuation separately. No
+polling, Events SSE, `gap` or `terminated` notifications are implemented.
+See [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-events).
 
 | Tool | Purpose |
 | --- | --- |

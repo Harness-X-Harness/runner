@@ -13,6 +13,12 @@ import { emptyOutput, ENVIRONMENT_OUTPUT_BYTES, type OutputSnapshot } from "../.
 import { githubRunInput, githubRunCompletion, exactCompletion, type GithubRunInput, type GithubRunCompletion } from "../../../.github/actions/agent-runtime/github-run-contract.ts";
 import { agentModelState, type AgentModelState } from "../../../.github/actions/agent-runtime/agent-model.ts";
 import type { ReconnectDiagnostic, ReconnectFailureCategory } from "../../../shared/environment-reconnect.ts";
+import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
+import { oauthOptions } from "./oauth-options.ts";
+import { eventGrantAllowed } from "./event-grants.ts";
+import { EnvironmentEvents } from "./environment-events.ts";
+import { EventError, type GrantIdentity, type SubscribeInput, type UnsubscribeInput } from "./mcp-events.ts";
+import type { EventDeliveryContainer } from "./event-delivery.ts";
 
 type Bindings = {
   ENVIRONMENTS: DurableObjectNamespace<EnvironmentObject>;
@@ -21,6 +27,11 @@ type Bindings = {
   GITHUB_RUNNER_REPOSITORY: string;
   GITHUB_RUNNER_REF?: string;
   GITHUB_CI_EVENT_REPOSITORIES?: string;
+  EVENT_DELIVERY: DurableObjectNamespace<EventDeliveryContainer>;
+  OAUTH_KV: KVNamespace;
+  TASK_CONTROL_PLANE_URL: string;
+  GITHUB_APP_CLIENT_ID: string;
+  GITHUB_APP_CLIENT_SECRET: string;
 };
 const executionSchema = z.object({
   ownerId: z.string().regex(/^[1-9]\d{0,19}$/),
@@ -72,12 +83,37 @@ const runtimeMessage = z.discriminatedUnion("type", [
 // RPC methods are internal; HTTP runtime access is gated by the Worker OIDC handler.
 export class EnvironmentObject extends DurableObject<Bindings> {
   private readonly creation: EnvironmentCreation;
+  private readonly events: EnvironmentEvents;
   private readonly operationObservers = new Map<string, Set<() => void>>();
   private readonly outputObservers = new Map<string, Set<() => void>>();
   private readonly environmentObservers = new Set<() => void>();
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env);
     this.creation = new EnvironmentCreation(ctx.storage, env.ENVIRONMENT_STARTUP_MS);
+    this.events = new EnvironmentEvents(ctx.storage, {
+      deliver: input => env.EVENT_DELIVERY.getByName("webhooks").deliver(input),
+      allowed: async grant => {
+        if (!await this.findRetainedCreation(grant.userId.slice("github-".length))) return false;
+        return eventGrantAllowed(getOAuthApi(oauthOptions(env), env), grant);
+      },
+    });
+  }
+
+  async subscribeEvents(ownerId: string, grant: GrantIdentity, input: SubscribeInput): Promise<Record<string, unknown>> {
+    const snapshot = await this.readEnvironment(ownerId);
+    if (!snapshot || snapshot.environmentId !== input.arguments.environmentId || grant.userId !== `github-${ownerId}`) {
+      throw new EventError(-32012, "Environment not found or not owned");
+    }
+    return this.events.subscribe(ownerId, grant, input, { kind: "environment", status: snapshot.status });
+  }
+  async unsubscribeEvents(ownerId: string, input: UnsubscribeInput): Promise<void> {
+    const creation = await this.findRetainedCreation(ownerId);
+    if (!creation || creation.environmentId !== input.arguments.environmentId) throw new EventError(-32012, "Environment not found or not owned");
+    await this.events.unsubscribe(ownerId, input);
+  }
+
+  private async scheduleAlarm(at: number): Promise<void> {
+    await this.ctx.storage.setAlarm(Math.min(at, await this.events.nextAlarm() ?? at));
   }
 
   /** Owner-private projection. Reading does not dispatch, release, or infer stop. */
@@ -187,12 +223,22 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   }
 
   async alarm(): Promise<void> {
+    // Notification I/O must not precede an already-due lifecycle decision.
+    try { await this.lifecycleAlarm(); await this.events.flush(); }
+    finally {
+      const next = await this.events.nextAlarm();
+      const existing = await this.ctx.storage.getAlarm();
+      if (next !== undefined && (existing === null || next < existing)) await this.ctx.storage.setAlarm(next);
+    }
+  }
+
+  private async lifecycleAlarm(): Promise<void> {
     if (await this.ctx.storage.get("environment-capacity-released") === true) {
       await this.ctx.storage.transaction(async () => {
         const expiresAt = await this.ctx.storage.get<number>("environment-results-expires-at");
         if (expiresAt === undefined) throw new Error("ENVIRONMENT_RETENTION_MISSING");
-        if (expiresAt > Date.now()) { await this.ctx.storage.setAlarm(expiresAt); return; }
-        for (const prefix of ["environment-operation:", "environment-output:", "environment-lifecycle:", "environment-ci-wait:"]) {
+        if (expiresAt > Date.now()) { await this.scheduleAlarm(expiresAt); return; }
+        for (const prefix of ["environment-operation:", "environment-output:", "environment-lifecycle:", "environment-ci-wait:", "environment-event-sub:", "environment-event-queue:"]) {
           for (;;) {
             const records = await this.ctx.storage.list({ prefix, limit: 128 });
             if (!records.size) break;
@@ -200,6 +246,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           }
         }
         await this.ctx.storage.delete("environment-agent-state");
+        await this.ctx.storage.delete(["environment-event-latest", "environment-event-revision"]);
         await this.ctx.storage.deleteAlarm();
       });
       for (const observers of [...this.operationObservers.values(), ...this.outputObservers.values()]) {
@@ -212,7 +259,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       if (await this.ctx.storage.get("environment-capacity-released") === true) return false;
       if (await this.ctx.storage.get("environment-close-requested") === true) return true;
       const deadline = await this.nextDeadline();
-      if (deadline > Date.now()) { await this.ctx.storage.setAlarm(deadline); return false; }
+      if (deadline > Date.now()) { await this.scheduleAlarm(deadline); return false; }
       await this.ctx.storage.put("environment-close-requested", true);
       return true;
     });
@@ -304,12 +351,15 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         if (idle === undefined && await this.ctx.storage.get("environment-active-operation") === undefined) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
+        const previouslyReady = await this.ctx.storage.get("environment-ready-generation");
         await this.ctx.storage.put("environment-ready-generation", current.generation);
         await this.ctx.storage.delete("environment-reconnect-diagnostic");
         const open = await this.ctx.storage.get<LifecycleReceipt>("environment-lifecycle:open");
         if (open?.status === "working") await this.ctx.storage.put("environment-lifecycle:open",
           { ...open, status: "completed", updatedAt: Date.now() });
-        await this.ctx.storage.setAlarm(await this.nextDeadline());
+        if (previouslyReady === undefined) await this.events.publish((await this.creation.readInternal()).environmentId,
+          { kind: "environment", status: "ready" });
+        await this.scheduleAlarm(await this.nextDeadline());
         return { type: "ready-accepted" };
       }
       if (incoming.type === "agent-state") {
@@ -354,6 +404,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           if (Object.keys(record.inputs ?? {}).length >= 256) return false;
           await this.ctx.storage.put(key, { ...record, updatedAt: Date.now(),
             inputs: { ...record.inputs, [incoming.inputId]: { request: incoming.request } } });
+          await this.events.publish((await this.creation.readInternal()).environmentId,
+            { kind: "operation", operationId: incoming.taskId, status: "input_required" });
         }
         return { type: "input-accepted", taskId: incoming.taskId, inputId: incoming.inputId, generation: current.generation };
       }
@@ -373,9 +425,14 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       if (!await this.storeOutput(incoming.taskId, incoming.output, record.result !== undefined)) return false;
       if (record.result === undefined) {
         await this.ctx.storage.put(key, { ...record, updatedAt: Date.now(), result: incoming.result });
+        const task = environmentTask(incoming.taskId, { ...record, result: incoming.result });
+        if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+          await this.events.publish((await this.creation.readInternal()).environmentId,
+            { kind: "operation", operationId: incoming.taskId, status: task.status });
+        }
         await this.ctx.storage.delete("environment-active-operation");
         await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
-        await this.ctx.storage.setAlarm(await this.nextDeadline());
+        await this.scheduleAlarm(await this.nextDeadline());
       }
       return { type: "result-accepted", generation: current.generation, taskId: incoming.taskId };
     });
@@ -578,7 +635,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const record = { request, runtimeId: current.runtimeId, createdAt: now, updatedAt: now };
       await this.ctx.storage.put({ [key]: record, "environment-active-operation": taskId, "environment-operation-count": count + 1 });
       await this.ctx.storage.delete("environment-idle-deadline");
-      await this.ctx.storage.setAlarm(await this.nextDeadline());
+      await this.scheduleAlarm(await this.nextDeadline());
       return record;
     });
     this.environmentChanged();
@@ -694,7 +751,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           status: "working", createdAt: record.createdAt, updatedAt: record.createdAt,
         });
       }
-      await this.ctx.storage.setAlarm(await this.nextDeadline());
+      await this.scheduleAlarm(await this.nextDeadline());
     });
     if (await this.ctx.storage.get("environment-close-requested") === true) {
       await this.requestClose(record.ownerId);
@@ -785,7 +842,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         }
         await this.ctx.storage.put({ "environment-capacity-released": true, "environment-results-expires-at": expiresAt });
         await this.ctx.storage.delete("environment-reconnect-diagnostic");
-        await this.ctx.storage.setAlarm(expiresAt);
+        await this.events.publish(record.environmentId, { kind: "environment", status: "closed" });
+        await this.scheduleAlarm(expiresAt);
       });
     }
     for (const observers of this.operationObservers.values()) for (const notify of observers) notify();
@@ -835,7 +893,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const stored = await this.ctx.storage.get<number>("environment-runtime-deadline");
       if (stored !== undefined) return stored;
       await this.ctx.storage.put("environment-runtime-deadline", deadline);
-      await this.ctx.storage.setAlarm(await this.nextDeadline());
+      await this.scheduleAlarm(await this.nextDeadline());
       return deadline;
     });
     this.environmentChanged();
@@ -921,6 +979,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         if (operation.result === undefined) {
           await this.ctx.storage.put(key, { ...operation, updatedAt: Date.now(),
             result: { ok: false, code: "ENVIRONMENT_ENDED_OUTCOME_UNKNOWN" } });
+          await this.events.publish(creation.environmentId, { kind: "operation", operationId: taskId, status: "failed" });
         }
         await this.ctx.storage.delete("environment-active-operation");
       }

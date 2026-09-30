@@ -8,7 +8,8 @@ test("subscription authorization rereads token authority and uses token scopes, 
   const valid: TokenSummary<unknown> = { id: "id", grantId: "grant", userId: "github-123",
     createdAt: 1, expiresAt: Date.now() / 1000 + 60, audience: resource, scope: ["environments:use"],
     grant: { clientId: "client", scope: ["environments:use"],
-      props: { githubUserId: "123", oauthScopes: ["obsolete:scope"] } } };
+      props: { githubUserId: "123", oauthScopes: ["obsolete:scope"],
+        mcpGrant: { userId: "FORGED", grantId: "FORGED", clientId: "FORGED" } } } };
   let current: TokenSummary<unknown> | null = valid;
   let reads = 0;
   const env = { TASK_CONTROL_PLANE_URL: "https://runner.example", OAUTH_PROVIDER: {
@@ -18,12 +19,13 @@ test("subscription authorization rereads token authority and uses token scopes, 
   } };
   const authorize = mcpAuthorization(new Request(resource, { headers: { authorization: "Bearer PRIVATE_BEARER" } }), env);
   assert.deepEqual((await authorize()).oauthScopes, ["environments:use"]);
+  assert.deepEqual((await authorize()).mcpGrant, { userId: "github-123", grantId: "grant", clientId: "client" });
   for (const invalid of [null, { ...valid, expiresAt: 1 }, { ...valid, audience: "https://other.example/mcp" },
     { ...valid, userId: "github-456" }]) {
     current = invalid;
     await assert.rejects(authorize());
   }
-  assert.equal(reads, 5);
+  assert.equal(reads, 6);
   current = { ...valid, scope: [] };
   assert.deepEqual((await authorize()).oauthScopes, []);
   const count = reads;

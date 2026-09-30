@@ -81,6 +81,30 @@ Never retain credentials or provider URLs in evidence. After a bounded failure,
 close the exact Environment and verify its run is terminal; do not leave paid
 work running. Data already changed by an Agent is not rolled back by cancellation.
 
+## Events changed-boundary acceptance
+
+Use one Environment, no Agent turns, at most two harmless commands and one close.
+Reuse existing OAuth grants. A controlled public HTTPS receiver must verify
+Standard Webhooks signatures before acknowledging the fresh challenge, and
+store only bounded ID/state evidence privately. It must not accept arbitrary
+destinations or publish callback secrets. Arm the receiver before opening.
+
+Confirm `server/discover` advertises Events and `events/list` describes the
+webhook-only event. Subscribe without Tasks capability to one owned Environment.
+Verify challenge, deterministic refresh ID, initial state, readiness and command
+completion with the exact operation ID. Try one non-owner subscription and
+confirm rejection before callback verification. Unsubscribe, then run the second
+harmless command and confirm its operation event is not delivered. Subscribe
+again, close the exact Environment, receive its closed event, and confirm the
+GitHub run is terminal. Remove only the temporary receiver and subscription.
+
+Controlled implementation tests cover delayed verification, expiry, revoked
+grant, key rotation and late replies. A receiver `2xx` is transport acceptance.
+ChatGPT acceptance is separate: rescan the plugin, ask it to monitor the event
+and state how to respond, then verify the actual subscribed conversation resumes
+without polling. Stop monitoring and confirm delivery stops. Do not claim this
+from an SDK test or a receiver acknowledgment.
+
 ## What this does not prove
 
 This proves only the tested revision, client, executor and bounded path. It does
