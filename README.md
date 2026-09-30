@@ -82,8 +82,10 @@ keys are secrets, not public configuration or Task results.
 
 ## Lifetime and cancellation
 
-Startup is bounded to ten minutes. GitHub bounds each job to sixty minutes;
-installation consumes that budget and the runtime reserves cleanup time.
+Startup is bounded to ten minutes. GitHub bounds each job to six hours;
+installation consumes that budget and the runtime reserves ten minutes for
+cleanup, so the hard Environment deadline is five hours and fifty minutes
+after the job starts.
 An idle Environment closes after fifteen minutes. Input and CI waits still
 consume the hard lifetime. Admission allows one Environment per Principal and
 four globally; this is platform policy, not a measured GitHub quota.
