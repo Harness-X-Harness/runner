@@ -52,7 +52,7 @@ four globally. A repeated idempotency key retains its original admission deadlin
 
 ### Ordinary client
 
-A client that does not declare Tasks calls the same tools. The result is an
+A client using protocol 2026-07-28 that does not declare Tasks calls the same tools. The result is an
 ordinary acceptance receipt and the current status. It is not a Task handle and
 not proof that the work finished.
 
@@ -82,12 +82,19 @@ Call `inspect_environment` when a person asks for the current state. Do not
 poll. This contract has no subscription, automatic model continuation or card.
 Waiting for input is visible and answerable, but it is not success.
 
+Use `list_environments` with `{}` to find live owned Environments without
+creating work. It includes opening, ready, unavailable and closing state, and
+omits closed Environments. A failed snapshot read is reported as a failure,
+not an empty list. Known retained resources remain readable after closure.
+Listing and inspecting do not renew either deadline.
+
 | Tool | Purpose |
 | --- | --- |
 | `open_environment` | Allocate a bounded workspace for Codex or Grok |
 | `agent` | Send another prompt to its native Agent session |
 | `command` | Run argv directly in the same workspace without a model |
 | `inspect_environment` | Read current Environment and operation state once |
+| `list_environments` | Find live owned Environments across clients |
 | `update_operation` | Answer questions or cancel one operation, keeping the Environment |
 | `close_environment` | Stop the exact runtime and confirm cleanup |
 

@@ -33,7 +33,7 @@ function resourceIdentity(uri: unknown) {
   return { uri: parsed, environmentId, taskId };
 }
 
-export async function listEnvironmentResources(env: EnvironmentResources, props: unknown) {
+export async function listOwnedEnvironments(env: EnvironmentResources, props: unknown) {
   const ownerId = executionPrincipal(props, ENVIRONMENT_SCOPE);
   const ids = await env.ENVIRONMENT_ADMISSION.getByName("global").list(ownerId);
   // Membership and lifecycle are separate authorities, not one cross-object snapshot.
@@ -43,7 +43,12 @@ export async function listEnvironmentResources(env: EnvironmentResources, props:
     if (value === null) throw new TaskError("RESOURCE_NOT_FOUND");
     return value;
   });
-  return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const, resources: available.filter(value => value.status !== "closed").map(value => ({
+  return available.filter(value => value.status !== "closed");
+}
+
+export async function listEnvironmentResources(env: EnvironmentResources, props: unknown) {
+  const available = await listOwnedEnvironments(env, props);
+  return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const, resources: available.map(value => ({
     uri: environmentUri(value.environmentId), name: value.environmentId,
     title: `${value.executor} Environment`, mimeType: "application/json",
   })) };
