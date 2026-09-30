@@ -20,4 +20,7 @@ const server = createServer(async (req, res) => {
 });
 server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
+// The Container sends SIGTERM on idle. Node runs as PID 1, so handle it
+// explicitly and finish accepted requests before exiting.
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
 server.listen(8080, "0.0.0.0");
