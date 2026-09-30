@@ -237,6 +237,16 @@ Codex uses its native default-mode user-input feature through `CODEX_CONFIG`;
 provider support must be verified separately from ACP form transport. Neither
 provider input nor a reconnect extends the Environment's original hard deadline.
 
+The reconnect loop reports bounded operator facts for runner identity acquisition,
+bootstrap handshake validation, HTTP handshake rejection, transport closure/error,
+or `unknown` when the local boundary cannot prove a category. It never logs raw
+exceptions, response bodies, credentials or endpoints. Consecutive attempts with
+the same category produce one log until the category changes or a connection
+succeeds. Retry cadence, the attempt timeout, existing protocol rejection behavior
+and the original Environment signal/deadline remain unchanged. Operator facts do
+not grant GitHub cancellation authority. Owner inspection shows only the current
+server-observed socket diagnostic described in [admission](environment-admission.md).
+
 Run `node --test tests/command.test.ts`. `formal/CommandCompletion.tla` checks the
 focused safety obligation that return requires observed process exit and stream
 closure. The faulty configuration returns on stop intent and must violate that

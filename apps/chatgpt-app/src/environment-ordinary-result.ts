@@ -49,6 +49,7 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
       expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
       executor: view.environment.executor,
       agent: view.tool === "inspect_environment" ? view.environment.agent : undefined,
+      reconnectDiagnostic: view.tool === "inspect_environment" ? view.environment.reconnectDiagnostic : undefined,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,
       activeOperationStatus: view.activeOperation?.status
         ?? (view.operation && view.environment.activeTaskId === view.operation.taskId ? view.operation.status : undefined),
@@ -122,6 +123,10 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   const reason = environment.reason ? ` (${environment.reason})` : "";
   const parts = [`Ordinary result for ${view.tool}.`,
     `Environment ${environment.environmentId} is ${environment.status}${reason}.`];
+  if (view.tool === "inspect_environment" && environment.reconnectDiagnostic) {
+    const diagnostic = environment.reconnectDiagnostic;
+    parts.push(`Current reconnect observation: ${diagnostic.category}, observedAt ${diagnostic.observedAt}. This observation is not proof of stopped execution.`);
+  }
   if (view.dispatch) parts.push(`Dispatch is ${view.dispatch}.`);
   if (view.operation) {
     parts.push(`Operation ${view.operation.taskId} is ${view.operation.status}.`);

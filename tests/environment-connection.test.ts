@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { once } from "node:events";
 import { createRequire } from "node:module";
-import { connectEnvironment } from "../.github/actions/agent-runtime/environment-connection.ts";
+import { connectEnvironment, RuntimeConnectionError } from "../.github/actions/agent-runtime/environment-connection.ts";
 import { serveEnvironmentConnection, serveEnvironmentConnections } from "../.github/actions/agent-runtime/environment-channel.ts";
 import { EnvironmentRuntime } from "../.github/actions/agent-runtime/environment-runtime.ts";
 import { EnvironmentOperations } from "../.github/actions/agent-runtime/environment-operations.ts";
@@ -15,9 +15,126 @@ import { fileURLToPath } from "node:url";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ReconnectDiagnostic } from "../shared/environment-reconnect.ts";
 
 const { WebSocketServer }: typeof import("../.github/actions/agent-runtime/node_modules/@types/ws/index.d.ts") =
   createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url))("ws");
+
+test("identity acquisition failure carries a safe connection category without upstream details", async () => {
+  await assert.rejects(connectEnvironment(new URL("ws://127.0.0.1:1/connect"),
+    "00000000-0000-4000-8000-000000000001", async () => {
+      throw new Error("PRIVATE_TOKEN https://private.example/provider");
+    }, AbortSignal.timeout(3000)), error => {
+    assert.ok(error instanceof RuntimeConnectionError);
+    assert.equal(error.category, "runner_identity");
+    assert.doesNotMatch(String(error), /PRIVATE|private.example/);
+    return true;
+  });
+});
+
+test("HTTP refusal and invalid bootstrap frames have distinct safe handshake facts", async t => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0,
+    verifyClient(info, done) { done(info.req.url !== "/denied", 403, "PRIVATE_HTTP_RESPONSE"); },
+  });
+  t.after(async () => {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  server.on("connection", socket => socket.send("PRIVATE_INVALID_BOOTSTRAP"));
+  for (const [path, category] of [["denied", "handshake_rejected"], ["malformed", "handshake"]]) {
+    await assert.rejects(connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/${path}`),
+      "00000000-0000-4000-8000-000000000001", async () => "PRIVATE_TOKEN", AbortSignal.timeout(3000)), error => {
+      assert.ok(error instanceof RuntimeConnectionError);
+      assert.equal(error.category, category);
+      assert.doesNotMatch(String(error), /PRIVATE/);
+      return true;
+    });
+  }
+});
+
+test("a refused local transport is distinct from HTTP handshake rejection", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  await assert.rejects(connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+    "00000000-0000-4000-8000-000000000001", async () => "PRIVATE_TOKEN", AbortSignal.timeout(3000)), error => {
+    assert.ok(error instanceof RuntimeConnectionError);
+    assert.equal(error.category, "transport_failure");
+    assert.doesNotMatch(String(error), /PRIVATE|127.0.0.1/);
+    return true;
+  });
+});
+
+test("failed attempts emit bounded facts and later reconnect without closing the Environment", { timeout: 8000 }, async t => {
+  const controller = new AbortController();
+  const unexpected = async (): Promise<never> => { throw new Error("unexpected work"); };
+  const environment: EnvironmentPort = { signal: controller.signal, inputs: new EnvironmentInput(),
+    ciWaits: new EnvironmentCiWaits(), output: new EnvironmentOutput(),
+    close: async () => { controller.abort(); }, cancel: unexpected, command: unexpected, agent: unexpected, execute: unexpected };
+  const deadline = Date.now() + 7000;
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(async () => {
+    await environment.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  let generation = 0;
+  server.on("connection", socket => {
+    const current = ++generation;
+    socket.send(JSON.stringify({ type: "connected", generation: current, deadline }));
+    socket.on("message", () => {
+      assert.equal(controller.signal.aborted, false);
+      socket.send(JSON.stringify({ type: "ready-accepted" }));
+      if (current === 1) socket.close(1000);
+      else socket.send(JSON.stringify({ type: "close", generation: current }));
+    });
+  });
+  let attempts = 0;
+  const facts: ReconnectDiagnostic[] = [];
+  await serveEnvironmentConnections(environment, deadline, signal => {
+    attempts++;
+    if (attempts === 1) return Promise.reject(new RuntimeConnectionError("runner_identity"));
+    if (attempts === 2) return Promise.reject(new Error("PRIVATE_TOKEN https://private.example/provider"));
+    return connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+      "00000000-0000-4000-8000-000000000001", async () => "PRIVATE_TOKEN", signal);
+  }, fact => { facts.push(fact); throw new Error("Observer must not control lifecycle"); });
+  assert.equal(attempts, 4);
+  assert.deepEqual(facts.map(fact => fact.category), ["runner_identity", "unknown", "transport_closed"]);
+  assert.ok(facts.every(fact => Number.isSafeInteger(fact.observedAt)));
+  assert.doesNotMatch(JSON.stringify(facts), /PRIVATE|private.example/);
+});
+
+test("repeated reconnect failures coalesce operator logs and end at the original hard deadline", { timeout: 4000 }, async t => {
+  const controller = new AbortController();
+  const unexpected = async (): Promise<never> => { throw new Error("unexpected work"); };
+  const environment: EnvironmentPort = { signal: controller.signal, inputs: new EnvironmentInput(),
+    ciWaits: new EnvironmentCiWaits(), output: new EnvironmentOutput(), close: async () => { controller.abort(); },
+    cancel: unexpected, command: unexpected, agent: unexpected, execute: unexpected };
+  const logs: string[] = [];
+  t.mock.method(console, "error", (value: string) => { logs.push(value); });
+  const deadline = Date.now() + 2200;
+  let attempts = 0;
+  await serveEnvironmentConnections(environment, deadline, async () => {
+    attempts++;
+    throw new RuntimeConnectionError("handshake_rejected");
+  });
+  assert.ok(attempts >= 2);
+  assert.equal(logs.length, 1);
+  const fact = JSON.parse(logs[0]!);
+  assert.equal(fact.event, "environment_reconnect_failure");
+  assert.equal(fact.category, "handshake_rejected");
+  assert.deepEqual(Object.keys(fact).sort(), ["category", "event", "observedAt"]);
+  assert.ok(Date.now() >= deadline);
+  assert.equal(controller.signal.aborted, true);
+});
 
 test("output acknowledgement coalesces pending revisions into the latest snapshot", { timeout: 5000 }, async t => {
   const output = new EnvironmentOutput();

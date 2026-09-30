@@ -1,9 +1,10 @@
 import WebSocket, { type RawData } from "ws";
 import { z } from "zod";
 import type { EnvironmentPort } from "./environment.ts";
-import type { RuntimeConnection } from "./environment-connection.ts";
+import { RuntimeConnectionError, type RuntimeConnection } from "./environment-connection.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { githubRunCompletion } from "./github-run-contract.ts";
+import type { ReconnectDiagnostic, ReconnectFailureCategory } from "../../../shared/environment-reconnect.ts";
 
 const messageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ci-accepted"), generation: z.number().int().positive(), taskId: z.string(), waitId: z.string().uuid() }).strict(),
@@ -29,22 +30,34 @@ const messageSchema = z.discriminatedUnion("type", [
 
 /** Reconnect transport only. The caller retains one Environment and one runtime ID. */
 export async function serveEnvironmentConnections(environment: EnvironmentPort, deadline: number,
-  connect: (signal: AbortSignal) => Promise<RuntimeConnection>): Promise<void> {
+  connect: (signal: AbortSignal) => Promise<RuntimeConnection>,
+  diagnostic: (fact: ReconnectDiagnostic) => void = fact => {
+    console.error(JSON.stringify({ event: "environment_reconnect_failure", ...fact }));
+  }): Promise<void> {
   const remaining = deadline - Date.now();
   if (!Number.isSafeInteger(deadline) || remaining > 2_147_483_647) throw new Error("INVALID_ENVIRONMENT_DEADLINE");
   if (remaining <= 0) { await environment.close(); return; }
   const signal = AbortSignal.any([environment.signal, AbortSignal.timeout(remaining)]);
   let generation = 0;
+  let previousCategory: ReconnectFailureCategory | undefined;
+  const report = (category: ReconnectFailureCategory) => {
+    if (category === previousCategory) return;
+    previousCategory = category;
+    // Coalesce repeated failures. Observer faults cannot change runtime behavior.
+    try { diagnostic({ category, observedAt: Date.now() }); } catch {}
+  };
   try {
     while (!signal.aborted) {
       let connection: RuntimeConnection | undefined;
       try {
         connection = await connect(AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
-      } catch {
+      } catch (error) {
         if (signal.aborted) break;
+        report(error instanceof RuntimeConnectionError ? error.category : "unknown");
         await delay(1000, undefined, { signal }).catch(() => {});
         continue;
       }
+      previousCategory = undefined;
       try {
         if (connection.deadline !== deadline || connection.generation <= generation) {
           throw new Error("ENVIRONMENT_CONNECTION_IDENTITY_CHANGED");
@@ -56,7 +69,9 @@ export async function serveEnvironmentConnections(environment: EnvironmentPort, 
           if (signal.aborted) break;
           await serveEnvironmentConnection(connection, environment, () => generation);
         } finally { signal.removeEventListener("abort", abort); }
-        if ((await connection.closed).code === 1008 && !signal.aborted) throw new Error("ENVIRONMENT_CONNECTION_REJECTED");
+        const closure = await connection.closed;
+        if (!signal.aborted) report(closure.category ?? "transport_closed");
+        if (closure.code === 1008 && !signal.aborted) throw new Error("ENVIRONMENT_CONNECTION_REJECTED");
       } finally { connection.socket.terminate(); }
       if (!signal.aborted) await delay(1000, undefined, { signal }).catch(() => {});
     }

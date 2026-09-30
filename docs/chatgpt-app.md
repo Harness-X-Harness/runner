@@ -111,6 +111,19 @@ new Environment is needed for agent work. Disconnected/closed snapshots are
 historical. A selected operation's result still describes that operation only.
 Neither inspection nor these observations renews idle or hard deadlines.
 
+`inspect_environment.reconnectDiagnostic` and the Environment resource can
+include the current connection observation as `{category, observedAt}`. The time
+is the control plane's observation time. It records only authenticated socket
+facts: `transport_closed`, `transport_failure`, or a local
+`control_plane_rejected` message. It contains no raw error, token, URL, runtime
+identity or public failure history. A successful current ready generation clears
+it; an old generation cannot restore it. An absent fact does not identify a
+cause. Runner identity acquisition and HTTP/bootstrap handshake failures are
+operator evidence when they cannot reach the control plane with reliable
+authenticated evidence. The diagnostic does not close an Environment, release
+capacity, change retry policy, or renew its idle/hard deadline. Explicit close
+still uses the Principal's Execution Authorization and exact-run stop evidence.
+
 An Environment permits one active Agent/command operation. Resource links expose
 bounded owner-private state and output; URI change notifications trigger reads.
 Reading a snapshot replaces previously displayed content rather than appending

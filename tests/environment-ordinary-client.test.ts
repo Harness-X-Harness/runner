@@ -5,6 +5,7 @@ import { environmentTaskAuthority } from "../apps/chatgpt-app/src/environment-ta
 import { serveTaskRequest } from "../apps/chatgpt-app/src/task-methods.ts";
 import { lifecycleTask } from "../apps/chatgpt-app/src/environment-lifecycle-task.ts";
 import type { EnvironmentSnapshot, OperationRecord } from "../apps/chatgpt-app/src/environment-object.ts";
+import type { ReconnectDiagnostic } from "../shared/environment-reconnect.ts";
 
 test("ordinary clients receive one honest contract and Tasks clients keep Task handles", async () => {
   const environmentId = `env_${"a".repeat(32)}`;
@@ -12,7 +13,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   const state = { reservations: 0, opens: 0, dispatches: 0, closes: 0, answers: 0, names: [] as string[],
     reads: [] as string[], cancellations: 0,
     status: "ready" as EnvironmentSnapshot["status"], activeTaskId: null as string | null, failRead: false,
-    immediateResult: undefined as OperationRecord["result"] };
+    immediateResult: undefined as OperationRecord["result"], diagnostic: undefined as ReconnectDiagnostic | undefined };
   const env = { ENVIRONMENT_ADMISSION: { getByName() { return { async list() { return [environmentId]; } }; } },
     ENVIRONMENTS: { getByName(id: string) {
       state.names.push(id);
@@ -21,6 +22,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
           if (state.failRead) throw new Error("PRIVATE_STORAGE_FAILURE");
           if (owner !== "123") return null;
           return { environmentId: id, executor: "codex", status: state.status, createdAt: 1, expiresAt: 1000, activeTaskId: state.activeTaskId,
+            reconnectDiagnostic: state.diagnostic,
             agent: { state: { defaults: { model: "fixture", reasoningEffort: "high" }, models: [], selection: null, uncertain: false },
               observedAt: 1, current: true } };
         },
@@ -203,6 +205,14 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   assert.equal(z.object({ operationStatus: z.literal("working"), workFinished: z.literal(false) })
     .parse(cancelled.result?.structuredContent).workFinished, false);
 
+  state.status = "unavailable";
+  state.activeTaskId = null;
+  state.diagnostic = { category: "transport_closed", observedAt: 123 };
+  const diagnosis = await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId } });
+  assert.deepEqual(z.object({ reconnectDiagnostic: z.unknown() }).parse(diagnosis.result?.structuredContent).reconnectDiagnostic, state.diagnostic);
+  assert.match(text(diagnosis), /observation.*not.*stopped/);
+  assert.doesNotMatch(body(await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId } }, false, other)), /transport_closed/);
+  state.diagnostic = undefined;
   state.status = "opening";
   state.activeTaskId = null;
   const opened = await rpc("tools/call", { name: "open_environment", arguments: { executor: "codex", idempotencyKey: "ordinary-open" } });

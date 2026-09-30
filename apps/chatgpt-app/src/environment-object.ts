@@ -12,6 +12,7 @@ import { inputRequest, inputAnswer, type InputRecord } from "./environment-task-
 import { emptyOutput, ENVIRONMENT_OUTPUT_BYTES, type OutputSnapshot } from "../../../shared/environment-output.ts";
 import { githubRunInput, githubRunCompletion, exactCompletion, type GithubRunInput, type GithubRunCompletion } from "../../../.github/actions/agent-runtime/github-run-contract.ts";
 import { agentModelState, type AgentModelState } from "../../../.github/actions/agent-runtime/agent-model.ts";
+import type { ReconnectDiagnostic, ReconnectFailureCategory } from "../../../shared/environment-reconnect.ts";
 
 type Bindings = {
   ENVIRONMENTS: DurableObjectNamespace<EnvironmentObject>;
@@ -41,6 +42,7 @@ export type EnvironmentSnapshot = {
   expiresAt: number | null;
   idleExpiresAt?: number | null;
   agent?: { state: AgentModelState; observedAt: number; current: boolean };
+  reconnectDiagnostic?: ReconnectDiagnostic;
   activeTaskId: string | null;
 };
 const operationId = z.string().regex(/^[\w-]{1,128}$/);
@@ -108,6 +110,10 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const agent = await this.ctx.storage.get<{ state: AgentModelState; observedAt: number; generation: number }>("environment-agent-state");
       if (agent) snapshot.agent = { state: agent.state, observedAt: agent.observedAt,
         current: snapshot.status === "ready" && agent.generation === current?.generation };
+      const diagnostic = await this.ctx.storage.get<ReconnectDiagnostic>("environment-reconnect-diagnostic");
+      if (diagnostic && snapshot.status !== "ready" && snapshot.status !== "closed") {
+        snapshot.reconnectDiagnostic = { category: diagnostic.category, observedAt: diagnostic.observedAt };
+      }
       return snapshot;
     });
   }
@@ -232,12 +238,34 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     }, signal));
   }
 
-  webSocketClose(socket: WebSocket): void {
+  async webSocketClose(socket: WebSocket): Promise<void> {
     socket.close(1000);
+    await this.recordRuntimeDiagnostic(socket, "transport_closed");
     this.environmentChanged();
   }
 
-  webSocketError(socket: WebSocket): void { socket.close(1011); this.environmentChanged(); }
+  async webSocketError(socket: WebSocket): Promise<void> {
+    socket.close(1011);
+    await this.recordRuntimeDiagnostic(socket, "transport_failure");
+    this.environmentChanged();
+  }
+
+  private async recordRuntimeDiagnostic(socket: WebSocket, category: ReconnectFailureCategory): Promise<void> {
+    const attachment = socket.deserializeAttachment() as RuntimeBinding | null;
+    await this.ctx.storage.transaction(async () => {
+      const current = await this.ctx.storage.get<RuntimeBinding>("environment-runtime");
+      if (!attachment || !current || attachment.runtimeId !== current.runtimeId ||
+          attachment.generation !== current.generation ||
+          await this.ctx.storage.get("environment-capacity-released") === true) return;
+      const previous = await this.ctx.storage.get<ReconnectDiagnostic & { generation: number }>("environment-reconnect-diagnostic");
+      // A close callback adds no cause to an already observed rejection/error.
+      if (category === "transport_closed" && previous?.generation === current.generation &&
+          (previous.category === "control_plane_rejected" || previous.category === "transport_failure")) return;
+      await this.ctx.storage.put("environment-reconnect-diagnostic", {
+        category, observedAt: Date.now(), generation: current.generation,
+      });
+    }).catch(() => {}); // Optional observation cannot change transport/lifecycle decisions.
+  }
 
   // Internal fetch only: the Worker reconstructs this header after OIDC validation.
   async fetch(request: Request): Promise<Response> {
@@ -277,6 +305,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
         await this.ctx.storage.put("environment-ready-generation", current.generation);
+        await this.ctx.storage.delete("environment-reconnect-diagnostic");
         const open = await this.ctx.storage.get<LifecycleReceipt>("environment-lifecycle:open");
         if (open?.status === "working") await this.ctx.storage.put("environment-lifecycle:open",
           { ...open, status: "completed", updatedAt: Date.now() });
@@ -350,7 +379,12 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       }
       return { type: "result-accepted", generation: current.generation, taskId: incoming.taskId };
     });
-    if (!acknowledgement) { socket.close(1008, "Runtime message rejected"); return; }
+    if (!acknowledgement) {
+      socket.close(1008, "Runtime message rejected");
+      await this.recordRuntimeDiagnostic(socket, "control_plane_rejected");
+      this.environmentChanged();
+      return;
+    }
     if (acknowledgement.taskId !== undefined && acknowledgement.type !== "output-accepted") {
       for (const changed of this.operationObservers.get(acknowledgement.taskId) ?? []) changed();
     }
@@ -750,6 +784,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             status: kind === "close" ? "completed" : receipt.cancelRequested ? "cancelled" : "failed" });
         }
         await this.ctx.storage.put({ "environment-capacity-released": true, "environment-results-expires-at": expiresAt });
+        await this.ctx.storage.delete("environment-reconnect-diagnostic");
         await this.ctx.storage.setAlarm(expiresAt);
       });
     }
