@@ -8,7 +8,7 @@ import type { EnvironmentObject, EnvironmentSnapshot } from "./environment-objec
 import { openEnvironment, closeEnvironment, ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { executionPrincipal } from "./execution-authority.ts";
 import { environmentTools, environmentToolDefinitions, inspectInput, updateInput } from "./environment-tools.ts";
-import { listEnvironmentResources, observeEnvironmentResource, readEnvironmentResource, type EnvironmentResources } from "./environment-resources.ts";
+import { listEnvironmentResources, listOwnedEnvironments, observeEnvironmentResource, readEnvironmentResource, type EnvironmentResources } from "./environment-resources.ts";
 import { lifecycleTaskId, lifecycleIdentity, type LifecycleKind } from "./environment-lifecycle-task.ts";
 import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, updateEnvironmentTask } from "./environment-operation-service.ts";
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
@@ -67,6 +67,17 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
         const invalid = [...new Set(parsed.error.issues.map(issue =>
           fields.includes(String(issue.path[0])) ? String(issue.path[0]) : "arguments"))];
         return ordinaryError(`Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.`);
+      }
+      if (name === "list_environments") {
+        const snapshots = await listOwnedEnvironments(env, props);
+        const environments = snapshots.map(({ environmentId, executor, status, reason, expiresAt, idleExpiresAt }) =>
+          ({ environmentId, executor, status, expiresAt, ...(reason ? { reason } : {}),
+            ...(idleExpiresAt !== undefined ? { idleExpiresAt } : {}) }));
+        return CallToolResultV2Schema.parse({ resultType: "complete", structuredContent: { environments },
+          content: [{ type: "text", text: environments.length
+            ? environments.map(value => `${value.environmentId}: ${value.executor}, ${value.status}${value.reason ? ` (${value.reason})` : ""}`).join("\n")
+            : "You have no live Environments." }],
+        });
       }
       if (name === "inspect_environment") return inspectOrdinary(env, props, inspectInput.parse(parsed.data));
       if (name === "update_operation") {

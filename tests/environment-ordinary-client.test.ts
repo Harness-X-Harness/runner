@@ -105,6 +105,23 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   assert.ok(tools.some(tool => tool.name === "update_operation" && !tool.annotations.readOnlyHint));
   assert.deepEqual(tools.map(tool => tool.name), tools.map(tool => tool.name).sort());
   assert.equal(tools.find(tool => tool.name === "inspect_environment")?.annotations.readOnlyHint, true);
+  assert.equal(tools.find(tool => tool.name === "list_environments")?.annotations.readOnlyHint, true);
+  const list = { name: "list_environments", arguments: {} };
+  const discovered = await rpc("tools/call", list);
+  assert.deepEqual(discovered.result?.structuredContent, { environments: [{ environmentId,
+    executor: "codex", status: "ready", expiresAt: 1000 }] });
+  assert.deepEqual((await rpc("tools/call", list, true)).result, discovered.result);
+  assert.equal(state.opens, 0);
+  assert.equal(state.dispatches, 0);
+  state.status = "closing";
+  assert.match(body(await rpc("tools/call", list)), /closing/);
+  state.status = "closed";
+  assert.deepEqual((await rpc("tools/call", list)).result?.structuredContent, { environments: [] });
+  state.status = "ready";
+  assert.ok((await rpc("tools/call", list, false, other)).error);
+  state.failRead = true;
+  assert.ok((await rpc("tools/call", list)).error);
+  state.failRead = false;
 
   const command = { name: "command", arguments: { environmentId, argv: ["pwd"], timeoutSeconds: 5 } };
   const accepted = await rpc("tools/call", command);
