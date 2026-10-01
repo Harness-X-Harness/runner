@@ -4,6 +4,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { serveEnvironmentConnections } from "./environment-channel.ts";
 import type { EnvironmentPort } from "./environment.ts";
+import type { ReconnectDiagnostic } from "../../../shared/environment-reconnect.ts";
 
 const claimSchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("stop") }).strict(),
@@ -44,9 +45,10 @@ export async function connectRunnerEnvironment(origin: string, environmentId: st
 }
 
 export async function serveRunnerEnvironment(environment: EnvironmentPort, origin: string, environmentId: string,
-  deadline: number, env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): Promise<void> {
+  deadline: number, env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch,
+  diagnostic?: (fact: ReconnectDiagnostic) => void): Promise<void> {
   environmentUrl(origin, environmentId, "connect");
   const runtimeId = randomUUID();
   return serveEnvironmentConnections(environment, deadline,
-    signal => connectRunnerEnvironment(origin, environmentId, runtimeId, signal, env, fetchImpl));
+    signal => connectRunnerEnvironment(origin, environmentId, runtimeId, signal, env, fetchImpl), diagnostic);
 }
