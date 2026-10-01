@@ -1,5 +1,14 @@
 const methods = new Set(["server/discover", "events/list", "events/subscribe", "events/unsubscribe"]);
 
+/** Called after protocol parsing; never reread the stream or record parameters. */
+export function observeMcpProtocolRejection(body: unknown, rpcCode: number,
+  write: (record: Record<string, unknown>) => void = record => console.log(record)): void {
+  const value = body !== null && typeof body === "object" && "method" in body ? body.method : undefined;
+  const bodyMethod = typeof value !== "string" ? "absent"
+    : methods.has(value) || value === "initialize" ? value : "other";
+  write({ event: "mcp.protocol.rejected", bodyMethod, rpcCode });
+}
+
 /** Method-only observations; never log requests, headers, URLs or response data. */
 export async function observeMcpEventRequest(request: Request, handle: () => Promise<Response>,
   write: (record: Record<string, unknown>) => void = record => console.log(record)): Promise<Response> {

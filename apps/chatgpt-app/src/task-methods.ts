@@ -13,6 +13,7 @@ import {
 import { z } from 'zod';
 import { TaskError } from '../../../shared/task-errors.ts';
 import { eventRequestSchema, EventError, type EventAuthority } from './mcp-events.ts';
+import { observeMcpProtocolRejection } from './mcp-event-diagnostics.ts';
 
 const requestSchema = z.discriminatedUnion('method', [
   GetTaskRequestV2Schema, UpdateTaskRequestV2Schema, CancelTaskRequestV2Schema,
@@ -101,10 +102,12 @@ export async function serveTaskRequest(request: Request, authority: TaskAuthorit
   catch { return Response.json({ jsonrpc: '2.0', id: null,
     error: { code: -32700, message: 'Invalid JSON' } }, { status: 400 }); }
   const id = z.object({ id: RequestIdV2Schema }).safeParse(body);
-  const error = (status: number, code: number, message: string, data?: unknown) => Response.json({
-    jsonrpc: '2.0', id: id.success ? id.data.id : null,
-    error: { code, message, ...(data === undefined ? {} : { data }) },
-  }, { status });
+  const error = (status: number, code: number, message: string, data?: unknown) => {
+    if (code === ProtocolErrorCode.UnsupportedProtocolVersion) observeMcpProtocolRejection(body, code);
+    return Response.json({ jsonrpc: '2.0', id: id.success ? id.data.id : null,
+      error: { code, message, ...(data === undefined ? {} : { data }) },
+    }, { status });
+  };
   const route = classifyInboundRequest({
     httpMethod: request.method, body,
     protocolVersionHeader: request.headers.get('mcp-protocol-version') ?? undefined,
