@@ -47,6 +47,33 @@ test("only explicit inspection includes the model directory; outcomes keep nativ
   assert.deepEqual(inspected.structuredContent?.agent, agent);
 });
 
+test("successful reads and controls do not inherit the selected operation's error", () => {
+  const cases = [
+    ["command", operation({ request: JSON.stringify({ kind: "command" }), result: { ok: true, value: {
+      exitCode: null, signal: "SIGTERM", stdout: "STOP_STARTED\n", stderr: "", truncated: false, stopReason: "cancelled",
+    } } })],
+    ["agent", operation({ request: JSON.stringify({ kind: "agent" }), result: { ok: true, value: { status: "cancelled" } } })],
+    ["agent", operation({ request: JSON.stringify({ kind: "agent" }), result: { ok: false, code: "EXECUTOR_FAILED" } })],
+    ["command", operation({ request: JSON.stringify({ kind: "command" }), result: { ok: true, value: {
+      exitCode: 7, signal: null, stdout: "", stderr: "COMMAND_FAILED", truncated: false,
+    } } })],
+  ] as const;
+  for (const [executionTool, selected] of cases) {
+    const execution = ordinaryToolResult({ tool: executionTool, environment: environment("ready"), operation: selected });
+    assert.equal(execution.isError, true);
+    for (const tool of ["inspect_environment", "update_operation"] as const) {
+      const receipt = ordinaryToolResult({ tool, environment: environment("ready"), operation: selected });
+      assert.equal(receipt.isError, undefined, `${tool} reading ${selected.status}`);
+      assert.equal(receipt.structuredContent?.operationStatus, selected.status);
+      assert.equal(receipt.structuredContent?.workFinished, true);
+      assert.equal(receipt.structuredContent?.disposition, execution.structuredContent?.disposition);
+      assert.deepEqual(receipt.structuredContent?.outcome, execution.structuredContent?.outcome);
+      assert.deepEqual(receipt.content, execution.content.map(block => block.type === "text"
+        ? { ...block, text: block.text.replace(`Ordinary result for ${executionTool}.`, `Ordinary result for ${tool}.`) } : block));
+    }
+  }
+});
+
 test("ordinary receipts keep acceptance, input, and completion distinct", () => {
   const opening = ordinaryToolResult({ tool: "open_environment", dispatch: "accepted", environment: environment("opening"),
     operation: lifecycleTask(environmentId, "open", { createdAt: 1, updatedAt: 2, status: "working" }) });

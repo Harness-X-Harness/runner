@@ -39,10 +39,12 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
   const active = view.activeOperation ? operationFacts(view.activeOperation) : undefined;
   const facts = { ...selected, questions: active?.questions.length ? active.questions : selected.questions };
   const assessment = assess(view, selected.commandError);
+  // Reading or controlling a failed/cancelled operation is not itself a failed tool call.
+  const isError = assessment.isError && view.tool !== "inspect_environment" && view.tool !== "update_operation";
   const content: { type: "text"; text: string }[] = [{ type: "text", text: describe(view, assessment, facts) }];
   if (selected.resultText) content.push({ type: "text", text: selected.resultText });
   return CallToolResultV2Schema.parse({ resultType: "complete",
-    ...(assessment.isError ? { isError: true } : {}), content,
+    ...(isError ? { isError: true } : {}), content,
     structuredContent: defined({ contract: "ordinary", tool: view.tool,
       workFinished: assessment.workFinished, disposition: assessment.disposition,
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,

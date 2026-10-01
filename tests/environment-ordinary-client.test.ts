@@ -222,6 +222,21 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   assert.equal(z.object({ operationStatus: z.literal("working"), workFinished: z.literal(false) })
     .parse(cancelled.result?.structuredContent).workFinished, false);
 
+  const stopped = records.get(ask);
+  assert.ok(stopped);
+  stopped.result = { ok: true, value: { status: "cancelled" } };
+  state.activeTaskId = null;
+  const stopReadback = await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId, operationId: ask } });
+  assert.equal(stopReadback.error, undefined);
+  assert.equal(stopReadback.result?.isError, undefined);
+  assert.deepEqual(z.object({ operationStatus: z.literal("cancelled"), disposition: z.literal("cancelled"),
+    workFinished: z.literal(true), activeOperationId: z.null() }).parse(stopReadback.result?.structuredContent),
+  { operationStatus: "cancelled", disposition: "cancelled", workFinished: true, activeOperationId: null });
+  assert.equal((await rpc("tasks/get", { taskId: ask }, true)).result?.status, "cancelled");
+  assert.equal(state.cancellations, 1);
+  assert.equal(state.reservations, 3);
+  assert.equal(state.closes, 0);
+
   state.status = "unavailable";
   state.activeTaskId = null;
   state.diagnostic = { category: "transport_closed", observedAt: 123 };
@@ -259,6 +274,9 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
 
   state.failRead = true;
   state.status = "ready";
+  const failedInspection = await rpc("tools/call", { name: "inspect_environment", arguments: { environmentId, operationId: ask } });
+  assert.equal(failedInspection.error?.code, -32603);
+  assert.equal(failedInspection.result, undefined);
   const broken = await rpc("tools/call", { ...command, arguments: { ...command.arguments, idempotencyKey: "broken-read" } });
   assert.equal(broken.error?.code, -32603);
   assert.equal(broken.result, undefined);
