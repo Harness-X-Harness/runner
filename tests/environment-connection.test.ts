@@ -136,6 +136,42 @@ test("repeated reconnect failures coalesce operator logs and end at the original
   assert.equal(controller.signal.aborted, true);
 });
 
+for (const closeCode of [1000, 1001, 1006])
+test(`operator diagnostic retains protocol close code ${closeCode}, not its private reason`, { timeout: 4000 }, async t => {
+  const controller = new AbortController();
+  const unexpected = async (): Promise<never> => { throw new Error("Unexpected work"); };
+  const environment: EnvironmentPort = { signal: controller.signal, inputs: new EnvironmentInput(),
+    ciWaits: new EnvironmentCiWaits(), output: new EnvironmentOutput(), close: async () => { controller.abort(); },
+    execute: unexpected, cancel: unexpected, command: unexpected, agent: unexpected };
+  const deadline = Date.now() + 3000;
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(async () => {
+    await environment.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  let generation = 0;
+  server.on("connection", socket => {
+    const current = ++generation;
+    socket.send(JSON.stringify({ type: "connected", generation: current, deadline }));
+    socket.once("message", () => {
+      socket.send(JSON.stringify({ type: "ready-accepted" }));
+      if (current > 1) { socket.send(JSON.stringify({ type: "close", generation: current })); return; }
+      if (closeCode === 1006) socket.terminate();
+      else socket.close(closeCode, "PRIVATE_TOKEN https://private.example/provider");
+    });
+  });
+  const facts: Array<ReconnectDiagnostic & { closeCode?: number }> = [];
+  await serveEnvironmentConnections(environment, deadline, signal => connectEnvironment(
+    new URL(`ws://127.0.0.1:${address.port}/connect`), "00000000-0000-4000-8000-000000000001",
+    async () => "PRIVATE_TOKEN", signal), fact => { facts.push(fact); if (facts.length > 1) controller.abort(); });
+  assert.equal(facts[0]?.closeCode, closeCode);
+  assert.doesNotMatch(JSON.stringify(facts), /PRIVATE|private.example/);
+});
+
 test("output acknowledgement coalesces pending revisions into the latest snapshot", { timeout: 5000 }, async t => {
   const output = new EnvironmentOutput();
   output.begin("stream");

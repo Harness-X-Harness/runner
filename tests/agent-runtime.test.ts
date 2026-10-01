@@ -128,6 +128,7 @@ test("production supervisor publishes only typed reconnect facts, keeping native
   assert.deepEqual(JSON.parse(stdout), { completed: true });
   assert.deepEqual(stderr.trim().split("\n").map(line => JSON.parse(line)), [
     { event: "environment_reconnect_failure", category: "runner_identity", observedAt: 1 },
+    { event: "environment_reconnect_failure", category: "transport_closed", observedAt: 2, closeCode: 1001 },
   ]);
   assert.doesNotMatch(`${stdout}${stderr}`, /PRIVATE_FIXTURE_MARKER/);
 });

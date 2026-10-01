@@ -13,7 +13,10 @@ const reconnectFact = z.object({
   category: z.enum(["runner_identity", "handshake", "handshake_rejected", "control_plane_rejected",
     "transport_closed", "transport_failure", "unknown"]),
   observedAt: z.number().int().positive(),
+  closeCode: z.number().int().min(1000).max(4999).optional(),
 }).strict();
+
+const ignoreOperatorLogError = () => {};
 
 function location(env: NodeJS.ProcessEnv): string {
   if (!/^env_[a-f0-9]{32}$/.test(env.ENVIRONMENT_ID ?? "") || !env.RUNNER_TEMP || !path.isAbsolute(env.RUNNER_TEMP)) {
@@ -71,6 +74,11 @@ async function main() {
 /** Keep native diagnostics private while forwarding stop to the runtime owner. */
 export async function superviseEnvironmentWorker(worker: Worker): Promise<void> {
   worker.stdout!.resume(); worker.stderr!.resume();
+  // This entry process owns the operator sink. Keep one guard through process
+  // exit: queued/repeated pipe errors can arrive after the worker has exited.
+  if (!process.stderr.listeners("error").includes(ignoreOperatorLogError)) {
+    process.stderr.on("error", ignoreOperatorLogError);
+  }
   const stop = () => worker.postMessage("close");
   const report = (message: unknown) => {
     const fact = reconnectFact.safeParse(message);

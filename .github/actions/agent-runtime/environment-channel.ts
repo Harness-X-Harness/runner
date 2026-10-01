@@ -6,6 +6,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { githubRunCompletion } from "./github-run-contract.ts";
 import type { ReconnectDiagnostic, ReconnectFailureCategory } from "../../../shared/environment-reconnect.ts";
 
+/** Operator-only protocol observation; never a free-form close reason. */
+export type RuntimeReconnectDiagnostic = ReconnectDiagnostic & { closeCode?: number };
+
 const messageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ci-accepted"), generation: z.number().int().positive(), taskId: z.string(), waitId: z.string().uuid() }).strict(),
   z.object({ type: z.literal("ci-result"), generation: z.number().int().positive(), taskId: z.string(), waitId: z.string().uuid(), result: githubRunCompletion }).strict(),
@@ -31,7 +34,7 @@ const messageSchema = z.discriminatedUnion("type", [
 /** Reconnect transport only. The caller retains one Environment and one runtime ID. */
 export async function serveEnvironmentConnections(environment: EnvironmentPort, deadline: number,
   connect: (signal: AbortSignal) => Promise<RuntimeConnection>,
-  diagnostic: (fact: ReconnectDiagnostic) => void = fact => {
+  diagnostic: (fact: RuntimeReconnectDiagnostic) => void = fact => {
     console.error(JSON.stringify({ event: "environment_reconnect_failure", ...fact }));
   }): Promise<void> {
   const remaining = deadline - Date.now();
@@ -40,11 +43,11 @@ export async function serveEnvironmentConnections(environment: EnvironmentPort, 
   const signal = AbortSignal.any([environment.signal, AbortSignal.timeout(remaining)]);
   let generation = 0;
   let previousCategory: ReconnectFailureCategory | undefined;
-  const report = (category: ReconnectFailureCategory) => {
+  const report = (category: ReconnectFailureCategory, closeCode?: number) => {
     if (category === previousCategory) return;
     previousCategory = category;
     // Coalesce repeated failures. Observer faults cannot change runtime behavior.
-    try { diagnostic({ category, observedAt: Date.now() }); } catch {}
+    try { diagnostic({ category, observedAt: Date.now(), ...(closeCode === undefined ? {} : { closeCode }) }); } catch {}
   };
   try {
     while (!signal.aborted) {
@@ -70,7 +73,7 @@ export async function serveEnvironmentConnections(environment: EnvironmentPort, 
           await serveEnvironmentConnection(connection, environment, () => generation);
         } finally { signal.removeEventListener("abort", abort); }
         const closure = await connection.closed;
-        if (!signal.aborted) report(closure.category ?? "transport_closed");
+        if (!signal.aborted) report(closure.category ?? "transport_closed", closure.code);
         if (closure.code === 1008 && !signal.aborted) throw new Error("ENVIRONMENT_CONNECTION_REJECTED");
       } finally { connection.socket.terminate(); }
       if (!signal.aborted) await delay(1000, undefined, { signal }).catch(() => {});

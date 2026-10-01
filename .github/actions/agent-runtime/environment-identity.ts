@@ -2,9 +2,8 @@ import { runnerIdentity } from "../runner-identity.ts";
 import { connectEnvironment, type RuntimeConnection } from "./environment-connection.ts";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { serveEnvironmentConnections } from "./environment-channel.ts";
+import { serveEnvironmentConnections, type RuntimeReconnectDiagnostic } from "./environment-channel.ts";
 import type { EnvironmentPort } from "./environment.ts";
-import type { ReconnectDiagnostic } from "../../../shared/environment-reconnect.ts";
 
 const claimSchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("stop") }).strict(),
@@ -46,7 +45,7 @@ export async function connectRunnerEnvironment(origin: string, environmentId: st
 
 export async function serveRunnerEnvironment(environment: EnvironmentPort, origin: string, environmentId: string,
   deadline: number, env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch,
-  diagnostic?: (fact: ReconnectDiagnostic) => void): Promise<void> {
+  diagnostic?: (fact: RuntimeReconnectDiagnostic) => void): Promise<void> {
   environmentUrl(origin, environmentId, "connect");
   const runtimeId = randomUUID();
   return serveEnvironmentConnections(environment, deadline,
