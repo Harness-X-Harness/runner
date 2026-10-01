@@ -78,6 +78,11 @@ not proof that the work finished.
 6. `close_environment` can return `closing`. Inspect when a person asks. Only
    status `closed` confirms cleanup.
 
+A successful `inspect_environment` or `update_operation` returns a normal tool
+result even when the selected operation is cancelled, failed, or has a nonzero
+command exit code. Its status and outcome remain unchanged. Invalid requests,
+missing ownership and failed reads remain errors.
+
 Call `inspect_environment` when a person asks for the current state. Do not
 poll. Without MCP Events support, this contract has no automatic notification or model continuation.
 Waiting for input is visible and answerable, but it is not success.
