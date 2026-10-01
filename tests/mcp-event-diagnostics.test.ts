@@ -1,6 +1,53 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { observeMcpEventRequest } from "../apps/chatgpt-app/src/mcp-event-diagnostics.ts";
+import { serveTaskRequest, type TaskAuthority } from "../apps/chatgpt-app/src/task-methods.ts";
+
+test("protocol rejection identifies a missing-header initialize or Events method without reading or logging parameters", async t => {
+  const records: unknown[] = [];
+  t.mock.method(console, "log", (record: unknown) => records.push(record));
+  const forbidden = async (): Promise<never> => { throw new Error("Authority must not run"); };
+  const authority: TaskAuthority = { tools: forbidden, resources: forbidden, readResource: forbidden,
+    call: forbidden, handle: forbidden, observe: forbidden, observeResources: forbidden,
+    events: { handle: forbidden } };
+  for (const method of ["initialize", "server/discover", "events/list", "events/subscribe", "events/unsubscribe", "PRIVATE"]) {
+    records.length = 0;
+    const request = new Request("https://fixture/mcp?code=PRIVATE", { method: "POST",
+      headers: { authorization: "Bearer PRIVATE", "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "PRIVATE", method, params: {
+        protocolVersion: "2025-11-25", clientInfo: { name: "PRIVATE", version: "PRIVATE" },
+        name: "PRIVATE", prompt: "PRIVATE", delivery: { url: "https://private-callback.example/PRIVATE", secret: "PRIVATE" },
+      } }),
+    });
+    const response = await serveTaskRequest(request, authority);
+    assert.equal(response.status, 400);
+    const reply = await response.json() as { id: string; error: { code: number } };
+    assert.equal(reply.error.code, -32022);
+    assert.equal(reply.id, "PRIVATE");
+    assert.deepEqual(records, [{ event: "mcp.protocol.rejected",
+      bodyMethod: method === "PRIVATE" ? "other" : method, rpcCode: -32022 }]);
+    assert.equal(JSON.stringify(records).includes("PRIVATE"), false);
+  }
+});
+
+test("valid modern requests preserve their response and emit no protocol rejection", async t => {
+  const records: unknown[] = [];
+  t.mock.method(console, "log", (record: unknown) => records.push(record));
+  const forbidden = async (): Promise<never> => { throw new Error("Authority must not run"); };
+  const authority: TaskAuthority = { tools: forbidden, resources: forbidden, readResource: forbidden,
+    call: forbidden, handle: forbidden, observe: forbidden, observeResources: forbidden };
+  const response = await serveTaskRequest(new Request("https://fixture/mcp", { method: "POST",
+    headers: { "content-type": "application/json", "mcp-protocol-version": "2026-07-28", "mcp-method": "ping" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "PRIVATE", method: "ping", params: { _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "PRIVATE", version: "1" },
+      "io.modelcontextprotocol/clientCapabilities": {},
+    } } }),
+  }), authority);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { jsonrpc: "2.0", id: "PRIVATE", result: { resultType: "complete" } });
+  assert.deepEqual(records, []);
+});
 
 test("event wire diagnostics distinguish discovery, catalog, callback rejection and missing headers without private data", async () => {
   for (const method of ["server/discover", "events/list", "events/subscribe", "events/unsubscribe", undefined]) {

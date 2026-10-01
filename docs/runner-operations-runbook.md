@@ -137,6 +137,10 @@ or event count. `unlabelled` means the HTTP method header was absent; it does no
 identify a client. No request body, identity, URL, callback, secret or result text
 is recorded. These observations do not establish that ChatGPT consumed the
 catalog or resumed a conversation. Keep invocation logs and traces disabled.
+For an unsupported protocol, `mcp.protocol.rejected` also records the allowlisted
+JSON-RPC method from the already parsed message and its numeric error code.
+This separates `initialize` from a missing-header Events request without reading
+the request stream again or recording parameters. Unknown method names are `other`.
 
 Record private evidence in ignored local project memory. Confirm that created
 runs have ended and clean up only the exact test branches, Issues and draft
