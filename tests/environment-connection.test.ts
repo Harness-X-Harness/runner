@@ -70,6 +70,45 @@ test("a refused local transport is distinct from HTTP handshake rejection", asyn
   });
 });
 
+for (const responsive of [true, false])
+test(`protocol liveness detects a silent peer without replacing the runtime: responsive=${responsive}`, { timeout: 4000 }, async t => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0, autoPong: responsive });
+  let pings = 0;
+  const firstPing = Promise.withResolvers<void>();
+  server.on("connection", socket => {
+    socket.on("ping", () => { pings++; firstPing.resolve(); });
+    socket.send(JSON.stringify({ type: "connected", generation: 1, deadline: Date.now() + 120000 }));
+  });
+  t.after(async () => {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+    "00000000-0000-4000-8000-000000000001", async () => "PRIVATE_TOKEN", AbortSignal.timeout(3000));
+  t.after(() => connection.socket.terminate());
+  const pong = responsive ? once(connection.socket, "pong") : undefined;
+  t.mock.timers.tick(30000);
+  const received = await Promise.race([firstPing.promise.then(() => true),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 1000))]);
+  assert.equal(received, true, "the established connection must probe a silent peer");
+  if (pong) await pong;
+  const nextPong = responsive ? once(connection.socket, "pong") : undefined;
+  t.mock.timers.tick(30000);
+  if (nextPong) {
+    await nextPong;
+    assert.equal(connection.socket.readyState, connection.socket.OPEN);
+    connection.socket.terminate();
+    await connection.closed;
+  } else assert.deepEqual(await connection.closed, { code: 1006, category: "transport_failure" });
+  const before = pings;
+  t.mock.timers.tick(60000);
+  assert.equal(pings, before, "closed socket must not keep a probe timer");
+});
+
 test("failed attempts emit bounded facts and later reconnect without closing the Environment", { timeout: 8000 }, async t => {
   const controller = new AbortController();
   const unexpected = async (): Promise<never> => { throw new Error("unexpected work"); };

@@ -76,6 +76,18 @@ export async function connectEnvironment(url: URL, runtimeId: string,
       const parsed = connectedSchema.safeParse(value);
       if (!parsed.success || parsed.data.deadline <= Date.now()) return fail("handshake");
       signal.removeEventListener("abort", abort);
+      // Close/error delivery can be lost. Probe only this authenticated socket;
+      // retiring it reuses the existing reconnect owner, not a new Environment.
+      let awaitingPong = false;
+      const pong = () => { awaitingPong = false; };
+      const probe = setInterval(() => {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (awaitingPong) { transportFailed = true; socket.terminate(); return; }
+        awaitingPong = true;
+        socket.ping();
+      }, 30000);
+      socket.on("pong", pong);
+      socket.once("close", () => { clearInterval(probe); socket.off("pong", pong); });
       resolve({ socket, closed, generation: parsed.data.generation, deadline: parsed.data.deadline });
     });
     signal.addEventListener("abort", abort, { once: true });

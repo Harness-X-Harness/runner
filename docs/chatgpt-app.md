@@ -199,6 +199,13 @@ new Environment is needed for agent work. Disconnected/closed snapshots are
 historical. A selected operation's result still describes that operation only.
 Neither inspection nor these observations renews idle or hard deadlines.
 
+The runner sends WebSocket protocol Ping every 30 seconds on its authenticated
+connection. If the next interval has no Pong, it retires that socket and uses
+the existing reconnect path with the same Environment and runtime identity.
+This detects silent transport loss; it does not poll MCP state, restart work,
+confirm execution stop, or renew idle/hard deadlines. Cloudflare responds to
+protocol Ping without invoking the Durable Object's message handler.
+
 `inspect_environment.reconnectDiagnostic` and the Environment resource can
 include the current connection observation as `{category, observedAt}`. The time
 is the control plane's observation time. It records only authenticated socket
