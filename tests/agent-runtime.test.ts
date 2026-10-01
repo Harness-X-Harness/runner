@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { withAcpAgent } from "../.github/actions/agent-runtime/acp-client.ts";
 import { readAgentTurn, readFinalResponse } from "../.github/actions/agent-runtime/final-response.ts";
@@ -129,6 +130,19 @@ test("production supervisor publishes only typed reconnect facts, keeping native
     { event: "environment_reconnect_failure", category: "runner_identity", observedAt: 1 },
   ]);
   assert.doesNotMatch(`${stdout}${stderr}`, /PRIVATE_FIXTURE_MARKER/);
+});
+
+test("a closed operator log pipe does not end the Environment supervisor", { timeout: 10000 }, async () => {
+  const child = spawn(process.execPath, [fileURLToPath(new URL(
+    "../.github/actions/agent-runtime/fixtures/run.ts", import.meta.url)), "diagnostic"],
+  { stdio: ["ignore", "pipe", "pipe"] });
+  child.stderr.destroy();
+  let stdout = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  const [code, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(stdout), { completed: true });
 });
 
 const reportedModels = { models: [

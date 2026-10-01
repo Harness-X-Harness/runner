@@ -74,9 +74,7 @@ export async function superviseEnvironmentWorker(worker: Worker): Promise<void> 
   const stop = () => worker.postMessage("close");
   const report = (message: unknown) => {
     const fact = reconnectFact.safeParse(message);
-    if (fact.success) {
-      try { process.stderr.write(`${JSON.stringify(fact.data)}\n`); } catch {}
-    }
+    if (fact.success) console.error(JSON.stringify(fact.data));
   };
   worker.on("message", report);
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
