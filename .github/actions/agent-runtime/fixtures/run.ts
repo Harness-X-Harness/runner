@@ -17,6 +17,12 @@ if (isMainThread) {
     if (workerData === "diagnostic") {
       console.log("PRIVATE_FIXTURE_MARKER"); console.error("PRIVATE_FIXTURE_MARKER");
       parentPort!.postMessage({ event: "environment_reconnect_failure", category: "runner_identity", observedAt: 1 });
+      parentPort!.postMessage({ event: "environment_reconnect_failure", category: "transport_closed", observedAt: 2,
+        closeCode: 1001 });
+      for (const closeCode of [-1, 5000, 1001.5, "PRIVATE_FIXTURE_MARKER"]) {
+        parentPort!.postMessage({ event: "environment_reconnect_failure", category: "transport_closed", observedAt: 2,
+          closeCode });
+      }
       parentPort!.postMessage({ event: "environment_reconnect_failure", category: "PRIVATE_FIXTURE_MARKER", observedAt: 1 });
       parentPort!.postMessage({ event: "environment_reconnect_failure", category: "transport_closed", observedAt: 1,
         error: "PRIVATE_FIXTURE_MARKER" });
