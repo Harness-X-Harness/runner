@@ -59,7 +59,10 @@ test("cancel and conversational actions preserve exact selection and active oper
   assert.equal(cancelArguments({ ...s, environmentStatus: "closed" }), undefined);
   assert.match(replyMessage(s, "explain").content[0]!.text, new RegExp(s.operationId));
   assert.match(replyMessage(s, "continue").content[0]!.text, /existing environment/);
-  assert.match(replyMessage(s, "answer").content[0]!.text, /Do not create a new agent turn/);
+  const answer = replyMessage({ ...s, questions: [{ id: "q", operationId, message: "Choose" }] }, "answer").content[0]!.text;
+  assert.match(answer, /Do not create a new agent turn/);
+  assert.match(answer, new RegExp(`operationId=${operationId}`));
+  assert.doesNotMatch(answer, new RegExp(s.operationId));
 });
 
 test("question fields preserve types, validate schema, and allow standard decline outside forms", () => {

@@ -75,7 +75,8 @@ export function stateLabel(s: Snapshot): string {
 }
 
 export function replyMessage(s: Snapshot, action: "explain" | "continue" | "answer") {
-  const target = `environmentId=${s.environmentId}${s.operationId ? `, operationId=${s.operationId}` : ""}`;
+  const operationId = action === "answer" ? s.questions?.[0]?.operationId : s.operationId;
+  const target = `environmentId=${s.environmentId}${operationId ? `, operationId=${operationId}` : ""}`;
   const intent = action === "explain" ? "Explain the selected operation's result. Do not execute new work."
     : action === "answer" ? "Help me answer the current operation's pending questions using update_operation. Do not create a new agent turn."
     : "Continue our task in this existing environment. If there is no clear next instruction, ask me what to do next. Do not create another environment.";
