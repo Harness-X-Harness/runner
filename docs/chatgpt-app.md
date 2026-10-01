@@ -98,9 +98,11 @@ authenticated `/mcp` endpoint. `secret` is a Standard Webhooks `whsec_` key
 containing 24–64 decoded bytes. `Mcp-Name` matches the event name for subscribe
 and unsubscribe.
 
-Harness checks ownership and verifies the HTTPS callback with a fresh signed
-challenge before activation. The ID is deterministic for the Principal,
-callback URL, event name and canonical arguments. Repeated subscription calls
+Harness checks ownership and verifies the HTTPS callback before activation.
+Without an unexpired verification for the same Principal and callback URL,
+it sends a fresh signed challenge. Successful verification is cached for ten
+minutes; reusing it does not extend its expiry. The ID is deterministic for the
+Principal, callback URL, event name and canonical arguments. Repeated subscription calls
 refresh that ID. The default lifetime is one hour, with a one-minute minimum
 and 24-hour maximum; `ttlMs: null` still receives a finite lifetime. Refresh
 before the returned `refreshBefore`. Unsubscribe uses the same name, arguments
