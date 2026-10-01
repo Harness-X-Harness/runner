@@ -121,6 +121,16 @@ test("production Environment supervisor suppresses diagnostics and forwards stop
   }
 });
 
+test("production supervisor publishes only typed reconnect facts, keeping native diagnostics private", async () => {
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, [fileURLToPath(new URL(
+    "../.github/actions/agent-runtime/fixtures/run.ts", import.meta.url)), "diagnostic"], { timeout: 10000 });
+  assert.deepEqual(JSON.parse(stdout), { completed: true });
+  assert.deepEqual(stderr.trim().split("\n").map(line => JSON.parse(line)), [
+    { event: "environment_reconnect_failure", category: "runner_identity", observedAt: 1 },
+  ]);
+  assert.doesNotMatch(`${stdout}${stderr}`, /PRIVATE_FIXTURE_MARKER/);
+});
+
 const reportedModels = { models: [
   { id: "gpt-6-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
   { id: "gpt-5.5", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },

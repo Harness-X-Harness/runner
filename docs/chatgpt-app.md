@@ -208,7 +208,9 @@ identity or public failure history. A successful current ready generation clears
 it; an old generation cannot restore it. An absent fact does not identify a
 cause. Runner identity acquisition and HTTP/bootstrap handshake failures are
 operator evidence when they cannot reach the control plane with reliable
-authenticated evidence. The diagnostic does not close an Environment, release
+authenticated evidence. Production workflows retain only coalesced reconnect
+failure categories and observation times; native stdout/stderr remains private.
+The diagnostic does not close an Environment, release
 capacity, change retry policy, or renew its idle/hard deadline. Explicit close
 still uses the Principal's Execution Authorization and exact-run stop evidence.
 

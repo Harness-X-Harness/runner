@@ -8,6 +8,12 @@ import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
 
 const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok"]), deadline: z.number().int().positive() }).strict();
+const reconnectFact = z.object({
+  event: z.literal("environment_reconnect_failure"),
+  category: z.enum(["runner_identity", "handshake", "handshake_rejected", "control_plane_rejected",
+    "transport_closed", "transport_failure", "unknown"]),
+  observedAt: z.number().int().positive(),
+}).strict();
 
 function location(env: NodeJS.ProcessEnv): string {
   if (!/^env_[a-f0-9]{32}$/.test(env.ENVIRONMENT_ID ?? "") || !env.RUNNER_TEMP || !path.isAbsolute(env.RUNNER_TEMP)) {
@@ -49,7 +55,8 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
         return { outcome: option ? { outcome: "selected", optionId: option.optionId } : { outcome: "cancelled" } };
       },
       grokExitPlan: async () => ({ outcome: "approved", feedback: null }),
-    }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline, env), signal, {
+    }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline,
+      env, fetch, fact => parentPort?.postMessage({ event: "environment_reconnect_failure", ...fact })), signal, {
       readAgentReport: (executor, reportSignal) => readExecutorReport(executor, env, fetch, reportSignal),
     });
 }
@@ -65,13 +72,20 @@ async function main() {
 export async function superviseEnvironmentWorker(worker: Worker): Promise<void> {
   worker.stdout!.resume(); worker.stderr!.resume();
   const stop = () => worker.postMessage("close");
+  const report = (message: unknown) => {
+    const fact = reconnectFact.safeParse(message);
+    if (fact.success) {
+      try { process.stderr.write(`${JSON.stringify(fact.data)}\n`); } catch {}
+    }
+  };
+  worker.on("message", report);
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
   try {
     await new Promise<void>((resolve, reject) => {
       worker.on("error", () => reject(new Error("ENVIRONMENT_RUNTIME_FAILED")));
       worker.on("exit", code => code === 0 ? resolve() : reject(new Error("ENVIRONMENT_RUNTIME_FAILED")));
     });
-  } finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
+  } finally { worker.off("message", report); process.off("SIGINT", stop); process.off("SIGTERM", stop); }
 }
 
 if (!isMainThread && workerData === true) {

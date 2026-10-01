@@ -14,7 +14,13 @@ if (isMainThread) {
   const abort = new AbortController();
   parentPort!.on("message", () => abort.abort());
   try {
-    await withEnvironment({ command: workerData === "missing" ? "/missing-agent" : process.execPath,
+    if (workerData === "diagnostic") {
+      console.log("PRIVATE_FIXTURE_MARKER"); console.error("PRIVATE_FIXTURE_MARKER");
+      parentPort!.postMessage({ event: "environment_reconnect_failure", category: "runner_identity", observedAt: 1 });
+      parentPort!.postMessage({ event: "environment_reconnect_failure", category: "PRIVATE_FIXTURE_MARKER", observedAt: 1 });
+      parentPort!.postMessage({ event: "environment_reconnect_failure", category: "transport_closed", observedAt: 1,
+        error: "PRIVATE_FIXTURE_MARKER" });
+    } else await withEnvironment({ command: workerData === "missing" ? "/missing-agent" : process.execPath,
       args: [fileURLToPath(new URL("./agent.ts", import.meta.url))], workspace: process.cwd(), env: {} },
     "codex", Date.now() + 5000, {}, {
       sessionUpdate: () => {}, requestPermission: () => ({ outcome: { outcome: "cancelled" } }),
