@@ -100,10 +100,14 @@ GitHub run is terminal. Remove only the temporary receiver and subscription.
 
 Controlled implementation tests cover delayed verification, expiry, revoked
 grant, key rotation and late replies. A receiver `2xx` is transport acceptance.
-ChatGPT acceptance is separate: rescan the plugin, ask it to monitor the event
-and state how to respond, then verify the actual subscribed conversation resumes
-without polling. Stop monitoring and confirm delivery stops. Do not claim this
-from an SDK test or a receiver acknowledgment.
+ChatGPT acceptance is separate. Rescan the plugin when its event catalog changes.
+In a test conversation, use the host's native event-source discovery and
+event-triggered Automation interface, not an ordinary subscription tool. Ask it
+to monitor the event and state how to respond; the host supplies the callback
+and signing secret. Verify that the subscribed conversation responds to a real
+event without polling. For a bounded test, explicitly stop that exact monitoring
+record and confirm unsubscribe; a response alone does not prove it stopped.
+Do not claim this acceptance from an SDK test or a receiver acknowledgment.
 
 ## What this does not prove
 
