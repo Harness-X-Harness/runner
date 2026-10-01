@@ -1,6 +1,7 @@
 {
   "name": "harness-x-harness-task-runner-control-plane",
   "main": "src/index.ts",
+  "build": { "command": "npm run build:ui" },
   "rules": [{ "type": "Text", "globs": ["**/*.css"], "fallthrough": true }],
   "compatibility_date": "2026-07-23",
   "compatibility_flags": [

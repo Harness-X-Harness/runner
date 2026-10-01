@@ -160,6 +160,10 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.deepEqual(resourceUris(resourceCatalog), [uri]);
   assert.equal(resourceCatalog.result?.ttlMs, 0);
   assert.equal(resourceCatalog.result?.cacheScope, "private");
+  const template = await rpc("resources/read", { uri: "ui://agentenv/workbench-v1.html" }, false, freshClient);
+  assert.match(z.array(z.object({ text: z.string(), mimeType: z.literal("text/html;profile=mcp-app") }))
+    .parse(template.result?.contents)[0]!.text, /<title>AgentEnv<\/title>/);
+  assert.ok((await rpc("resources/read", { uri: "ui://agentenv/unknown.html" }, false, freshClient)).error);
   assert.deepEqual(resourceUris(await rpc("resources/list", {}, false, otherOwner)), []);
   const unavailable = { code: -32602, message: "Resource not found or no longer available" };
   assert.deepEqual((await rpc("resources/read", { uri }, false, otherOwner)).error, unavailable);
