@@ -14,6 +14,7 @@ import { startEnvironmentOperation, getEnvironmentTask, cancelEnvironmentTask, u
 import { observeEnvironmentTask } from "./environment-task-observation.ts";
 import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type OrdinaryTool } from "./environment-ordinary-result.ts";
 import { EVENT_NAME, EventError, eventCatalog, eventRpcValue, grantIdentity } from "./mcp-events.ts";
+import { WORKBENCH_URI, readWorkbench } from "./workbench-resource.ts";
 
 type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
   "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment" |
@@ -68,7 +69,9 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       return listEnvironmentResources(env, await authorize());
     },
     async readResource(uri) {
-      return readEnvironmentResource(env, await authorize(), uri);
+      const props = await authorize();
+      executionPrincipal(props, ENVIRONMENT_SCOPE);
+      return uri === WORKBENCH_URI ? readWorkbench() : readEnvironmentResource(env, props, uri);
     },
     async call(request) {
       const props = await authorize();

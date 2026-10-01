@@ -3,6 +3,7 @@ import { ToolV2Schema } from "@modelcontextprotocol/ext-tasks/core/v2";
 import { commandInput, agentInput } from "./environment-operation-service.ts";
 import { openInput, environmentIdentity, ENVIRONMENT_SCOPE } from "./environment-service.ts";
 import { inputResponse } from "./environment-task-input.ts";
+import { WORKBENCH_URI } from "./workbench-resource.ts";
 
 export const inspectInput = environmentIdentity.extend({
   operationId: z.string().regex(/^task_[a-f0-9]{32}_(?:[a-f0-9]{32}|open|close)$/).optional(),
@@ -31,6 +32,8 @@ export function environmentTools() {
     const readOnly = tool.name === "inspect_environment" || tool.name === "list_environments";
     return ToolV2Schema.parse({ ...tool,
       inputSchema: z.toJSONSchema(schema, { io: "input" }),
+      _meta: { ui: { visibility: ["model", "app"],
+        ...(readOnly || tool.name === "open_environment" || tool.name === "agent" ? { resourceUri: WORKBENCH_URI } : {}) } },
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly && tool.name !== "open_environment",
         idempotentHint: readOnly || tool.name === "close_environment", openWorldHint: !readOnly },
       securitySchemes: [{ type: "oauth2", scopes: [ENVIRONMENT_SCOPE] }],

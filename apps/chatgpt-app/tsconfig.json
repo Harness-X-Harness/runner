@@ -5,10 +5,11 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "strict": true,
+    "jsx": "react-jsx",
     "erasableSyntaxOnly": true,
     "noEmit": true,
     "types": ["@cloudflare/workers-types"],
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "../../shared/**/*.ts"]
+  "include": ["src/**/*.ts", "ui/**/*.ts", "ui/**/*.tsx", "../../shared/**/*.ts"]
 }

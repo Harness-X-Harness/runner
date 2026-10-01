@@ -88,6 +88,41 @@ omits closed Environments. A failed snapshot read is reported as a failure,
 not an empty list. Known retained resources remain readable after closure.
 Listing and inspecting do not renew either deadline.
 
+### Chat workbench
+
+MCP Apps clients can render the AgentEnv workbench from `list_environments`,
+`inspect_environment`, `open_environment` and `agent`. The UI is optional;
+ordinary tool results remain usable without it. It needs neither Tasks nor
+Events. The template is linked by `_meta.ui.resourceUri` and read through
+`resources/read`; `resources/list` remains the live Environment directory.
+
+The workbench shows an explicitly dated snapshot, not a live monitor. Selecting
+an Environment or clicking **View progress** performs one read. There is no
+timer, automatic retry, subscription or background model wakeup. Tool results
+replace the displayed snapshot. Viewing the workbench does not renew deadlines.
+
+Use the ChatGPT input box for Agent requests and commands. The standard
+`ui/update-model-context` bridge shares the selected Environment and operation
+for subsequent conversation turns; it does not send a message or start work.
+**Continue in ChatGPT**, **Explain result** and **Answer in ChatGPT** send a
+user-requested `ui/message`. Host approval and capability rules still apply.
+
+Buttons use the same authenticated tools as chat. The component receives no
+OAuth token and makes no direct network connections. Native question forms submit
+the exact question and operation IDs through `update_operation`; unsupported
+form layouts can be answered in chat using the same tool. **Stop operation**
+keeps the Environment; **Close environment** ends its runner and loses temporary
+workspace files. Both require explicit confirmation. A pending stop or close
+does not imply terminal state. Progress, final output and historical operations
+remain distinct, and a completed Agent response does not certify its objective.
+
+The UI follows host theme variables and uses the standard MCP Apps bridge, not
+host-name detection or a separate execution model. Its source is in
+[`ui/`](../apps/chatgpt-app/ui/); `npm run build:ui --prefix apps/chatgpt-app`
+bundles its HTML resource before tests, development or deployment. The generated
+`dist/` directory is disposable and is not committed. When making a breaking
+template change, update its resource URI so clients do not reuse incompatible UI.
+
 ### Events client
 
 Clients that support the MCP Events webhook draft can subscribe independently
