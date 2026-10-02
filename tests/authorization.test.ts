@@ -107,7 +107,9 @@ test("initial consent displays and preserves every requested capability", async 
     body,
     /这些权限决定你的客户端能让 Harness 做什么/,
   );
-  assert.match(body, /Harness 只会得到运行仓库和 Actions 工作流的控制凭据/);
+  assert.match(body, /派生并使用仅限执行仓库的 Actions 工作流控制凭据/);
+  assert.match(body, /不保留基础访问令牌/);
+  assert.doesNotMatch(body, /只会得到/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);

@@ -34,6 +34,10 @@ Environment 及其操作按 Principal 检查所有权；ID 和 Resource URI 不�
 
 输出 Resource 只交付有界用户可见文本，不转发 reasoning、原生 RPC 或 metadata。命令输出和 Agent 回复是用户数据，不能保证任意文本绝不包含秘密；平台不得主动写入凭据。关闭环境退出 live discovery，已知结果保留七天，到期后读取拒绝且不能重新执行。
 
+操作请求（包括 prompt、命令参数和原生问题回答）保存在 Environment 的私有状态中，不在操作终态时删除。请求随操作记录保留到环境确认关闭后七天，由到期 alarm 清理。保留原请求用于核对同一提交键的重试，不能把结果保留等同于仅保留输出。MCP 状态和输出投影不包含私有请求或原生会话标识。
+
+工作区文件位于临时 runner，不属于上述结果保留范围。关闭环境会失去这些文件，包括已保存和只在本地提交的内容；需要保留的内容必须先推送或另存到外部。
+
 ## MCP Events 出站通知
 
 Events 与工具共用认证和 `environments:use`，订阅只属于一个 Principal 的一个 Environment。
@@ -47,30 +51,20 @@ callback 和签名 secret 只保存在私有 Environment 状态中，不进入 M
 Standard Webhooks 签名覆盖实际发送字节；刷新密钥后在一分钟内双签。通知只含 ID、revision 和
 生命周期状态，不含用户正文、输出或连接凭证。订阅和待投递队列有界，不建立历史事件数据库。
 
-## 保留的一次性任务
-
-Task claim 验证 OIDC 签名、issuer、canonical audience、repository、workflow/ref、受保护分支、GitHub-hosted runner、dispatch event、actor 和 run/attempt。一个 Task 最多释放 prompt 给一个已接纳执行。取消先于领取时，后到 claim 不得释放 prompt。
-
-prompt 只在私有状态和 mode-0600 handoff 文件中传递，终态提交时从 Worker 状态删除。最终文本受共享长度限制，只有 owner 能读取；七天后清理结果、元数据和 alarm。Task ID 是查询 handle，不是授权凭证。
-
-回传和日志不记录 prompt、原生协议、reasoning、provider endpoint 或 credential。MCP 公开的是 owner-authorized Task snapshot，不含 owner 字段、prompt 字段、原生 thread/session ID 或 secrets。最终文本由 Agent 产生，因此可信用户也应避免要求 Agent 在结果中披露凭证。
-
-取消是 intent，不是 rollback。终态不可变；完成或失败回传可以先提交。丢失 finish 后，后续有效授权查询可以用精确 GitHub run 证据收敛状态，但不能从日志恢复模型结果。没有永久后台观察者，也不保证用户授权失效后的无人值守收敛。
-
 ## 凭证与供应链
 
 配置入口见 [workflow](.github/workflows/run-environment.yml)、[Worker 配置](apps/chatgpt-app/wrangler.jsonc) 和 [部署说明](docs/runner-operations-runbook.md#deployment-credentials)，不在此维护第二份变量清单。
 
 Codex/Grok 使用默认 home 的原生 config，并通过 `env_key = "MINI_END_USER_KEY"` 读取 key。endpoint 来自 GitHub Secrets。外部 Actions 固定完整 commit SHA；CLI 使用官方当前 installer。这是 happy-path，不是可复现工具链。两条 auth workflow 的输出必须丢弃，不能变成公开诊断日志。
 
-本地 `.secrets.env`、`.lark.env` 和私有运维配置必须保持 Git 忽略。Lark 不在 Task 执行路径内；其配置不因 Task 退役清理而自动撤销。
+本地 `.secrets.env`、`.lark.env` 和私有运维配置必须保持 Git 忽略。
 
 ## 发布前检查
 
-- 新工作仅使用 `environments:use`，旧 scope 不自动升级；旧结果按原保留期读取。
+- 新工作仅使用 `environments:use`，旧 scope 不自动升级。
 - 用户 GitHub 权限与固定 Agent GitHub 权限分开。
 - OIDC 精确身份验证先于私有 prompt 和执行凭证释放。
-- prompt 在终态删除，结果保留七天，终态不可复活。
+- 操作请求和结果保留到环境确认关闭后七天，到期清理，终态不可复活。
 - 私有输入、输出和 secrets 不进入普通日志、summary 或 artifacts。
 - 本地测试、workflow lint 和改动边界的真实验收均通过。
 - 存储删除必须精确指定类；删除数据不能通过回退源码恢复。

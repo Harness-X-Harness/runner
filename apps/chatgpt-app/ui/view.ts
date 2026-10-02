@@ -55,9 +55,9 @@ export function readView(result: Result, now: number): View {
   throw new Error("未返回工作区。请刷新。");
 }
 
-const rejectedError = /INVALID_OPERATION_INPUT|OPERATION_ID_CONFLICT|ENVIRONMENT_NOT_READY|ENVIRONMENT_RUNTIME_BUSY|ENVIRONMENT_CLOSING|ENVIRONMENT_IDLE_EXPIRED|ENVIRONMENT_NOT_FOUND|OPERATION_RECEIPT_CAPACITY|INVALID_INPUT_RESPONSE|^Invalid .+ input:/;
+const rejectedError = /^(?:INVALID_OPERATION_INPUT|OPERATION_ID_CONFLICT|ENVIRONMENT_NOT_READY|ENVIRONMENT_RUNTIME_BUSY|ENVIRONMENT_CLOSING|ENVIRONMENT_IDLE_EXPIRED|ENVIRONMENT_NOT_FOUND|OPERATION_RECEIPT_CAPACITY|INVALID_INPUT_RESPONSE)$|^Invalid \w+ input:/;
 
-/** A answered rejection did not create unknown work. A missing response stays unknown. */
+/** An answered rejection did not create unknown work. A missing response stays unknown. */
 export function submissionDisposition(message: string): "rejected" | "unknown" {
   return rejectedError.test(message) ? "rejected" : "unknown";
 }

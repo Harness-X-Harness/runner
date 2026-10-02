@@ -18,7 +18,7 @@ export function consentView(clientName: string, csrf: string, details: ReturnTyp
   }
   return h(Flex, { direction: "column", gap: "5" },
     h(Text, { as: "p" }, h(Strong, null, clientName), " 请求使用 Harness X Harness。"),
-    paragraph("接下来由 GitHub 验证你的身份。Harness 只会得到运行仓库和 Actions 工作流的控制凭据。"),
+    paragraph("接下来由 GitHub 验证你的身份。Harness 从用户令牌派生并使用仅限执行仓库的 Actions 工作流控制凭据，不保留基础访问令牌。"),
     paragraph("这些权限决定你的客户端能让 Harness 做什么。GitHub 会另外验证你和执行仓库里的操作。"),
     h(Heading, { as: "h2", size: "4" }, "请求的权限"),
     details.length === 0 ? paragraph("没有请求权限。") :

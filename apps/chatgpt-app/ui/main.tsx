@@ -10,39 +10,38 @@ let error = "";
 let connected = false;
 let busy = false;
 let creationKey = crypto.randomUUID();
-let failureMessage = "";
 const listeners = new Set<() => void>();
 const changed = () => listeners.forEach(notify => notify());
 
-async function receive(result: Result): Promise<boolean> {
+type CallOutcome = "sent" | "rejected" | "unknown";
+
+async function receive(result: Result): Promise<CallOutcome> {
   try {
     latest = readView(result, Date.now());
     error = "";
-    failureMessage = "";
     changed();
     if (app.getHostCapabilities()?.updateModelContext) {
       try { await app.updateModelContext(selectedContext(latest)); }
       catch { error = "未能同步当前选择。"; }
     }
-    return true;
+    return "sent";
   } catch (failure) {
-    failureMessage = failure instanceof Error ? failure.message : "";
-    error = userFacingError(failureMessage || "操作失败。请刷新。");
+    const message = failure instanceof Error ? failure.message : "";
+    error = userFacingError(message || "操作失败。请刷新。");
     changed();
-    return false;
+    return submissionDisposition(message);
   }
 }
 
-async function call(name: string, args: Record<string, unknown>): Promise<boolean> {
-  if (busy) return false;
+async function call(name: string, args: Record<string, unknown>): Promise<CallOutcome> {
+  if (busy) return "unknown";
   busy = true;
   error = "";
-  failureMessage = "";
   changed();
-  let applied = false;
+  let outcome: CallOutcome = "unknown";
   try {
     const result = await app.callServerTool({ name, arguments: args });
-    applied = await receive(result);
+    outcome = await receive(result);
     if (name === "open_environment" && latest?.kind === "environment" && !result.isError) creationKey = crypto.randomUUID();
     if (name === "open_environment" && latest?.kind === "capacity") {
       latest = { ...latest,
@@ -50,14 +49,12 @@ async function call(name: string, args: Record<string, unknown>): Promise<boolea
         idempotencyKey: typeof args.idempotencyKey === "string" ? args.idempotencyKey : undefined };
     }
   } catch {
-    failureMessage = "";
     error = "未收到响应。请刷新。";
-    applied = false;
   } finally {
     busy = false;
     changed();
   }
-  return applied;
+  return outcome;
 }
 
 async function message(action: "explain" | "answer") {
@@ -99,10 +96,7 @@ function Workbench() {
     canCall={connected && !busy && Boolean(app.getHostCapabilities()?.serverTools)}
     canMessage={connected && !busy && Boolean(app.getHostCapabilities()?.message?.text)}
     onCall={(name, args) => { void call(name, args); }}
-    onSend={async args => {
-      const sent = await call("agent", args);
-      return sent ? "sent" : failureMessage ? submissionDisposition(failureMessage) : "unknown";
-    }}
+    onSend={args => call("agent", args)}
     onMessage={action => { void message(action); }} />;
 }
 

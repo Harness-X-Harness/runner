@@ -22,6 +22,14 @@ type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { ENVIRONMENTS: 
   "reserveOperation" | "readOperation" | "readOutput" | "cancelOperation" | "observeOperation" | "observeOutput" | "observeEnvironment" | "answerOperation" |
   "subscribeEvents" | "unsubscribeEvents"> } };
 
+// Exact, public admission refusals. Never classify arbitrary RPC/storage failures
+// or errors from reading an already accepted operation as proof of rejection.
+const operationRejections = new Set([
+  "INVALID_OPERATION_INPUT", "OPERATION_ID_CONFLICT", "ENVIRONMENT_NOT_READY",
+  "ENVIRONMENT_RUNTIME_BUSY", "ENVIRONMENT_CLOSING", "ENVIRONMENT_IDLE_EXPIRED",
+  "ENVIRONMENT_NOT_FOUND", "OPERATION_RECEIPT_CAPACITY",
+]);
+
 export async function handleEnvironmentTaskRequest(request: Request,
   env: Environment & Parameters<typeof mcpAuthorization>[1]): Promise<Response> {
   const authorize = mcpAuthorization(request, env);
@@ -132,7 +140,12 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
       }
       if (name !== "command" && name !== "agent") throw new Error("UNKNOWN_TOOL");
       const environmentId = operationEnvironmentId(parsed.data);
-      const { taskId } = await startEnvironmentOperation(env, props, { ...parsed.data, kind: name });
+      let taskId: string;
+      try { ({ taskId } = await startEnvironmentOperation(env, props, { ...parsed.data, kind: name })); }
+      catch (error) {
+        if (!(error instanceof Error) || !operationRejections.has(error.message)) throw error;
+        return ordinaryError(error.message);
+      }
       const operation = await getEnvironmentTask(env, props, taskId);
       if (capable) return operation.status === "completed" ? operation.result : { ...operation, resultType: "task" };
       const environment = await readOwnedEnvironment(env, props, environmentId);

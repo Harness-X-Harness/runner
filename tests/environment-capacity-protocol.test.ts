@@ -58,6 +58,18 @@ test("capacity rejection has identical ordinary and Tasks semantics without disp
   const environmentId = first.result?.structuredContent?.environmentId;
   assert.ok(environmentId);
   assert.match(environmentId, /^env_[a-f0-9]{32}$/);
+  // Refusals must survive the real Durable Object RPC boundary as tool errors.
+  // Neither the owner (not ready) nor another principal (not found) starts work.
+  for (const capable of [false, true]) {
+    for (const [owner, code] of [["1", "ENVIRONMENT_NOT_READY"], ["2", "ENVIRONMENT_NOT_FOUND"]]) {
+      const refused = await rpc(owner!, "tools/call", { name: "agent", arguments: {
+        environmentId, prompt: "hello", idempotencyKey: "not-admitted",
+      } }, capable);
+      assert.equal(refused.error, undefined);
+      assert.equal(refused.result?.isError, true);
+      assert.match(JSON.stringify(refused.result), new RegExp(code!));
+    }
+  }
   const ownerResult = await open("1", "refused");
   assert.equal(ownerResult.error, undefined);
   assert.equal(ownerResult.result?.resultType, "complete");

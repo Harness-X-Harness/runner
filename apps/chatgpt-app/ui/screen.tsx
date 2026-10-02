@@ -51,7 +51,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   return <main aria-busy={busy}>
     <header>
       <div className="brand"><span className="mark" aria-hidden="true" /><strong>AgentEnv</strong></div>
-      {label && <span className={`status ${tone}`} aria-hidden="true">{label}</span>}
+      <span className={label ? `status ${tone}` : undefined} role="status">{label}</span>
     </header>
     {error && <p className="error" role="alert">{error}</p>}
     {!view && <p role="status">{connected ? "正在加载…" : "正在连接…"}</p>}
@@ -151,7 +151,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       confirmLabel="停止" cancelLabel="取消" danger onOpenChange={open => { if (!open) setConfirm(undefined); }}
       onConfirm={() => { const action = confirm; setConfirm(undefined); if (action?.kind === "stop") onCall("update_operation", { operationId: action.id, action: "cancel" }); }} />
     <ConfirmDialog open={confirm?.kind === "close"} title="关闭此工作区？"
-      description="未保存的文件将丢失。"
+      description="工作区内的所有文件将丢失，包括已保存和仅在本地提交的文件。请先推送或另存到外部。"
       confirmLabel="关闭" cancelLabel="取消" danger onOpenChange={open => { if (!open) setConfirm(undefined); }}
       onConfirm={() => { const action = confirm; setConfirm(undefined); if (action?.kind === "close") onCall("close_environment", { environmentId: action.id }); }} />
   </main>;

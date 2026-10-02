@@ -99,10 +99,13 @@ only because a new version was deployed.
 
 ## Local checks
 
+Use Node.js 24 for these checks.
+
 ```bash
 npm ci --prefix apps/chatgpt-app
 npm ci --prefix .github/actions/agent-runtime
 npm ci --prefix apps/event-delivery
+npm run build:ui --prefix apps/chatgpt-app
 node --test tests/*.test.ts
 apps/chatgpt-app/node_modules/.bin/tsc --noEmit -p apps/chatgpt-app
 .github/actions/agent-runtime/node_modules/.bin/tsc --noEmit -p .github/actions/agent-runtime

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { build } from "../apps/chatgpt-app/node_modules/esbuild/lib/main.js";
 import { readView, selectedContext, refreshArguments, stateLabel, finalText, cancelArguments, replyMessage, questionFields, answerContent, reasonText, nextSentence, listStatus, commandText, commandTitle, operationStatusText, decidePromptSend, submissionDisposition, userFacingError } from "../apps/chatgpt-app/ui/view.ts";
 import { environmentTools } from "../apps/chatgpt-app/src/environment-tools.ts";
 import { readWorkbench, WORKBENCH_URI } from "../apps/chatgpt-app/src/workbench-resource.ts";
@@ -31,6 +34,8 @@ test("UI discovery uses the same seven tools and a credential-free standard reso
   assert.match(resource.text, /输入指令/);
   assert.match(resource.text, /未收到响应。请先重试原指令。/);
   assert.match(resource.text, /刷新不会延长使用时间。/);
+  assert.match(resource.text, /工作区内的所有文件将丢失，包括已保存和仅在本地提交的文件。请先推送或另存到外部。/);
+  assert.doesNotMatch(resource.text, /未保存的文件将丢失/);
   assert.doesNotMatch(resource.text, />一个工作区</);
 });
 
@@ -105,6 +110,8 @@ test("the workbench tells a person the next fact and keeps a rejected open actio
   assert.equal(userFacingError("INVALID_OPERATION_INPUT"), "输入无效。请修改后再发送。");
   assert.equal(submissionDisposition("INVALID_OPERATION_INPUT"), "rejected");
   assert.equal(submissionDisposition(""), "unknown");
+  assert.equal(submissionDisposition("Task request failed"), "unknown");
+  assert.equal(submissionDisposition("Read failed after ENVIRONMENT_NOT_READY"), "unknown");
   const capacity = readView({ isError: true, structuredContent: {
     outcome: "capacity_rejected", capacityKind: "owner", retryable: false,
     existingEnvironment: { environmentId, status: "ready" },
@@ -171,4 +178,31 @@ test("an unconfirmed prompt keeps its key until its own response arrives", () =>
   assert.equal(fresh.action, "send");
   if (fresh.action !== "send") return;
   assert.equal(fresh.key, "key-6");
+});
+
+test("the rendered workbench exposes its only lifecycle label as a live status", async () => {
+  const appRoot = new URL("../apps/chatgpt-app/", import.meta.url);
+  const built = await build({
+    stdin: { contents: `import { createElement } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      import { Screen } from "./ui/screen.tsx";
+      export function render(environmentStatus) {
+        return renderToStaticMarkup(createElement(Screen, {
+          view: { kind: "environment", receivedAt: 1, snapshot: {
+            contract: "ordinary", environmentId: "env_fixture", executor: "codex", environmentStatus,
+            disposition: "accepted", workFinished: false, expiresAt: null, activeOperationId: null,
+          } }, now: 1, error: "", busy: false, connected: true, canCall: true, canMessage: true,
+          creationKey: "fixture", onCall() {}, onSend: async () => "sent", onMessage() {},
+        }));
+      }`, resolveDir: fileURLToPath(appRoot), loader: "tsx" },
+    bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic",
+    external: ["react", "react-dom"],
+  });
+  const module = { exports: {} as { render(status: string): string } };
+  new Function("require", "module", "exports", built.outputFiles[0]!.text)(createRequire(appRoot), module, module.exports);
+  for (const [status, label] of [["opening", "启动中"], ["ready", "就绪"], ["closing", "关闭中"], ["closed", "已关闭"]]) {
+    const rendered = module.exports.render(status!);
+    assert.match(rendered, new RegExp(`<span class="status [^"]+" role="status">${label}</span>`));
+    assert.doesNotMatch(rendered, /<span[^>]*class="status[^>]*aria-hidden/);
+  }
 });
