@@ -2,9 +2,9 @@ export const ENVIRONMENT_SCOPE = "environments:use";
 
 const SCOPE_DETAILS = Object.freeze({
   [ENVIRONMENT_SCOPE]: Object.freeze({
-    group: "Environment permissions",
-    title: "Use private development environments",
-    description: "Open and close temporary environments, run commands and coding agents, and read their tasks and output. Agents use the platform's configured GitHub credentials.",
+    group: "工作区权限",
+    title: "使用私人开发工作区",
+    description: "打开和关闭临时工作区，运行命令和编程助手，并读取它们的任务和输出。助手使用平台配置的 GitHub 凭据。",
   }),
 });
 

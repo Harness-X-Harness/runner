@@ -19,6 +19,7 @@ import { internalEnvironmentFetch } from "./environment-callback.ts";
 import { environmentWebhook } from "./environment-webhook.ts";
 export { EnvironmentObject as BoundedEnvironmentObject, EnvironmentAdmissionObject } from "./environment-object.ts";
 import authorizationStyles from "@radix-ui/themes/styles.css";
+import pixelAuthStyles from "../ui/auth-pixel.css";
 import { AUTH_STYLES_PATH } from "./authorization-view.ts";
 import { observeMcpEventRequest } from "./mcp-event-diagnostics.ts";
 
@@ -56,7 +57,7 @@ function createOAuthProvider(env: WorkerEnvironment): OAuthProvider<WorkerEnviro
 async function defaultFetch(request: Request, env: WorkerEnvironment): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === AUTH_STYLES_PATH && request.method === "GET") {
-    return new Response(authorizationStyles, { headers: {
+    return new Response(`${authorizationStyles}\n${pixelAuthStyles}`, { headers: {
       "content-type": "text/css; charset=utf-8",
       "cache-control": "public, max-age=0, must-revalidate",
       "x-content-type-options": "nosniff",

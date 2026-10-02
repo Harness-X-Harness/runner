@@ -36,15 +36,15 @@ export async function authorizePage(request: Request, env: AuthorizationEnvironm
   } catch (error) {
     if (isCimdFetchError(error)) {
       return html(
-        "Authorization temporarily unavailable",
-        [paragraph("Harness could not verify your MCP client's public metadata. No authorization was granted."), paragraph("The service operator must resolve the metadata lookup failure before you can connect.")],
+        "授权暂时不可用",
+        [paragraph("Harness 无法验证客户端的公开元数据。没有授予授权。"), paragraph("运维人员必须先修复元数据查询，然后你才能连接。")],
         503,
       );
     }
     if (!isAuthorizationError(error)) throw error;
     return authorizationErrorResponse(error);
   }
-  if (!client) return html("Authorization error", paragraph("Unknown OAuth client."), 400);
+  if (!client) return html("授权错误", paragraph("未知的 OAuth 客户端。"), 400);
 
   let scopeDetails: ScopeDetails;
   try {
@@ -54,7 +54,7 @@ export async function authorizePage(request: Request, env: AuthorizationEnvironm
     };
     scopeDetails = describeScopes(authRequest.scope);
   } catch {
-    return html("Authorization error", paragraph("Invalid permission request."), 400);
+    return html("授权错误", paragraph("无效的权限请求。"), 400);
   }
 
   const csrf = crypto.randomUUID();
@@ -71,7 +71,7 @@ export async function authorizePage(request: Request, env: AuthorizationEnvironm
   );
 
   return html(
-    "Authorize Harness X Harness",
+    "授权 Harness X Harness",
     consentView(client.clientName ?? "MCP client", csrf, scopeDetails),
     200,
     [secureCookie(CONSENT_COOKIE, browserSession)],
@@ -84,7 +84,7 @@ export async function submitAuthorizationDecision(request: Request, env: Authori
   const csrf = String(form.get("csrf") ?? "");
   const browserSession = cookieValue(request.headers.get("cookie"), CONSENT_COOKIE);
   if (!csrf || !browserSession) {
-    return html("Authorization error", paragraph("Invalid consent state."), 400);
+    return html("授权错误", paragraph("无效的授权状态。"), 400);
   }
 
   const consent = await consumeAuthorizationState(
@@ -93,14 +93,14 @@ export async function submitAuthorizationDecision(request: Request, env: Authori
     await sha256Base64Url(browserSession),
   );
   if (consent.kind === "missing") {
-    return html("Authorization error", paragraph("Expired consent state."), 400);
+    return html("授权错误", paragraph("授权状态已过期。"), 400);
   }
   if (consent.kind === "browser_mismatch") {
-    return html("Authorization error", paragraph("Invalid consent state."), 400);
+    return html("授权错误", paragraph("无效的授权状态。"), 400);
   }
   const decision = String(form.get("decision") ?? "");
   if (decision !== "allow" && decision !== "deny") {
-    return html("Authorization error", paragraph("Invalid authorization decision."), 400);
+    return html("授权错误", paragraph("无效的授权决定。"), 400);
   }
   const authRequest = consent.value.authRequest;
 
@@ -135,7 +135,7 @@ export async function completeAuthorizationCallback(
     authorization = await consumeGitHubAuthorization(request, env);
   } catch (error) {
     if (!(error instanceof GitHubAuthorizationStateError)) throw error;
-    return html("Authorization error", paragraph(`${error.message}.`), error.status, [clearGitHubCookie()]);
+    return html("授权错误", paragraph(`${error.message}。`), error.status, [clearGitHubCookie()]);
   }
 
   let response;
@@ -147,14 +147,14 @@ export async function completeAuthorizationCallback(
       logger,
     );
   } else {
-    response = html("Authorization error", paragraph("Unknown GitHub authorization request."), 400);
+    response = html("授权错误", paragraph("未知的 GitHub 授权请求。"), 400);
   }
   return clearGitHubAuthorizationCookie(response);
 }
 
 function authorizationErrorResponse(error: AuthorizationFailure): Response {
   if (!error.redirectUri) {
-    return html("Authorization error", paragraph(`${error.description}.`), 400);
+    return html("授权错误", paragraph(`${error.description}.`), 400);
   }
   return oauthRedirect(error.redirectUri, {
     error: error.code,
