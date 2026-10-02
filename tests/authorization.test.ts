@@ -64,11 +64,11 @@ test("consent page explains fixed scopes and sends hardened browser headers", as
   assert.match(response.headers.get("set-cookie") ?? "", /__Host-RUNNER_CSRF=/);
 
   const body = await response.text();
-  assert.match(body, /Use private development environments/);
-  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /使用私人开发工作区/);
+  assert.match(body, /GitHub 凭据/);
   assert.match(body, /environments:use/);
-  assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="allow")[^>]*>Continue with GitHub<\/button>/);
-  assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="deny")[^>]*>Cancel<\/button>/);
+  assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="allow")[^>]*>用 GitHub 继续<\/button>/);
+  assert.match(body, /<button\b(?=[^>]*\btype="submit")(?=[^>]*\bname="decision")(?=[^>]*\bvalue="deny")[^>]*>取消<\/button>/);
   assert.doesNotMatch(body, /<script\b|<style\b/);
   assert.match(body, /<link rel="stylesheet" href="\/assets\/authorization.css"/);
   assert.match(body, /&lt;script&gt;ChatGPT&lt;\/script&gt;/);
@@ -100,14 +100,14 @@ test("initial consent displays and preserves every requested capability", async 
   );
 
   const body = await response.text();
-  assert.match(body, /Use private development environments/);
-  assert.match(body, /configured GitHub credentials/);
-  assert.match(body, /Environment permissions/);
+  assert.match(body, /使用私人开发工作区/);
+  assert.match(body, /GitHub 凭据/);
+  assert.match(body, /工作区权限/);
   assert.match(
     body,
-    /These permissions control what your MCP client can ask Harness to do/,
+    /这些权限决定你的客户端能让 Harness 做什么/,
   );
-  assert.match(body, /Harness derives a workflow credential limited to the runner repository and Actions workflow control/);
+  assert.match(body, /Harness 只会得到运行仓库和 Actions 工作流的控制凭据/);
   assert.equal(states.size(), 1);
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);
@@ -126,8 +126,8 @@ test("Environment consent grants only the fresh requested scope", async () => {
   });
   assert.equal(response.status, 200);
   const body = await response.text();
-  assert.match(body, /Use private development environments/);
-  assert.match(body, /configured GitHub credentials/);
+  assert.match(body, /使用私人开发工作区/);
+  assert.match(body, /GitHub 凭据/);
   assert.doesNotMatch(body, /tasks:manage|environments:manage/);
   const [stored] = states.values();
   assert.ok(stored && "authRequest" in stored);

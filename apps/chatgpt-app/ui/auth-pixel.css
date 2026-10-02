@@ -1,0 +1,40 @@
+.radix-themes.pixel-auth {
+  --default-font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  min-height: 100vh;
+  color: #10241c;
+  background-color: #e7f2ea;
+  background-image:
+    linear-gradient(rgb(16 36 28 / 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(16 36 28 / 0.08) 1px, transparent 1px);
+  background-size: 8px 8px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+.radix-themes.pixel-auth .rt-Heading,
+.radix-themes.pixel-auth .rt-Text {
+  font-family: inherit;
+}
+.radix-themes.pixel-auth .rt-Card,
+.radix-themes.pixel-auth .rt-Button {
+  border-radius: 0;
+}
+.radix-themes.pixel-auth .rt-Card {
+  border: 2px solid #10241c;
+  box-shadow: 4px 4px 0 #10241c;
+  background: #f4fbf6;
+}
+.radix-themes.pixel-auth .rt-Button {
+  box-shadow: 3px 3px 0 #10241c;
+  font-family: inherit;
+}
+.radix-themes.pixel-auth .px-allow {
+  background: #0c8f4e;
+  color: #f3fff7;
+}
+.radix-themes.pixel-auth .px-cancel {
+  background: transparent;
+  box-shadow: none;
+}
+.radix-themes.pixel-auth .rt-Code {
+  border-radius: 0;
+  font-size: 11px;
+}

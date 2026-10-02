@@ -62,7 +62,7 @@ export async function consumeGitHubAuthorization(request: Request, env: Authoriz
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
   if (!state || !code) {
-    throw new GitHubAuthorizationStateError("GitHub authorization was not completed");
+    throw new GitHubAuthorizationStateError("GitHub 授权没有完成");
   }
 
   const browserBinding = cookieValue(request.headers.get("cookie"), STATE_COOKIE);
@@ -72,10 +72,10 @@ export async function consumeGitHubAuthorization(request: Request, env: Authoriz
     browserBinding ? await sha256Base64Url(browserBinding) : "",
   );
   if (record.kind === "missing") {
-    throw new GitHubAuthorizationStateError("Expired GitHub authorization state");
+    throw new GitHubAuthorizationStateError("GitHub 授权状态已过期");
   }
   if (record.kind === "browser_mismatch") {
-    throw new GitHubAuthorizationStateError("GitHub authorization browser state did not match");
+    throw new GitHubAuthorizationStateError("GitHub 授权的浏览器状态不一致");
   }
 
   return {

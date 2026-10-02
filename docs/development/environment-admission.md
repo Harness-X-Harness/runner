@@ -11,7 +11,18 @@ confirmation are separate actions. A stop confirmation prevents a subsequent
 start for that same runtime identity. Dispatch/observation may never complete:
 there is no fairness or liveness claim.
 
-The finite model has two owners and three Environment identities, including two
+`formal/EnvironmentLifecycle.tla` is a separate focused obligation for one
+Environment's status projection. Startup, idle, hard-deadline, and disconnect
+expiry stay `unavailable` and keep the capacity reservation. Only confirmed
+stop after close intent releases it and enters `closed`. A later ready frame
+does not undo startup, idle, or hard expiry. Disconnect can return to `ready`
+without a new execution. Observation can lag and must not treat an earlier open
+completion as the current ready state. It is not a refinement of the admission
+or ordinary-receipt models, and it has no liveness claim. The finite check uses
+one Environment and one execution incarnation.
+
+
+The admission model has two owners and three Environment identities, including two
 competing identities for one owner. Its capacity is two, not the production
 policy of four. It checks retention of responsibility and owner exclusion;
 it is not a parameterized proof of arbitrary global limits. The faulty variant

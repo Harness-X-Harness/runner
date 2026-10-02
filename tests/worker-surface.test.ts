@@ -88,8 +88,8 @@ for (const failedLookup of [1, 2]) {
     assert.equal(response.headers.has("location"), false);
     assert.equal(response.headers.has("set-cookie"), false);
     const body = await response.text();
-    assert.match(body, /Authorization temporarily unavailable/);
-    assert.match(body, /could not verify your MCP client&#x27;s public metadata/);
+    assert.match(body, /授权暂时不可用/);
+    assert.match(body, /无法验证客户端的公开元数据/);
     assert.doesNotMatch(body, /private-client-state|private-upstream-response|client\.example|CimdFetchError|Continue with GitHub/);
     fetchMock.assertNoPendingInterceptors();
 
@@ -99,7 +99,7 @@ for (const failedLookup of [1, 2]) {
         { headers: { "content-type": "application/json", "cache-control": "no-store" } }).times(2);
     const recovered = await mf.dispatchFetch(authorizeUrl());
     assert.equal(recovered.status, 200);
-    assert.match(await recovered.text(), /Use private development environments/);
+    assert.match(await recovered.text(), /使用私人开发工作区/);
     fetchMock.assertNoPendingInterceptors();
   });
 }

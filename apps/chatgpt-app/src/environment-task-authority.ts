@@ -115,8 +115,8 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
             structuredContent: { outcome: "capacity_rejected", capacityKind: opened.capacityKind,
               retryable: opened.retryable, ...(existing ? { existingEnvironment: existing } : {}) },
             content: [{ type: "text", text: existing
-              ? `Principal Environment capacity reached. Existing Environment ${existing.environmentId}${existing.status ? ` is ${existing.status}` : ""}. This open is not retryable. Explicitly continue with or close that Environment first.`
-              : "Global Environment capacity reached. This open is temporarily retryable. No work was queued. Do not poll or automatically retry." }],
+              ? `You already have a workspace. environmentId=${existing.environmentId}${existing.status ? `, status=${existing.status}` : ""}. Open that workspace, or close it before you start another. Do not retry this open.`
+              : "No room for a new workspace right now. Nothing was started. Try again later. Do not poll." }],
           });
         }
         return projectLifecycle(env, props, capable, name, opened.environmentId, "open", opened.dispatch);
