@@ -102,14 +102,19 @@ Events. The template is linked by `_meta.ui.resourceUri` and read through
 `resources/read`; `resources/list` remains the live Environment directory.
 
 The workbench shows an explicitly dated snapshot, not a live monitor. Selecting
-an Environment or clicking **View progress** performs one read. There is no
-timer, automatic retry, subscription or background model wakeup. Tool results
+an Environment or clicking **Refresh** performs one read. There is no
+automatic query, retry, subscription or background model wakeup. The local clock
+only updates relative timestamps. Tool results
 replace the displayed snapshot. Viewing the workbench does not renew deadlines.
 
-Use the ChatGPT input box for Agent requests and commands. The standard
+Send an Agent request from the workbench input or the ChatGPT input box; use
+chat for commands. A confirmed admission refusal allows editing and a new
+submission. An unknown response retains the original text and submission key
+for an explicit retry; unrelated results do not clear that key. An error after
+admission is not evidence that no work started. The standard
 `ui/update-model-context` bridge shares the selected Environment and operation
 for subsequent conversation turns; it does not send a message or start work.
-**Continue in ChatGPT**, **Explain result** and **Answer in ChatGPT** send a
+**Explain result** and **Answer in ChatGPT** send a
 user-requested `ui/message`. Host approval and capability rules still apply.
 
 Buttons use the same authenticated tools as chat. The component receives no

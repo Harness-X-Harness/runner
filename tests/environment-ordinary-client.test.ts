@@ -6,6 +6,7 @@ import { serveTaskRequest } from "../apps/chatgpt-app/src/task-methods.ts";
 import { lifecycleTask } from "../apps/chatgpt-app/src/environment-lifecycle-task.ts";
 import type { EnvironmentSnapshot, OperationRecord } from "../apps/chatgpt-app/src/environment-object.ts";
 import type { ReconnectDiagnostic } from "../shared/environment-reconnect.ts";
+import { resultText, submissionDisposition } from "../apps/chatgpt-app/ui/view.ts";
 
 test("ordinary clients receive one honest contract and Tasks clients keep Task handles", async () => {
   const environmentId = `env_${"a".repeat(32)}`;
@@ -13,6 +14,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   const state = { reservations: 0, opens: 0, dispatches: 0, closes: 0, answers: 0, names: [] as string[],
     reads: [] as string[], cancellations: 0,
     status: "ready" as EnvironmentSnapshot["status"], activeTaskId: null as string | null, failRead: false,
+    reserveError: undefined as string | undefined, readError: undefined as string | undefined,
     immediateResult: undefined as OperationRecord["result"], diagnostic: undefined as ReconnectDiagnostic | undefined };
   const env = { ENVIRONMENT_ADMISSION: { getByName() { return { async list() { return [environmentId]; } }; } },
     ENVIRONMENTS: { getByName(id: string) {
@@ -41,6 +43,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
             status: state.status === "closed" ? "completed" : "working" }) : null;
         },
         async reserveOperation(_owner: string, taskId: string, request: string) {
+          if (state.reserveError) throw new Error(state.reserveError);
           state.reservations++;
           const record = records.get(taskId) ?? { request, runtimeId: "PRIVATE_RUNTIME", createdAt: 1, updatedAt: 1 };
           if (state.immediateResult !== undefined) record.result = state.immediateResult;
@@ -49,6 +52,7 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
           return record;
         },
         async readOperation(owner: string, taskId: string) {
+          if (state.readError) throw new Error(state.readError);
           state.reads.push(taskId);
           return owner === "123" ? records.get(taskId) ?? null : null;
         },
@@ -281,4 +285,42 @@ test("ordinary clients receive one honest contract and Tasks clients keep Task h
   assert.equal(broken.error?.code, -32603);
   assert.equal(broken.result, undefined);
   assert.doesNotMatch(body(broken), /PRIVATE_STORAGE_FAILURE|Ordinary result/);
+
+  state.failRead = false;
+  const agent = { name: "agent", arguments: { environmentId, prompt: "hello", idempotencyKey: "rejection-probe" } };
+  // Drive the real transport, not a mock CallToolResult with the desired error text.
+  for (const capable of [false, true]) {
+    const before = state.reservations;
+    for (const prompt of ["x".repeat(66000), "界".repeat(22000)]) {
+      const rejected = await rpc("tools/call", { ...agent, arguments: { ...agent.arguments, prompt } }, capable);
+      assert.equal(rejected.error, undefined);
+      assert.equal(rejected.result?.isError, true);
+      assert.equal(resultText(rejected.result!), "INVALID_OPERATION_INPUT");
+      assert.equal(submissionDisposition(resultText(rejected.result!)), "rejected");
+      assert.equal(state.reservations, before);
+    }
+    for (const code of ["OPERATION_ID_CONFLICT", "ENVIRONMENT_NOT_READY", "ENVIRONMENT_RUNTIME_BUSY",
+      "ENVIRONMENT_CLOSING", "ENVIRONMENT_IDLE_EXPIRED", "ENVIRONMENT_NOT_FOUND", "OPERATION_RECEIPT_CAPACITY"]) {
+      state.reserveError = code;
+      const rejected = await rpc("tools/call", agent, capable);
+      assert.equal(rejected.error, undefined);
+      assert.equal(rejected.result?.isError, true);
+      assert.equal(resultText(rejected.result!), code);
+      assert.equal(submissionDisposition(resultText(rejected.result!)), "rejected");
+      assert.equal(state.reservations, before);
+    }
+    state.reserveError = "PRIVATE_STORAGE_FAILURE INVALID_OPERATION_INPUT";
+    const unknown = await rpc("tools/call", agent, capable);
+    assert.equal(unknown.error?.code, -32603);
+    assert.equal(unknown.result, undefined);
+    assert.doesNotMatch(body(unknown), /PRIVATE_STORAGE_FAILURE|INVALID_OPERATION_INPUT/);
+    state.reserveError = undefined;
+    // The same named error after admission is not proof that nothing started.
+    state.readError = "ENVIRONMENT_NOT_READY";
+    const acceptedButUnreadable = await rpc("tools/call", agent, capable);
+    assert.equal(acceptedButUnreadable.error?.code, -32603);
+    assert.equal(acceptedButUnreadable.result, undefined);
+    assert.equal(state.reservations, before + 1);
+    state.readError = undefined;
+  }
 });

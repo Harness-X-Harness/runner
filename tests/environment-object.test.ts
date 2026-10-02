@@ -586,8 +586,9 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.deepEqual(await cancelAcknowledged, { type: "result-accepted", generation: 6, taskId: "operation-two" });
   const confirmedCancellation = await (await call(environmentId, cancelledOperation, "read-operation")).json() as { result: unknown };
   assert.deepEqual(confirmedCancellation.result, { ok: true, value: { status: "cancelled" } });
-  const preserved = await (await call(environmentId, operation, "read-operation")).json() as { result: typeof outcome };
+  const preserved = await (await call(environmentId, operation, "read-operation")).json() as { request: string; result: typeof outcome };
   assert.equal(preserved.result.value.finalResponse.length, 140000);
+  assert.equal(preserved.request, operation.request);
   assert.deepEqual(await (await call(environmentId, operation, "read-output")).json(), finalOutput);
   for (const change of [{ runtimeId: "00000000-0000-4000-8000-000000000002" }, { runId: "124" }, { ownerId: "2" }]) {
     assert.equal((await call(environmentId, { ...runtimeClaim, ...change }, "runtime")).status, 409);
@@ -725,6 +726,7 @@ test("Environment DO identity and cross-object admission use committed creation"
   assert.equal((await call(environmentId)).status, 409);
   assert.equal(await (await call(environmentId, input, "alarm-time")).json(), retentionAlarm);
   const retained = await (await call(environmentId, operation, "read-operation")).json() as OperationRecord;
+  assert.equal(retained.request, operation.request);
   assert.equal(environmentTask(operation.taskId, retained).ttlMs, retentionAlarm - retained.createdAt);
   await call(environmentId, input, "expire-results");
   assert.equal(await lifecycleTask(environmentId, "1", "open"), null);
