@@ -175,20 +175,6 @@ export function operationStatusText(s: Snapshot): string | undefined {
   return undefined;
 }
 
-export function stateLabel(s: Snapshot): string {
-  if (s.environmentStatus === "ready") {
-    if (s.questions?.length) return "等待输入";
-    if (operationBusy(s)) return "进行中";
-    if (selectedWorkFailed(s)) return "失败";
-    if (s.operationStatus === "cancelled") return "已取消";
-    return "就绪";
-  }
-  const phase = lifecycleLabel(s.environmentStatus);
-  if (selectedWorkFailed(s)) return `${phase} · 失败`;
-  if (s.operationStatus === "cancelled") return `${phase} · 已取消`;
-  return phase;
-}
-
 const reasonCopy: Record<string, string> = {
   startup_expired: "启动超时。",
   runtime_expired: "使用时间已到。",
@@ -225,7 +211,7 @@ export function connectionNote(s: Snapshot): string | undefined {
   return reconnectCopy[note.data.category] ?? "连接异常。";
 }
 
-/** Only facts the status label cannot carry. The label already states phase and outcome. */
+/** Context beyond the separate Environment indicator and operation outcome. */
 export function nextSentence(s: Snapshot): string | undefined {
   if (s.environmentStatus === "unavailable") return reasonText(s.environmentReason) ?? connectionNote(s);
   if (s.historical) return "较早的操作。";
@@ -260,13 +246,10 @@ export function executorName(value: string): string {
   return value;
 }
 
-export function replyMessage(s: Snapshot, action: "explain" | "continue" | "answer") {
-  const operationId = action === "answer" ? s.questions?.[0]?.operationId : s.operationId;
+export function replyMessage(s: Snapshot) {
+  const operationId = s.questions?.[0]?.operationId;
   const target = `environmentId=${s.environmentId}${operationId ? `, operationId=${operationId}` : ""}`;
-  const intent = action === "explain" ? "请解释此结果。不要开始新的工作。"
-    : action === "answer" ? "请协助回答当前问题。不要开始新的回合。"
-    : "请在当前工作区继续。如不确定，先询问。不要打开另一个工作区。";
-  return { role: "user" as const, content: [{ type: "text" as const, text: `AgentEnv: ${target}. ${intent}` }] };
+  return { role: "user" as const, content: [{ type: "text" as const, text: `AgentEnv: ${target}. 请协助回答当前问题。不要开始新的回合。` }] };
 }
 
 export function cancelArguments(s: Snapshot) {

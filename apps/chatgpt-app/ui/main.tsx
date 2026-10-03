@@ -57,13 +57,13 @@ async function call(name: string, args: Record<string, unknown>): Promise<CallOu
   return outcome;
 }
 
-async function message(action: "explain" | "answer") {
+async function message() {
   if (busy || latest?.kind !== "environment") return;
   busy = true;
   error = "";
   changed();
   try {
-    const result = await app.sendMessage(replyMessage(latest.snapshot, action));
+    const result = await app.sendMessage(replyMessage(latest.snapshot));
     if (result.isError) error = "消息未发送。";
   } catch {
     error = "消息未确认。请查看对话。";
@@ -71,6 +71,13 @@ async function message(action: "explain" | "answer") {
     busy = false;
     changed();
   }
+}
+
+async function openLink(url: string) {
+  try {
+    const result = await app.openLink({ url });
+    if (result.isError) { error = "未能打开链接。"; changed(); }
+  } catch { error = "未能打开链接。"; changed(); }
 }
 
 app.ontoolresult = result => { void receive(result); };
@@ -97,7 +104,8 @@ function Workbench() {
     canMessage={connected && !busy && Boolean(app.getHostCapabilities()?.message?.text)}
     onCall={(name, args) => { void call(name, args); }}
     onSend={args => call("agent", args)}
-    onMessage={action => { void message(action); }} />;
+    onMessage={() => { void message(); }}
+    onOpenLink={connected && app.getHostCapabilities()?.openLinks ? openLink : undefined} />;
 }
 
 createRoot(document.getElementById("root")!).render(<Workbench />);

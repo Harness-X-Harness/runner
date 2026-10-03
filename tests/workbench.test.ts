@@ -3,7 +3,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { build } from "../apps/chatgpt-app/node_modules/esbuild/lib/main.js";
-import { readView, selectedContext, refreshArguments, stateLabel, finalText, cancelArguments, replyMessage, questionFields, answerContent, reasonText, nextSentence, listStatus, commandText, commandTitle, operationStatusText, decidePromptSend, submissionDisposition, userFacingError } from "../apps/chatgpt-app/ui/view.ts";
+import { readView, selectedContext, refreshArguments, lifecycleLabel, finalText, cancelArguments, replyMessage, questionFields, answerContent, reasonText, nextSentence, listStatus, commandText, commandTitle, operationStatusText, decidePromptSend, submissionDisposition, userFacingError } from "../apps/chatgpt-app/ui/view.ts";
 import { environmentTools } from "../apps/chatgpt-app/src/environment-tools.ts";
 import { readWorkbench, WORKBENCH_URI } from "../apps/chatgpt-app/src/workbench-resource.ts";
 
@@ -56,11 +56,12 @@ test("display separates lifecycle, operation completion and semantic results", (
   assert.equal(view.kind, "environment");
   if (view.kind !== "environment") return;
   const s = view.snapshot;
-  assert.equal(stateLabel(s), "进行中");
+  assert.equal(lifecycleLabel(s.environmentStatus), "就绪");
+  assert.equal(operationStatusText(s), "进行中");
   assert.equal(finalText(s), undefined);
-  assert.equal(stateLabel({ ...s, environmentStatus: "closing" }), "关闭中");
-  assert.equal(stateLabel({ ...s, environmentStatus: "closed" }), "已关闭");
-  assert.equal(stateLabel({ ...s, questions: [{ id: "q", operationId, message: "Choose" }] }), "等待输入");
+  assert.equal(lifecycleLabel("closing"), "关闭中");
+  assert.equal(lifecycleLabel("closed"), "已关闭");
+  assert.equal(operationStatusText({ ...s, operationStatus: "input_required" }), "等待输入");
   assert.equal(finalText({ ...s, operationStatus: "completed", outcome: { finalResponse: "<script>untrusted</script>" } }), "<script>untrusted</script>");
   assert.equal(finalText({ ...s, operationStatus: "working", outcome: { finalResponse: "not final" } }), undefined);
   assert.match(finalText({ ...s, operationStatus: "completed", outcome: { exitCode: 1, stdout: "", stderr: "failed", truncated: true } })!, /Exit code: 1.*failed.*truncated/s);
@@ -73,9 +74,7 @@ test("cancel and conversational actions preserve exact selection and active oper
   assert.deepEqual(cancelArguments(s), { operationId, action: "cancel" });
   assert.equal(cancelArguments({ ...s, activeOperationStatus: "completed" }), undefined);
   assert.equal(cancelArguments({ ...s, environmentStatus: "closed" }), undefined);
-  assert.match(replyMessage(s, "explain").content[0]!.text, new RegExp(s.operationId));
-  assert.match(replyMessage(s, "continue").content[0]!.text, /当前工作区/);
-  const answer = replyMessage({ ...s, questions: [{ id: "q", operationId, message: "Choose" }] }, "answer").content[0]!.text;
+  const answer = replyMessage({ ...s, questions: [{ id: "q", operationId, message: "Choose" }] }).content[0]!.text;
   assert.match(answer, /不要开始新的回合/);
   assert.match(answer, new RegExp(`operationId=${operationId}`));
   assert.doesNotMatch(answer, new RegExp(s.operationId));
@@ -98,10 +97,10 @@ test("question fields preserve types, validate schema, and allow standard declin
 test("the workbench tells a person the next fact and keeps a rejected open actionable", () => {
   const ready = { ...snapshot, activeOperationId: null, activeOperationStatus: undefined, operationStatus: "completed",
     outcome: { finalResponse: "done" } };
-  assert.equal(stateLabel(ready), "就绪");
-  assert.equal(stateLabel({ ...ready, outcome: { exitCode: 0, stdout: "", stderr: "", truncated: false } }), "就绪");
-  assert.equal(stateLabel({ ...ready, outcome: { exitCode: 1, stdout: "", stderr: "failed", truncated: false } }), "失败");
-  assert.equal(stateLabel({ ...snapshot, environmentStatus: "unavailable", environmentReason: "runtime_disconnected" }), "不可用");
+  assert.equal(lifecycleLabel(ready.environmentStatus), "就绪");
+  assert.equal(operationStatusText({ ...ready, outcome: { exitCode: 0, stdout: "", stderr: "", truncated: false } }), "已完成");
+  assert.equal(operationStatusText({ ...ready, outcome: { exitCode: 1, stdout: "", stderr: "failed", truncated: false } }), "失败");
+  assert.equal(lifecycleLabel("unavailable"), "不可用");
   assert.equal(reasonText("idle_expired"), "闲置时间已到。");
   const idle = { ...ready, environmentStatus: "unavailable", environmentReason: "idle_expired" };
   assert.equal(nextSentence(idle), "闲置时间已到。");
@@ -125,17 +124,17 @@ test("the workbench tells a person the next fact and keeps a rejected open actio
 
 test("a closed environment still shows the selected operation result", () => {
   const failed = { ...snapshot, environmentStatus: "closed", operationStatus: "failed", outcome: { message: "ended" } };
-  assert.equal(stateLabel(failed), "已关闭 · 失败");
+  assert.equal(lifecycleLabel(failed.environmentStatus), "已关闭");
   assert.equal(nextSentence(failed), undefined);
   assert.equal(operationStatusText(failed), "失败");
   const cancelled = { ...snapshot, environmentStatus: "closed", activeOperationId: null, activeOperationStatus: undefined,
     operationStatus: "cancelled" };
-  assert.equal(stateLabel(cancelled), "已关闭 · 已取消");
+  assert.equal(lifecycleLabel(cancelled.environmentStatus), "已关闭");
   assert.equal(nextSentence(cancelled), undefined);
   assert.equal(operationStatusText(cancelled), "已取消");
   const done = { ...snapshot, environmentStatus: "closed", activeOperationId: null, operationStatus: "completed",
     outcome: { finalResponse: "done" } };
-  assert.equal(stateLabel(done), "已关闭");
+  assert.equal(lifecycleLabel(done.environmentStatus), "已关闭");
   assert.equal(nextSentence(done), undefined);
   assert.equal(operationStatusText(done), "已完成");
 });
@@ -146,20 +145,20 @@ test("timeout and signal failures use the native command failure rule", () => {
   const command = commandText(timeout);
   assert.ok(command);
   assert.equal(commandTitle(command!), "超时");
-  assert.equal(stateLabel(timeout), "失败");
+  assert.equal(operationStatusText(timeout), "失败");
   assert.equal(nextSentence(timeout), undefined);
   assert.match(finalText(timeout)!, /timeout/);
   assert.match(finalText(timeout)!, /SIGTERM/);
   assert.doesNotMatch(finalText(timeout)!, /Exit code: none/);
   const signal = { ...timeout, outcome: { exitCode: null, signal: "SIGKILL", stdout: "partial", stderr: "", truncated: false } };
   assert.equal(commandTitle(commandText(signal)!), "信号 SIGKILL");
-  assert.equal(stateLabel(signal), "失败");
+  assert.equal(operationStatusText(signal), "失败");
   const success = { ...timeout, outcome: { exitCode: 0, signal: null, stdout: "ok", stderr: "", truncated: false } };
   assert.equal(commandTitle(commandText(success)!), "结果");
-  assert.equal(stateLabel(success), "就绪");
+  assert.equal(operationStatusText(success), "已完成");
   assert.equal(nextSentence(success), undefined);
   const nullExit = { ...timeout, outcome: { exitCode: null, signal: null, stdout: "", stderr: "", truncated: false } };
-  assert.equal(stateLabel(nullExit), "失败");
+  assert.equal(operationStatusText(nullExit), "失败");
   assert.equal(commandTitle(commandText(nullExit)!), "失败");
 });
 
@@ -180,29 +179,89 @@ test("an unconfirmed prompt keeps its key until its own response arrives", () =>
   assert.equal(fresh.key, "key-6");
 });
 
-test("the rendered workbench exposes its only lifecycle label as a live status", async () => {
+async function screenRenderer() {
   const appRoot = new URL("../apps/chatgpt-app/", import.meta.url);
   const built = await build({
     stdin: { contents: `import { createElement } from "react";
       import { renderToStaticMarkup } from "react-dom/server";
       import { Screen } from "./ui/screen.tsx";
-      export function render(environmentStatus) {
+      export function render(environmentStatus, overrides = {}) {
         return renderToStaticMarkup(createElement(Screen, {
           view: { kind: "environment", receivedAt: 1, snapshot: {
             contract: "ordinary", environmentId: "env_fixture", executor: "codex", environmentStatus,
-            disposition: "accepted", workFinished: false, expiresAt: null, activeOperationId: null,
+            disposition: "accepted", workFinished: true, expiresAt: 21600001, idleExpiresAt: 900001,
+            activeOperationId: null, operationStatus: "completed", outcome: { finalResponse: "RETAINED_RESULT" }, ...overrides,
           } }, now: 1, error: "", busy: false, connected: true, canCall: true, canMessage: true,
-          creationKey: "fixture", onCall() {}, onSend: async () => "sent", onMessage() {},
+          creationKey: "fixture", onCall() {}, onSend: async () => "sent", onMessage() {}, onOpenLink() {},
         }));
       }`, resolveDir: fileURLToPath(appRoot), loader: "tsx" },
     bundle: true, write: false, format: "cjs", platform: "node", jsx: "automatic",
     external: ["react", "react-dom"],
   });
-  const module = { exports: {} as { render(status: string): string } };
+  const module = { exports: {} as { render(status: string, overrides?: Record<string, unknown>): string } };
   new Function("require", "module", "exports", built.outputFiles[0]!.text)(createRequire(appRoot), module, module.exports);
+  return module.exports.render;
+}
+
+test("the compact pixel workbench keeps lifecycle, outcome and closed usage distinct", async () => {
+  const render = await screenRenderer();
   for (const [status, label] of [["opening", "启动中"], ["ready", "就绪"], ["closing", "关闭中"], ["closed", "已关闭"]]) {
-    const rendered = module.exports.render(status!);
-    assert.match(rendered, new RegExp(`<span class="status [^"]+" role="status">${label}</span>`));
-    assert.doesNotMatch(rendered, /<span[^>]*class="status[^>]*aria-hidden/);
+    const rendered = render(status!);
+    assert.match(rendered, new RegExp(`<span class="status [^"]+" role="status"[^>]+data-hint="工作区：${label}"`));
+    assert.doesNotMatch(rendered, /<span[^>]*class="status [^"]*"[^>]*aria-hidden/);
+    assert.match(rendered, /RETAINED_RESULT/);
+    assert.match(rendered, /<nav aria-label="工作区操作">/);
+    assert.match(rendered, /role="region" aria-label="助手回复"/);
+    assert.doesNotMatch(rendered, /<details|解释结果|<h2[^>]*>结果/);
+    assert.doesNotMatch(rendered, /<footer[^>]*>.*<button/);
+    if (status === "closed") {
+      assert.doesNotMatch(rendered, /关闭时间|闲置时间|刷新不会延长使用时间/);
+      assert.doesNotMatch(rendered, /aria-label="关闭工作区"|class="prompt"/);
+    } else {
+      assert.match(rendered, /关闭时间/);
+      assert.match(rendered, /闲置时间/);
+    }
+  }
+  const failed = render("ready", { operationStatus: "failed", outcome: undefined });
+  assert.match(failed, /data-hint="工作区：就绪"/);
+  assert.match(failed, /class="operation-state bad" role="status">失败/);
+  const oldFailure = render("ready", { operationId: "old", operationStatus: "failed", outcome: undefined,
+    activeOperationId: "current", activeOperationStatus: "working", historical: true });
+  assert.match(oldFailure, /失败/);
+  assert.match(oldFailure, /当前操作 · .*进行中/);
+});
+
+test("final replies render Markdown safely while command output and progress remain literal", async () => {
+  const render = await screenRenderer();
+  const markdown = [
+    "# Summary", "", "A **clear** reply with `code`.", "",
+    "- one", "- two", "", "> quoted", "",
+    "```ts", '<script>alert("literal code")</script>', "```", "",
+    "| Item | State |", "| --- | --- |", "| check | done |", "",
+    "- [x] read only", "",
+    "[docs](https://example.com/docs)", "",
+    "[bad](javascript:alert%281%29) [file](file:///tmp/private) [relative](/authorize)", "",
+    "![image description](https://example.com/image.png)", "",
+    '<script>alert("raw HTML")</script><iframe src="https://example.com"></iframe>',
+  ].join("\n");
+  const rendered = render("ready", { outcome: { finalResponse: markdown } });
+  assert.match(rendered, /<h1>Summary<\/h1>/);
+  assert.match(rendered, /<strong>clear<\/strong>/);
+  assert.match(rendered, /<ul>.*<li>one<\/li>.*<li>two<\/li>/s);
+  assert.match(rendered, /<blockquote>/);
+  assert.match(rendered, /<pre[^>]*><code class="language-ts">&lt;script&gt;/);
+  assert.match(rendered, /<table>.*<th>Item<\/th>.*<td>done<\/td>/s);
+  assert.match(rendered, /role="img" aria-label="已完成"/);
+  assert.doesNotMatch(rendered, /type="checkbox"/);
+  assert.match(rendered, /<a href="https:\/\/example.com\/docs">docs<\/a>/);
+  assert.match(rendered, /image description/);
+  assert.doesNotMatch(rendered, /<script|<iframe|<img|javascript:|file:\/\/|href="\/authorize"/);
+  const literal = "# not a heading\n<script>literal output</script>";
+  const command = render("ready", { outcome: { exitCode: 0, stdout: literal, stderr: "", truncated: false } });
+  const progress = render("ready", { operationStatus: "working", outcome: undefined,
+    output: { text: literal, truncated: false, revision: 1 } });
+  for (const output of [command, progress]) {
+    assert.match(output, /<pre># not a heading\n&lt;script&gt;literal output&lt;\/script&gt;<\/pre>/);
+    assert.doesNotMatch(output, /<h1>not a heading/);
   }
 });

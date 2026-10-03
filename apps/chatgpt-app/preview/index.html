@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentEnv · 本地前端预览</title>
+  <style>
+    :root {
+      color-scheme: light; font: 13px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      --paper: #e7f2ea; --panel: #f4fbf6; --ink: #10241c; --muted: #3e5c4c;
+      --line: #10241c; --accent: #087b42; --accent-ink: #f3fff7; --shadow: #10241c;
+      color: var(--ink); background: var(--paper);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --paper: #0c1210; --panel: #141c18; --ink: #d8ffe9; --muted: #8fbfa4;
+      --line: #9dffc8; --accent: #3dff9a; --accent-ink: #062116; --shadow: #000;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    [hidden] { display: none !important; }
+    .shell { max-width: 1180px; padding: 20px 24px; margin: auto; }
+    .preview-controls { background: var(--panel); border: 2px solid var(--line); box-shadow: 3px 3px 0 var(--shadow); }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border-bottom: 2px solid var(--line); }
+    .brand, nav, .group { display: flex; align-items: center; gap: 8px; }
+    .brand { min-width: 0; }
+    h1 { margin: 0; font-size: 16px; }
+    h2 { margin: 0; font-size: 13px; }
+    p { margin: 0; }
+    .mark {
+      width: 24px; height: 24px; flex-shrink: 0; background: var(--accent); border: 2px solid var(--line); box-shadow: 2px 2px 0 var(--shadow);
+      background-image: linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink));
+      background-size: 4px 4px, 4px 4px, 12px 4px; background-position: 4px 4px, 12px 4px, 4px 12px; background-repeat: no-repeat;
+    }
+    .badge { color: var(--muted); font-size: 11px; border-left: 1px solid var(--line); padding-left: 8px; }
+    nav { gap: 4px; }
+    button, select, .icon-link { font: inherit; border: 2px solid var(--line); border-radius: 0; color: var(--ink); background: var(--paper); min-height: 36px; }
+    select { padding: 5px 8px; width: 100%; }
+    button, .icon-link { cursor: pointer; }
+    .icon-button, .icon-link { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-color: transparent; padding: 8px; text-decoration: none; }
+    button:hover, .icon-link:hover { background: var(--paper); border-color: var(--line); }
+    button[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+    button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .controls { display: grid; grid-template-columns: 1.2fr 1fr 1.3fr; gap: 16px; padding: 12px; }
+    fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+    fieldset + fieldset { border-left: 1px solid var(--line); padding-left: 16px; }
+    .group { align-items: end; }
+    label { display: grid; gap: 4px; min-width: 0; flex: 1; font-size: 11px; color: var(--muted); }
+    .wide { flex: 2; }
+    .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .context { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 20px; flex-wrap: wrap; padding: 10px 2px 0; color: var(--muted); font-size: 12px; }
+    #bridge-status { font-size: 11px; }
+    #stage { margin: 14px auto; width: min(100%, 780px); }
+    iframe { display: block; border: 0; width: 100%; background: transparent; }
+    .note { color: var(--muted); font-size: 11px; text-align: center; }
+    .trace { border: 2px solid var(--line); background: var(--panel); margin-top: 16px; }
+    .trace header { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    #log { margin: 0; padding: 0 12px 0 36px; max-height: 380px; overflow: auto; }
+    #log:empty { padding: 12px; }
+    #log:empty::before { content: "操作卡片后，记录会显示在这里。"; color: var(--muted); }
+    #log li { padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 25%, transparent); }
+    #log li:last-child { border: 0; }
+    pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 12px; line-height: 1.6; }
+    [data-hint] { position: relative; }
+    [data-hint]::after { content: attr(data-hint); position: absolute; z-index: 2; top: calc(100% + 6px); right: 0; padding: 4px 8px; width: max-content; color: var(--ink); background: var(--panel); border: 1px solid var(--line); box-shadow: 2px 2px 0 var(--shadow); font-size: 12px; visibility: hidden; pointer-events: none; }
+    [data-hint]:hover::after, [data-hint]:focus-visible::after { visibility: visible; }
+    @media (max-width: 850px) { .controls { grid-template-columns: 1fr 1fr; } fieldset:last-child { grid-column: 1 / -1; border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; } }
+    @media (max-width: 520px) { .shell { padding: 12px 8px; } .topbar { gap: 8px; } h1 { font-size: 13px; } .badge { display: none; } .controls { grid-template-columns: 1fr; gap: 10px; } fieldset + fieldset { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; } .context { gap: 4px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="preview-controls" aria-label="预览设置">
+      <header class="topbar">
+        <div class="brand"><span class="mark" aria-hidden="true"></span><h1>AgentEnv 预览台</h1><span class="badge">本地示例</span></div>
+        <nav aria-label="预览操作">
+          <button class="icon-button" id="reset" type="button" aria-label="重置场景" data-hint="重置场景">
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 2h7v2H4v2H2V4h2zM11 4h2v3h2v2H9V3h2zM2 9h2v3h2v2H4v-2H2zM6 12h6v-2h2v2h-2v2H6z"/></svg>
+          </button>
+          <button class="icon-button" id="toggle-log" type="button" aria-label="交互记录" aria-expanded="false" aria-controls="trace" data-hint="交互记录">
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M2 2h2v2H2zM6 2h8v2H6zM2 7h2v2H2zM6 7h8v2H6zM2 12h2v2H2zM6 12h8v2H6z"/></svg>
+          </button>
+          <a class="icon-link" id="link" aria-label="此场景的地址" data-hint="场景地址 · 可右键复制">
+            <svg class="icon" viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M2 4h5v2H2v6h6V9h2v3H8v2H2v-2H0V6h2zM9 0h5v2h2v5h-2V2H9zM8 4h4v2h-2v2H8v2H6V6h2z"/></svg>
+          </a>
+        </nav>
+      </header>
+      <div class="controls">
+        <fieldset><legend class="sr-only">内容</legend><div class="group">
+          <label class="wide">场景<select id="scene"></select></label>
+          <label>助手<select id="executor"><option value="codex">Codex</option><option value="grok">Grok</option></select></label>
+        </div></fieldset>
+        <fieldset><legend class="sr-only">显示</legend><div class="group">
+          <label>主题<select id="theme"><option value="light">浅色</option><option value="dark">深色</option></select></label>
+          <label class="wide">宽度<select id="width"><option value="780">桌面 · 780px</option><option value="375">窄屏 · 375px</option></select></label>
+        </div></fieldset>
+        <fieldset><legend class="sr-only">响应模拟</legend><div class="group">
+          <label>回复延迟<select id="delay"><option value="0">无延迟</option><option value="1500" selected>1.5 秒</option><option value="5000">5 秒</option></select></label>
+          <label class="wide">下一次工具调用<select id="fault"><option value="none">正常</option><option value="rejected">明确拒绝</option><option value="unknown">响应未确认</option></select></label>
+        </div></fieldset>
+      </div>
+    </section>
+    <div class="context"><p id="hint"></p><p id="bridge-status" role="status">正在加载本地宿主…</p></div>
+    <div id="stage"></div>
+    <p class="note">正式卡片 · 示例回复 · 按需更新</p>
+    <section class="trace" id="trace" aria-label="交互记录" hidden>
+      <header><h2>交互记录</h2><span id="log-count">0 条</span></header>
+      <ol id="log"></ol>
+    </section>
+  </main>
+  <script type="module" src="/host.js"></script>
+</body>
+</html>
