@@ -20,6 +20,11 @@ After a merged change affects Task execution, authorization or results, use
 `docs/agents/live-stories/task-runtime.md` for bounded production acceptance.
 It is a development-time Live Story, not CI automation.
 
+### Interface design
+
+Before changing product UI layout, styling or interaction grouping, read
+[`design.md`](design.md). Use its local preview checks for frontend changes.
+
 ## 事实经验自动固化
 
 每个 clone 在 Agent 开始工作时必须初始化本地工作记忆：先确认 `.agent-memory/` 已写入该

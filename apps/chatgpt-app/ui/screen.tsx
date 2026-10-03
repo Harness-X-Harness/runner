@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./components/button.tsx";
 import { ConfirmDialog } from "./components/confirm-dialog.tsx";
+import { Icon } from "./components/icon.tsx";
+import { MarkdownReply } from "./components/markdown-reply.tsx";
 import { QuestionForm } from "./questions.tsx";
-import { cancelArguments, commandFailed, commandText, commandTitle, connectionNote, decidePromptSend, executorName, finalText, listStatus, modelLine, nextSentence, operationStatusText, questionFields, refreshArguments, relativeTime, stateLabel, type PromptLease, type View } from "./view.ts";
+import { cancelArguments, commandFailed, commandText, commandTitle, connectionNote, decidePromptSend, executorName, finalText, lifecycleLabel, listStatus, modelLine, nextSentence, operationStatusText, questionFields, refreshArguments, relativeTime, type PromptLease, type View } from "./view.ts";
 
 type Confirm = { kind: "stop" | "close"; id: string } | undefined;
 
-export function Screen({ view, error, busy, connected, canCall, canMessage, now, creationKey, onCall, onSend, onMessage }: {
+export function Screen({ view, error, busy, connected, canCall, canMessage, now, creationKey, onCall, onSend, onMessage, onOpenLink }: {
   view?: View;
   error: string;
   busy: boolean;
@@ -17,7 +19,8 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   creationKey: string;
   onCall: (name: string, args: Record<string, unknown>) => void;
   onSend: (args: { environmentId: string; prompt: string; idempotencyKey: string }) => Promise<"sent" | "rejected" | "unknown">;
-  onMessage: (action: "explain" | "answer") => void;
+  onMessage: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const [confirm, setConfirm] = useState<Confirm>();
   const [prompt, setPrompt] = useState("");
@@ -32,11 +35,10 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
     setPrompt("");
     setLease(current => current?.environmentId === environmentId ? current : undefined);
   }, [environmentId]);
-  const label = snapshot ? stateLabel(snapshot) : undefined;
   const phase = snapshot?.environmentStatus;
+  const label = phase ? lifecycleLabel(phase) : undefined;
   const failed = snapshot !== undefined && (snapshot.operationStatus === "failed" || commandFailed(snapshot));
-  const tone = phase === "unavailable" || failed ? "bad"
-    : phase === "opening" || phase === "closing" || snapshot?.operationStatus === "cancelled" || Boolean(snapshot?.questions?.length) || Boolean(snapshot && cancelArguments(snapshot)) ? "warn" : "good";
+  const tone = phase === "unavailable" ? "bad" : phase === "ready" ? "good" : phase === "closed" ? "off" : "warn";
   const command = snapshot ? commandText(snapshot) : undefined;
   const prose = snapshot && !command ? finalText(snapshot) : undefined;
   const canWork = snapshot?.environmentStatus === "ready" && !cancelArguments(snapshot);
@@ -46,21 +48,43 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   const viewed = view ? relativeTime(view.receivedAt, viewedAt) : "";
   const clock = viewed === "刚刚" ? "刚刚更新" : `${viewed}更新`;
   const operationText = snapshot ? operationStatusText(snapshot) : undefined;
+  const active = snapshot ? cancelArguments(snapshot) : undefined;
+  const progress = prose === undefined && !command ? snapshot?.output : undefined;
+  const notice = snapshot ? nextSentence(snapshot) ?? (phase === "ready" ? connectionNote(snapshot) : undefined) : undefined;
   const promptText = prompt.trim();
   const unconfirmed = Boolean(lease && promptText !== "" && promptText !== lease.text);
   return <main aria-busy={busy}>
     <header>
-      <div className="brand"><span className="mark" aria-hidden="true" /><strong>AgentEnv</strong></div>
-      <span className={label ? `status ${tone}` : undefined} role="status">{label}</span>
+      <div className="identity">
+        <div className="brand"><span className="mark" aria-hidden="true" /><strong>AgentEnv</strong></div>
+        {snapshot && <div className="executor"><h1>{executorName(snapshot.executor)}</h1>
+          {modelLine(snapshot) && <small>{modelLine(snapshot)}</small>}
+        </div>}
+      </div>
+      <div className="controls">
+        {label && <span className={`status ${tone}`} role="status" tabIndex={0} data-hint={`工作区：${label}`}>
+          <span className="status-bar" aria-hidden="true" />
+          <span className={phase === "ready" ? "sr-only" : undefined}>{label}</span>
+        </span>}
+        {view && <nav aria-label="工作区操作">
+          <Button className="icon-button" aria-label="刷新" data-hint={busy ? "正在处理…" : `刷新 · ${clock}`} disabled={!canCall}
+            onClick={() => { const next = refreshArguments(view); onCall(next.name, next.arguments); }}><Icon name="refresh" /></Button>
+          {snapshot && <Button className="icon-button" aria-label="列表" data-hint="工作区列表" disabled={!canCall}
+            onClick={() => onCall("list_environments", {})}><Icon name="list" /></Button>}
+          {snapshot && phase !== "closed" && <Button className="icon-button close-button" variant="danger" aria-label="关闭工作区" data-hint="关闭工作区" disabled={!canCall}
+            onClick={() => setConfirm({ kind: "close", id: snapshot.environmentId })}><Icon name="power" /></Button>}
+        </nav>}
+      </div>
     </header>
+    {busy && <span className="sr-only" role="status">正在处理…</span>}
     {error && <p className="error" role="alert">{error}</p>}
     {!view && <p role="status">{connected ? "正在加载…" : "正在连接…"}</p>}
-    {view?.kind === "list" && <section>
+    {view?.kind === "list" && <section className="launcher">
       {view.environments.length === 0 ? <>
         <h1>选择助手</h1>
         <p>同时只能有一个工作区。</p>
         <div className="choices">
-          {(["codex", "grok"] as const).map(executor => <Button className="choice" variant="primary" key={executor} disabled={!canCall}
+          {(["codex", "grok"] as const).map(executor => <Button className="choice" key={executor} disabled={!canCall}
             onClick={() => onCall("open_environment", { executor, idempotencyKey: creationKey })}>
             <strong>{executorName(executor)}</strong><small>{executor === "codex" ? "打开 Codex" : "打开 Grok"}</small>
           </Button>)}
@@ -73,7 +97,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         </Button>)}
       </>}
     </section>}
-    {view?.kind === "capacity" && <section>
+    {view?.kind === "capacity" && <section className="launcher">
       <h1>{view.capacityKind === "owner" ? "已有工作区" : "没有可用名额"}</h1>
       <p role="status">{view.capacityKind === "owner"
         ? "请先关闭当前工作区。"
@@ -83,27 +107,34 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       {view.capacityKind === "global" && view.executor && view.idempotencyKey && <Button variant="primary" disabled={!canCall}
         onClick={() => onCall("open_environment", { executor: view.executor, idempotencyKey: view.idempotencyKey })}>重试</Button>}
     </section>}
-    {snapshot && <section>
-      <h1>{executorName(snapshot.executor)}</h1>
-      {nextSentence(snapshot) && <p role="status">{nextSentence(snapshot)}</p>}
-      {modelLine(snapshot) && <p className="muted">{modelLine(snapshot)}</p>}
+    {snapshot && <section className="workspace" aria-label="工作内容">
+      {notice && <p className="notice" role="status">{notice}</p>}
+      {operationText && operationText !== "已完成" && (!active || snapshot.operationId !== active.operationId) && <p className={`operation-state ${failed ? "bad" : ""}`} role="status">{operationText}</p>}
       {!!snapshot.questions?.length && snapshot.questions.map(question => <QuestionForm key={`${question.operationId}:${question.id}`}
         question={question} disabled={!canCall || snapshot.environmentStatus !== "ready"}
         answer={(question, response) => onCall("update_operation", {
           operationId: question.operationId, action: "answer", inputResponses: { [question.id]: response },
         })} />)}
-      {unsupported && <Button variant="quiet" disabled={!canMessage || snapshot.environmentStatus !== "ready"} onClick={() => onMessage("answer")}>在对话中回答</Button>}
-      {snapshot.output?.text && <details open={!prose && !command && Boolean(cancelArguments(snapshot))}>
-        <summary>进度</summary>
-        <pre>{snapshot.output.text}</pre>
-        {snapshot.output.truncated && <p className="muted">输出未完整显示。</p>}
-      </details>}
-      {command && <div className="result-block">
-        <h2>{commandTitle(command)}</h2>
+      {unsupported && <Button variant="quiet" disabled={!canMessage || snapshot.environmentStatus !== "ready"} onClick={onMessage}>在对话中回答</Button>}
+      {command && <div className={`result-block ${failed ? "failed" : ""}`} role="region" aria-label="命令输出">
+        {failed && <h2>{commandTitle(command)}</h2>}
         {command.stdout || command.stderr ? <pre>{`${command.stdout}${command.stderr ? `\n${command.stderr}` : ""}`}</pre> : <p className="muted">无输出。</p>}
         {command.truncated && <p className="muted">输出未完整显示。</p>}
       </div>}
-      {prose !== undefined && <div className="result-block"><h2>结果</h2><p className="result">{prose}</p></div>}
+      {prose !== undefined && <div className="result-block" role="region" aria-label="助手回复">
+        <MarkdownReply text={prose} onOpenLink={onOpenLink} />
+      </div>}
+      {(progress?.text || active) && <div className="operation-progress">
+        {active && <div className="operation-bar">
+          <span className="operation-state" role="status">{snapshot.activeOperationId !== snapshot.operationId ? "当前操作 · " : ""}{snapshot.activeOperationStatus === "input_required" ? "等待输入" : "进行中"}</span>
+          <Button variant="quiet" disabled={!canCall}
+            onClick={() => setConfirm({ kind: "stop", id: active.operationId })}><Icon name="stop" />停止</Button>
+        </div>}
+        {progress?.text && <div role="region" aria-label="进度快照">
+          <pre>{progress.text}</pre>
+          {progress.truncated && <p className="muted">输出未完整显示。</p>}
+        </div>}
+      </div>}
       {showPrompt && <form className="prompt" onSubmit={event => {
         event.preventDefault();
         const text = prompt.trim();
@@ -116,35 +147,21 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
           if (result === "sent") setPrompt("");
         });
       }}>
-        <label className="px-label" htmlFor="next-request">指令</label>
-        <textarea id="next-request" value={prompt} disabled={!canCall} placeholder="输入指令"
-          onChange={event => setPrompt(event.target.value)} />
+        <label className="sr-only" htmlFor="next-request">指令</label>
+        <div className="composer">
+          <textarea id="next-request" rows={2} value={prompt} disabled={!canCall} placeholder={prose !== undefined || command ? "继续追问，或开始下一项工作…" : "输入指令，开始工作…"}
+            onChange={event => setPrompt(event.target.value)} />
+          <Button className="icon-button" type="submit" variant="primary" aria-label="发送" data-hint="发送" disabled={!canCall || promptText === "" || unconfirmed}><Icon name="send" /></Button>
+        </div>
         {unconfirmed && <p className="error" role="status">未收到响应。请先重试原指令。</p>}
-        <Button type="submit" variant="primary" disabled={!canCall || promptText === "" || unconfirmed}>发送</Button>
       </form>}
-      {prose !== undefined && <Button variant="quiet" disabled={!canMessage} onClick={() => onMessage("explain")}>解释结果</Button>}
-      {cancelArguments(snapshot) && <Button variant="quiet" disabled={!canCall}
-        onClick={() => setConfirm({ kind: "stop", id: snapshot.activeOperationId! })}>停止</Button>}
-      <details className="details">
-        <summary>详情</summary>
-        <dl>
-          <dt>工作区</dt><dd>{snapshot.environmentId}</dd>
-          {snapshot.operationId && <><dt>操作</dt><dd>{snapshot.operationId}</dd></>}
-          {operationText && <><dt>状态</dt><dd>{operationText}</dd></>}
-          {snapshot.activeOperationId && snapshot.activeOperationId !== snapshot.operationId && <><dt>当前操作</dt><dd>{snapshot.activeOperationId}</dd></>}
-          {snapshot.expiresAt !== null && <><dt>关闭时间</dt><dd>{relativeTime(snapshot.expiresAt, now)}</dd></>}
-          {snapshot.idleExpiresAt != null && <><dt>闲置时间</dt><dd>{relativeTime(snapshot.idleExpiresAt, now)}</dd></>}
-          {connectionNote(snapshot) && snapshot.environmentStatus === "ready" && <><dt>连接</dt><dd>{connectionNote(snapshot)}</dd></>}
-        </dl>
-        <p className="muted">刷新不会延长使用时间。</p>
-      </details>
     </section>}
-    {view && <footer>
-      <Button variant="quiet" disabled={!canCall} onClick={() => { const next = refreshArguments(view); onCall(next.name, next.arguments); }}>{busy ? "正在刷新…" : "刷新"}</Button>
-      {snapshot && <Button variant="quiet" disabled={!canCall} onClick={() => onCall("list_environments", {})}>列表</Button>}
-      {snapshot && snapshot.environmentStatus !== "closed" && <Button variant="danger" disabled={!canCall}
-        onClick={() => setConfirm({ kind: "close", id: snapshot.environmentId })}>关闭</Button>}
-      <p className="muted">{clock}</p>
+    {view && <footer className="workspace-meta">
+      {snapshot && phase !== "closed" && (snapshot.expiresAt !== null || snapshot.idleExpiresAt != null) && <span className="usage" tabIndex={0} data-hint="刷新不会延长使用时间。">
+        {snapshot.idleExpiresAt != null && <span>闲置时间 {relativeTime(snapshot.idleExpiresAt, now)}</span>}
+        {snapshot.expiresAt !== null && <span>关闭时间 {relativeTime(snapshot.expiresAt, now)}</span>}
+      </span>}
+      <span className="freshness" tabIndex={0} data-hint="仅在操作卡片时获取快照">{clock}</span>
     </footer>}
     <ConfirmDialog open={confirm?.kind === "stop"} title="停止此操作？"
       description="已完成的更改将保留。"

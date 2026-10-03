@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { build } from "../apps/chatgpt-app/node_modules/esbuild/lib/main.js";
 import { Miniflare } from "../apps/chatgpt-app/node_modules/miniflare/dist/src/index.js";
 
@@ -25,7 +26,7 @@ test("capacity rejection has identical ordinary and Tasks semantics without disp
           githubUserId: owner, oauthScopes: ['environments:use'],
           githubAuthorizationKind: 'github_app_scoped', environmentGithubAccessToken: 'PRIVATE_TOKEN',
         })));
-      } };`, resolveDir: process.cwd(), loader: "ts" },
+      } };`, resolveDir: fileURLToPath(new URL("../", import.meta.url)), loader: "ts" },
     bundle: true, write: false, format: "esm", platform: "browser", target: "es2022",
     external: ["cloudflare:workers"],
   });

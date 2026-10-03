@@ -49,7 +49,7 @@ jobs:
 
       - name: Type-check Worker and shared runtime source
         working-directory: apps/chatgpt-app
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Test TypeScript source
         shell: bash
