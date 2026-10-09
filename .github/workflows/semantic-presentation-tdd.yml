@@ -1,0 +1,44 @@
+name: Semantic presentation TDD
+
+on:
+  push:
+    paths:
+      - ".github/workflows/semantic-presentation-tdd.yml"
+      - "apps/chatgpt-app/ui/semantic-presentation.ts"
+      - "apps/chatgpt-app/ui/view.ts"
+      - "tests/semantic-presentation.test.ts"
+  pull_request:
+    paths:
+      - ".github/workflows/semantic-presentation-tdd.yml"
+      - "apps/chatgpt-app/ui/semantic-presentation.ts"
+      - "apps/chatgpt-app/ui/view.ts"
+      - "tests/semantic-presentation.test.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Semantic result contract (red / green)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install Workbench dependencies (no runtime or provider secrets)
+        run: npm ci --prefix apps/chatgpt-app
+
+      - name: Type-check Workbench and presentation contract
+        run: npm run typecheck --prefix apps/chatgpt-app
+
+      - name: Run semantic presentation contract tests (RED until issue 207)
+        run: node --test tests/semantic-presentation.test.ts
