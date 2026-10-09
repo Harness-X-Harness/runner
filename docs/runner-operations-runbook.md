@@ -16,6 +16,37 @@ the subscription contract.
 Use `update_operation` with exact operation/question IDs for answers or operation
 cancellation. It does not close the Environment or create another Agent turn.
 
+## Codex Linux sandbox prerequisites
+
+The GitHub-hosted Ubuntu 24.04 Environment prepares the native Codex Linux
+sandbox only after a successful Codex executor claim. Before the provider
+execution step receives credentials, the workflow installs the distribution's
+`bubblewrap` and `apparmor-profiles` packages and loads the supplied
+`bwrap-userns-restrict` profile for the system `/usr/bin/bwrap`.
+It does not disable AppArmor or unprivileged user namespace restrictions
+globally. This setup is local to the disposable runner job; the other
+executor's launch path is unchanged.
+
+After installing Codex, the job verifies both system Bubblewrap namespace
+creation and `codex sandbox -- /usr/bin/true`, without a model call or
+provider credentials. Failure stops the job before `Serve Environment`.
+The repository test workflow also exercises this same preparation and native
+sandbox check on GitHub-hosted Ubuntu, without secrets.
+
+A passing sandbox bootstrap only proves that the CLI can initialize a
+sandboxed command in the tested host and CLI version. It does not prove
+provider authentication, Agent behavior, or file access beyond the tested
+command. Direct Runner commands are **not** a process-level sandbox; they
+share a runner user with the Agent, as described in
+[SECURITY.md](../SECURITY.md). Do not treat this setup as multi-tenant
+isolation or replace a failed check with an unrestricted CLI mode.
+
+On failure, verify the distro profile and system Bubblewrap executable, the
+installed CLI version, and the native command's exit status in the trusted
+ephemeral job. A CLI upgrade or host-image change may require a new bounded
+validation. Keep private input, tokens and native diagnostic streams out of
+public issue discussions and workflow logs.
+
 ## Storage lifecycle
 
 Applied migration tags are append-only. Check the deployed Worker and its exact
