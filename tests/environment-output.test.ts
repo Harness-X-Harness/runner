@@ -33,7 +33,7 @@ for (const executor of ["codex", "grok"] as const) test(`${executor} visible out
   await withEnvironment({ ...config, extensions: executor === "grok" ? "grok" : undefined }, executor, Date.now() + 5000, {}, handlers, async environment => {
     const result = await environment.execute("turn", { kind: "agent", prompt: `${executor}-final` });
     assert.deepEqual(result, { ok: true, value: { status: "completed", finalResponse: "FINAL_OK",
-      ...(executor === "codex" ? { model: "gpt-6-sol", reasoningEffort: "high" } : { model: "grok-4.7", reasoningEffort: "xhigh" }) } });
+      ...(executor === "codex" ? { model: "gpt-6.1-sol", reasoningEffort: "high" } : { model: "grok-4.7", reasoningEffort: "xhigh" }) } });
     assert.equal(environment.output.read("turn").text, "private commentaryFINAL_OK");
   });
 });

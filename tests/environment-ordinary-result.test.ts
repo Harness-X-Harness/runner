@@ -124,11 +124,11 @@ test("ordinary receipts keep acceptance, input, and completion distinct", () => 
   assert.match(content(agent), /does not certify/);
   assert.doesNotMatch(content(agent), /Agent model is/);
   const reported = operation({ request: JSON.stringify({ kind: "agent" }), result: { ok: true, value: {
-    status: "completed", finalResponse: "AGENT_DONE", model: "gpt-6-sol", reasoningEffort: "high" } } });
+    status: "completed", finalResponse: "AGENT_DONE", model: "gpt-6.1-sol", reasoningEffort: "high" } } });
   const selectedAgent = ordinaryToolResult({ tool: "agent", environment: environment("ready"), operation: reported });
-  assert.match(content(selectedAgent), /This operation used agent model gpt-6-sol with reasoning effort high/);
+  assert.match(content(selectedAgent), /This operation used agent model gpt-6.1-sol with reasoning effort high/);
   assert.equal(selectedAgent.structuredContent?.outcome && typeof selectedAgent.structuredContent.outcome === "object"
-    && "model" in selectedAgent.structuredContent.outcome ? selectedAgent.structuredContent.outcome.model : undefined, "gpt-6-sol");
+    && "model" in selectedAgent.structuredContent.outcome ? selectedAgent.structuredContent.outcome.model : undefined, "gpt-6.1-sol");
   const inspected = ordinaryToolResult({ tool: "inspect_environment", environment: environment("ready"), operation: reported });
   assert.match(content(inspected), /AGENT_DONE/);
   assert.deepEqual(inspected.structuredContent?.outcome, selectedAgent.structuredContent?.outcome);

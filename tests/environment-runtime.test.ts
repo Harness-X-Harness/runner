@@ -36,7 +36,7 @@ for (const active of [false, true]) test(`provider exit closes Environment witho
 
 test("the first agent call fixes a reported model and effort", { timeout: 7000 }, async () => {
   const report = { models: [
-    { id: "gpt-6-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+    { id: "gpt-6.1-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] },
     { id: "gpt-5.5", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
   ] };
   await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {
@@ -49,7 +49,7 @@ test("the first agent call fixes a reported model and effort", { timeout: 7000 }
     assert.equal(environment.agentState?.read().uncertain, false);
     assert.deepEqual(await environment.execute("two", { kind: "agent", prompt: "codex-final" }),
       { ok: true, value: { status: "completed", finalResponse: "FINAL_OK", ...selected } });
-    assert.deepEqual(await environment.execute("three", { kind: "agent", prompt: "codex-final", model: "gpt-6-sol" }),
+    assert.deepEqual(await environment.execute("three", { kind: "agent", prompt: "codex-final", model: "gpt-6.1-sol" }),
       { ok: false, code: "AGENT_MODEL_CONFLICT" });
   }, undefined, { readAgentReport: async () => report });
   await withEnvironment(processConfig, "codex", Date.now() + 5000, {}, handlers, async environment => {

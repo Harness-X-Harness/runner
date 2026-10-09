@@ -64,7 +64,7 @@ function ready(executor: Executor, now: number): Snapshot {
   return { contract: "ordinary", environmentId, executor, environmentStatus: "ready", disposition: "accepted",
     workFinished: false, expiresAt: now + 6 * 60 * 60_000, idleExpiresAt: now + 15 * 60_000,
     activeOperationId: null, agent: { current: true, state: { uncertain: false, selection: {
-      model: executor === "codex" ? "gpt-6-sol" : "grok-4.7", reasoningEffort: executor === "codex" ? "high" : "xhigh",
+      model: executor === "codex" ? "gpt-6.1-sol" : "grok-4.7", reasoningEffort: executor === "codex" ? "high" : "xhigh",
     } } } };
 }
 function working(snapshot: Snapshot): Snapshot {
