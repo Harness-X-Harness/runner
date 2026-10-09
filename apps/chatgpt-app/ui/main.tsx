@@ -16,6 +16,8 @@ const changed = () => listeners.forEach(notify => notify());
 type CallOutcome = "sent" | "rejected" | "unknown";
 
 async function receive(result: Result): Promise<CallOutcome> {
+  // Only host-delivered tool results and callServerTool responses enter here.
+  // readView validates the display shape; neither it nor the selector authenticates data.
   try {
     latest = readView(result, Date.now());
     error = "";

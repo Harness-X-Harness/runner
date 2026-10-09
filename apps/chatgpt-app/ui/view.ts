@@ -111,7 +111,7 @@ export function operationBusy(s: Snapshot) {
   return Boolean(s.activeOperationId) && !["completed", "failed", "cancelled"].includes(s.activeOperationStatus ?? "");
 }
 
-const commandOutcome = z.object({
+export const commandOutcome = z.object({
   exitCode: z.number().nullable(),
   signal: z.string().nullable().optional(),
   stdout: z.string(),
@@ -122,7 +122,7 @@ const commandOutcome = z.object({
 export type CommandOutcome = z.infer<typeof commandOutcome>;
 
 export function commandText(s: Snapshot): CommandOutcome | undefined {
-  if (s.operationStatus !== "completed") return undefined;
+  if (s.operationStatus !== "completed" && s.operationStatus !== "cancelled") return undefined;
   const command = commandOutcome.safeParse(s.outcome);
   return command.success ? command.data : undefined;
 }
@@ -138,6 +138,7 @@ export function commandFailed(s: Snapshot) {
 }
 
 export function commandTitle(command: CommandOutcome): string {
+  if (command.stopReason === "cancelled") return "已取消";
   if (!commandFailure(command)) return "结果";
   if (command.stopReason === "timeout") return "超时";
   if (command.signal) return `信号 ${command.signal}`;
@@ -167,8 +168,8 @@ function selectedWorkFailed(s: Snapshot): boolean {
 
 export function operationStatusText(s: Snapshot): string | undefined {
   if (!s.operationStatus) return undefined;
+  if (s.operationStatus === "cancelled" || commandText(s)?.stopReason === "cancelled") return "已取消";
   if (selectedWorkFailed(s)) return "失败";
-  if (s.operationStatus === "cancelled") return "已取消";
   if (s.operationStatus === "completed") return "已完成";
   if (s.operationStatus === "working") return "进行中";
   if (s.operationStatus === "input_required") return "等待输入";

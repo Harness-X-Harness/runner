@@ -33,7 +33,7 @@ export function environmentTools() {
     return ToolV2Schema.parse({ ...tool,
       inputSchema: z.toJSONSchema(schema, { io: "input" }),
       _meta: { ui: { visibility: ["model", "app"],
-        ...(readOnly || tool.name === "open_environment" || tool.name === "agent" ? { resourceUri: WORKBENCH_URI } : {}) } },
+        ...(readOnly || tool.name === "open_environment" || tool.name === "agent" || tool.name === "command" ? { resourceUri: WORKBENCH_URI } : {}) } },
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly && tool.name !== "open_environment",
         idempotentHint: readOnly || tool.name === "close_environment", openWorldHint: !readOnly },
       securitySchemes: [{ type: "oauth2", scopes: [ENVIRONMENT_SCOPE] }],

@@ -3,6 +3,8 @@ import { Button } from "./components/button.tsx";
 import { ConfirmDialog } from "./components/confirm-dialog.tsx";
 import { Icon } from "./components/icon.tsx";
 import { MarkdownReply } from "./components/markdown-reply.tsx";
+import { CommandResultPanel } from "./components/command-result-panel.tsx";
+import { selectSemanticPresentation } from "./semantic-presentation.ts";
 import { QuestionForm } from "./questions.tsx";
 import { cancelArguments, commandFailed, commandText, commandTitle, connectionNote, decidePromptSend, executorName, finalText, lifecycleLabel, listStatus, modelLine, nextSentence, operationStatusText, questionFields, refreshArguments, relativeTime, type PromptLease, type View } from "./view.ts";
 
@@ -40,6 +42,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   const failed = snapshot !== undefined && (snapshot.operationStatus === "failed" || commandFailed(snapshot));
   const tone = phase === "unavailable" ? "bad" : phase === "ready" ? "good" : phase === "closed" ? "off" : "warn";
   const command = snapshot ? commandText(snapshot) : undefined;
+  const presentation = snapshot ? selectSemanticPresentation(snapshot) : null;
   const prose = snapshot && !command ? finalText(snapshot) : undefined;
   const canWork = snapshot?.environmentStatus === "ready" && !cancelArguments(snapshot);
   const showPrompt = Boolean(canWork && !snapshot?.questions?.length);
@@ -108,18 +111,18 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         onClick={() => onCall("open_environment", { executor: view.executor, idempotencyKey: view.idempotencyKey })}>重试</Button>}
     </section>}
     {snapshot && <section className="workspace" aria-label="工作内容">
-      {notice && <p className="notice" role="status">{notice}</p>}
-      {operationText && operationText !== "已完成" && (!active || snapshot.operationId !== active.operationId) && <p className={`operation-state ${failed ? "bad" : ""}`} role="status">{operationText}</p>}
+      {notice && !(presentation?.evidence.historical && notice === "较早的操作。") && <p className="notice" role="status">{notice}</p>}
+      {!presentation && operationText && operationText !== "已完成" && (!active || snapshot.operationId !== active.operationId) && <p className={`operation-state ${failed ? "bad" : ""}`} role="status">{operationText}</p>}
       {!!snapshot.questions?.length && snapshot.questions.map(question => <QuestionForm key={`${question.operationId}:${question.id}`}
         question={question} disabled={!canCall || snapshot.environmentStatus !== "ready"}
         answer={(question, response) => onCall("update_operation", {
           operationId: question.operationId, action: "answer", inputResponses: { [question.id]: response },
         })} />)}
       {unsupported && <Button variant="quiet" disabled={!canMessage || snapshot.environmentStatus !== "ready"} onClick={onMessage}>在对话中回答</Button>}
-      {command && <div className={`result-block ${failed ? "failed" : ""}`} role="region" aria-label="命令输出">
-        {failed && <h2>{commandTitle(command)}</h2>}
-        {command.stdout || command.stderr ? <pre>{`${command.stdout}${command.stderr ? `\n${command.stderr}` : ""}`}</pre> : <p className="muted">无输出。</p>}
-        {command.truncated && <p className="muted">输出未完整显示。</p>}
+      {command && <div className={`result-block ${presentation?.status === "cancelled" || snapshot.operationStatus === "cancelled" ? "cancelled" : failed ? "failed" : ""}`} role="region" aria-label="命令输出">
+        {presentation ? <CommandResultPanel presentation={presentation} /> : failed && <h2>{commandTitle(command)}</h2>}
+        {command.stdout || command.stderr ? <pre tabIndex={0} aria-label="原始命令日志">{`${command.stdout}${command.stderr ? `\n${command.stderr}` : ""}`}</pre> : <p className="muted">无输出。</p>}
+        {!presentation && command.truncated && <p className="muted">输出未完整显示。</p>}
       </div>}
       {prose !== undefined && <div className="result-block" role="region" aria-label="助手回复">
         <MarkdownReply text={prose} onOpenLink={onOpenLink} />
@@ -131,7 +134,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
             onClick={() => setConfirm({ kind: "stop", id: active.operationId })}><Icon name="stop" />停止</Button>
         </div>}
         {progress?.text && <div role="region" aria-label="进度快照">
-          <pre>{progress.text}</pre>
+          <pre tabIndex={0} aria-label="原始进度日志">{progress.text}</pre>
           {progress.truncated && <p className="muted">输出未完整显示。</p>}
         </div>}
       </div>}

@@ -4,15 +4,23 @@ on:
   push:
     paths:
       - ".github/workflows/semantic-presentation-tdd.yml"
-      - "apps/chatgpt-app/ui/semantic-presentation.ts"
-      - "apps/chatgpt-app/ui/view.ts"
+      - "apps/chatgpt-app/ui/**"
+      - "apps/chatgpt-app/preview/**"
+      - "apps/chatgpt-app/src/environment-tools.ts"
+      - "apps/chatgpt-app/src/workbench-resource.ts"
+      - "apps/chatgpt-app/package*.json"
       - "tests/semantic-presentation.test.ts"
+      - "tests/workbench*.test.ts"
   pull_request:
     paths:
       - ".github/workflows/semantic-presentation-tdd.yml"
-      - "apps/chatgpt-app/ui/semantic-presentation.ts"
-      - "apps/chatgpt-app/ui/view.ts"
+      - "apps/chatgpt-app/ui/**"
+      - "apps/chatgpt-app/preview/**"
+      - "apps/chatgpt-app/src/environment-tools.ts"
+      - "apps/chatgpt-app/src/workbench-resource.ts"
+      - "apps/chatgpt-app/package*.json"
       - "tests/semantic-presentation.test.ts"
+      - "tests/workbench*.test.ts"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +28,7 @@ permissions:
 
 jobs:
   contract:
-    name: Semantic result contract (red / green)
+    name: Semantic result contract and browser
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -43,5 +51,10 @@ jobs:
       - name: Type-check Workbench and presentation contract
         run: npm run typecheck --prefix apps/chatgpt-app
 
-      - name: Run semantic presentation contract tests (RED until issue 207)
-        run: node --test tests/semantic-presentation.test.ts
+      - name: Run semantic presentation and workbench contracts
+        run: node --test tests/semantic-presentation.test.ts tests/workbench*.test.ts
+
+      - name: Run credential-free local browser fixtures
+        env:
+          AGENT_BROWSER_EXECUTABLE_PATH: /usr/bin/google-chrome
+        run: npm exec --yes --package=agent-browser@0.38.2 -- npm run test:ui --prefix apps/chatgpt-app

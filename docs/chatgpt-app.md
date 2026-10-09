@@ -96,7 +96,7 @@ Listing and inspecting do not renew either deadline.
 ### Chat workbench
 
 MCP Apps clients can render the AgentEnv workbench from `list_environments`,
-`inspect_environment`, `open_environment` and `agent`. The UI is optional;
+`inspect_environment`, `open_environment`, `agent` and `command`. The UI is optional;
 ordinary tool results remain usable without it. It needs neither Tasks nor
 Events. The template is linked by `_meta.ui.resourceUri` and read through
 `resources/read`; `resources/list` remains the live Environment directory.
@@ -107,6 +107,29 @@ automatic query, retry, subscription or background model wakeup. The local clock
 only updates relative timestamps. Tool results
 replace the displayed snapshot. Viewing the workbench does not renew deadlines.
 
+Final command outcomes have a compact evidence panel above the unchanged literal
+logs. Success means a terminal command exit of zero with no signal or stop reason;
+it does not certify the user's broader objective. Nonzero exits, signals,
+cancellation, timeout, truncation and historical results remain distinct from
+Environment availability. A historical selected result does not describe or stop
+the active operation. Whole-workspace `workFinished` can be false while that
+selected historical operation is terminal.
+
+Only owner-authorized MCP tool `structuredContent`, delivered through the host
+tool-result bridge, supplies evidence. Schema checks validate shape, not identity
+or authorization. Model text, parsed JSON strings and output resources cannot
+establish command status. Missing or inconsistent command evidence retains the
+existing Markdown/literal-log display. Generated evidence includes only bounded
+machine fields, never excerpts of stdout, stderr or Agent prose. Cancelled Tasks
+currently omit command outcomes; their cancellation label and available literal
+output snapshot remain visible without inventing exit or signal evidence.
+
+The `command` URI binding uses the existing credential-free workbench resource,
+CSP and authenticated tools. It adds no permissions or execution credential
+projection. MCP Apps discovery and local AppBridge rendering can be tested with
+fixtures. Opening the card in ChatGPT, including Tasks result handoff, requires
+independent host acceptance; fixture success does not prove that capability.
+
 Send an Agent request from the workbench input or the ChatGPT input box; use
 chat for commands. A confirmed admission refusal allows editing and a new
 submission. An unknown response retains the original text and submission key
@@ -114,8 +137,8 @@ for an explicit retry; unrelated results do not clear that key. An error after
 admission is not evidence that no work started. The standard
 `ui/update-model-context` bridge shares the selected Environment and operation
 for subsequent conversation turns; it does not send a message or start work.
-**Explain result** and **Answer in ChatGPT** send a
-user-requested `ui/message`. Host approval and capability rules still apply.
+**Answer in ChatGPT** sends a user-requested `ui/message` for an unsupported
+question form. Host approval and capability rules still apply.
 
 Buttons use the same authenticated tools as chat. The component receives no
 OAuth token and makes no direct network connections. Native question forms submit

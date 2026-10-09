@@ -7,7 +7,7 @@ import { scenes } from "./scenarios.ts";
 
 const exec = promisify(execFile);
 
-test("production card interactions in a local MCP Apps host", { timeout: 180_000 }, async t => {
+test("production card interactions in a local MCP Apps host", { timeout: 360_000 }, async t => {
   const { server, url } = await startPreview(0);
   const session = `agentenv-ui-test-${process.pid}`;
   const browser = async (...args: string[]) => {
@@ -208,6 +208,72 @@ test("production card interactions in a local MCP Apps host", { timeout: 180_000
       assert.deepEqual(await evaluate(replyRegions), [{ same: true, scroll: 40 }, { same: true, scroll: 40 }]);
       assert.equal(await evaluate(`${doc}.querySelector('textarea').value`), "unsent draft");
       assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+    });
+
+    await t.test("semantic outcomes cannot be forged by literal logs or model JSON", async () => {
+      for (const [scene, label, evidence] of [
+        ["command-success", "命令成功", "退出码 0"],
+        ["command-failed", "命令失败", "退出码 1"],
+        ["command-cancelled", "命令已取消", "SIGKILL"],
+        ["command-timeout", "命令超时", "SIGKILL"],
+        ["command-truncated", "命令成功", "输出已截断"],
+        ["command-historical", "命令成功", "较早的结果"],
+        ["command-deceptive", "命令失败", "退出码 1"],
+      ]) {
+        await open(scene!, "&width=375&theme=dark");
+        assert.equal(await evaluate(`${doc}.querySelector('.command-status').textContent`), label);
+        assert.match(await evaluate(`${doc}.querySelector('.command-evidence').textContent`), new RegExp(evidence!));
+        assert.equal(await evaluate(`${doc}.querySelector('.status').textContent`), "就绪");
+        assert.equal(await evaluate(`${doc}.querySelector('pre').tabIndex`), 0);
+        assert.equal((await toolCalls()).length, 0);
+        if (scene === "command-deceptive") {
+          assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /ORIGINAL_ERROR/);
+          assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /<script>window.injected=true<\/script>/);
+          assert.equal(await evaluate(`${doc}.querySelectorAll('.workspace script, .workspace img, .workspace a').length`), 0);
+          assert.equal(await evaluate(`Boolean(${doc}.defaultView.injected)`), false);
+        }
+      }
+      await open("command-truncated", "&width=375");
+      await evaluate(`${doc}.querySelector('pre').focus()`);
+      await browser("press", "PageDown");
+      await waitFor("d.querySelector('pre').scrollTop > 0");
+      // Chrome animates PageDown even with scroll-behavior:auto. Wait for the
+      // keyboard scroll to settle before asserting unchanged-result continuity.
+      const before = await evaluate(`new Promise(resolve => {
+        const log = ${doc}.querySelector('pre');
+        let last = log.scrollTop, stableFrames = 0;
+        const frame = () => {
+          stableFrames = log.scrollTop === last ? stableFrames + 1 : 0;
+          last = log.scrollTop;
+          if (stableFrames >= 12 && last > 0) resolve(last);
+          else requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      })`);
+      await act("textbox", "指令", "fill", "draft");
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('pre').scrollTop`), before);
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await open("command-historical");
+      const selected = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await click("停止");
+      await waitFor('d.querySelector("[role=alertdialog]")');
+      assert.equal(await evaluate(`${doc}.activeElement.textContent`), "取消");
+      await browser("press", "Tab");
+      assert.equal(await evaluate(`${doc}.activeElement.textContent`), "停止");
+      await browser("press", "Enter");
+      await idle();
+      assert.equal((await toolCalls())[0].args.operationId, `task_${"a".repeat(32)}_${"b".repeat(32)}`);
+      assert.notEqual((await toolCalls())[0].args.operationId, selected);
+      await open("cancelled");
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.command-panel').length`), 0);
+      assert.match(await text(), /已取消/);
+      assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /PARTIAL_CANCELLED_SNAPSHOT/);
+      await open("untrusted-json");
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.command-panel, .workspace script, .workspace img, .workspace a').length`), 0);
+      assert.match(await evaluate(`${doc}.querySelector('.result').textContent`), /"status":"passed"/);
+      assert.equal((await toolCalls()).length, 0);
     });
 
     await t.test("every scene fits desktop and narrow cards in both themes", async () => {

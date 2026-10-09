@@ -87,7 +87,8 @@ This creates its own headless browser session and loopback server, then closes
 both. It does not restore a login or touch existing browser sessions. Tests
 cover the actual iframe bridge, send/busy/refresh, stop and close confirmation,
 answers, rejection/unconfirmed-response UX, and all narrow dark-mode scenes.
-Browser regression is a separate local command; CI does not install a browser.
+Browser regression also runs in the focused Semantic presentation TDD workflow,
+using pinned `agent-browser@0.38.2` and the hosted Ubuntu Chrome executable.
 
 ## Evidence boundary
 
@@ -99,3 +100,15 @@ when those integration boundaries change, not for each text or layout change.
 
 Do not add a second card implementation or runtime state machine to the preview.
 Add a fixture to `apps/chatgpt-app/preview/scenarios.ts` for a new display state.
+
+Command fixtures cover success, nonzero exit, cancellation with full outcome,
+timeout, truncation, historical results with active work and deceptive stdout.
+The untrusted JSON scene keeps model-authored JSON in Markdown without creating
+command evidence. All scenes are checked at 375px and 780px in both themes.
+The browser suite also checks literal logs, keyboard scrolling, unchanged-result
+scroll position, safe confirmation focus and exact active-operation cancellation.
+
+The full-outcome cancellation fixture exercises the display contract only.
+Current Task projection omits outcomes for cancelled Tasks; that real shape falls
+back to the operation's cancellation label and literal output snapshot. Missing
+command evidence must not be reconstructed from that snapshot.

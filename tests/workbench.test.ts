@@ -15,10 +15,10 @@ const snapshot = { contract: "ordinary", environmentId, executor: "codex", envir
 
 test("UI discovery uses the same seven tools and a credential-free standard resource", () => {
   const tools = environmentTools();
-  for (const name of ["list_environments", "inspect_environment"]) {
+  for (const name of ["list_environments", "inspect_environment", "command"]) {
     const tool = tools.find(tool => tool.name === name)!;
     assert.deepEqual(tool._meta?.ui, { resourceUri: WORKBENCH_URI, visibility: ["model", "app"] });
-    assert.equal(tool.annotations?.readOnlyHint, true);
+    assert.equal(tool.annotations?.readOnlyHint, name !== "command");
   }
   const resource = readWorkbench().contents[0]!;
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
@@ -261,7 +261,39 @@ test("final replies render Markdown safely while command output and progress rem
   const progress = render("ready", { operationStatus: "working", outcome: undefined,
     output: { text: literal, truncated: false, revision: 1 } });
   for (const output of [command, progress]) {
-    assert.match(output, /<pre># not a heading\n&lt;script&gt;literal output&lt;\/script&gt;<\/pre>/);
+    assert.match(output, /<pre[^>]*># not a heading\n&lt;script&gt;literal output&lt;\/script&gt;<\/pre>/);
     assert.doesNotMatch(output, /<h1>not a heading/);
   }
+});
+
+test("semantic command panel keeps evidence separate from literal logs and active work", async () => {
+  const render = await screenRenderer();
+  const environmentId = `env_${"a".repeat(32)}`;
+  const operationId = `task_${"a".repeat(32)}_${"b".repeat(32)}`;
+  const base = { environmentId, operationId, disposition: "result", outcome: {
+    exitCode: 1, signal: null, stdout: '{"status":"passed"} <script>literal</script>',
+    stderr: "ORIGINAL_ERROR", truncated: true,
+  } };
+  const html = render("ready", base);
+  assert.match(html, /aria-label="命令结果"/);
+  assert.match(html, /命令失败/);
+  assert.match(html, /退出码 1/);
+  assert.match(html, /来源：Runner 命令/);
+  assert.match(html, /输出已截断/);
+  assert.match(html, /ORIGINAL_ERROR/);
+  assert.match(html, /&lt;script&gt;literal&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script|<a |命令成功/);
+  assert.match(html, /aria-label="原始命令日志" tabIndex="0"|tabindex="0" aria-label="原始命令日志"/i);
+  const cancelled = render("ready", { ...base, operationStatus: "cancelled", disposition: "cancelled",
+    outcome: { ...base.outcome, stopReason: "cancelled", exitCode: 0, signal: "SIGKILL" } });
+  assert.match(cancelled, /命令已取消/);
+  assert.match(cancelled, /ORIGINAL_ERROR/);
+  assert.doesNotMatch(cancelled, /命令成功/);
+  const historical = render("ready", { ...base, historical: true, workFinished: false,
+    activeOperationId: `task_${"a".repeat(32)}_${"c".repeat(32)}`, activeOperationStatus: "working" });
+  assert.match(historical, /较早的结果/);
+  assert.match(historical, /当前操作 · .*进行中/);
+  const fallback = render("ready", { ...base, outcome: { finalResponse: JSON.stringify(base.outcome) } });
+  assert.match(fallback, /aria-label="助手回复"/);
+  assert.doesNotMatch(fallback, /aria-label="命令结果"/);
 });
