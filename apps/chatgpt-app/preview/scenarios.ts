@@ -89,6 +89,7 @@ export class PreviewSession {
   private scene: SceneId;
   private snapshot: Snapshot | undefined;
   private next: Snapshot | undefined;
+  private commandResult: Snapshot | undefined;
   private now: number;
 
   constructor(scene: SceneId, executor: Executor, now = Date.now()) {
@@ -140,6 +141,7 @@ export class PreviewSession {
     }] };
     if (["opening", "closing", "closed", "unavailable"].includes(scene)) s = { ...s, environmentStatus: scene };
     if (scene === "unavailable") s.environmentReason = "runtime_disconnected";
+    if (scene.startsWith("command-")) this.commandResult = s;
     this.snapshot = scene === "empty" || scene === "capacity-global" ? undefined : s;
     if (scene === "opening") this.next = ready(executor, now);
     if (scene === "closing") this.next = { ...s, environmentStatus: "closed" };
@@ -172,9 +174,19 @@ export class PreviewSession {
     if (!this.snapshot) return rejected("ENVIRONMENT_NOT_FOUND");
     if (name === "inspect_environment") {
       if (this.next) { this.snapshot = this.next; this.next = undefined; }
+      if (args.operationId && this.commandResult?.operationId === args.operationId) {
+        const selected = this.commandResult;
+        return result({ ...this.snapshot, operationId: selected.operationId, operationStatus: selected.operationStatus,
+          outcome: selected.outcome, output: selected.output,
+          historical: this.snapshot.activeOperationId != null && this.snapshot.activeOperationId !== selected.operationId });
+      }
       return result(this.snapshot);
     }
-    if (name === "agent") {
+    if (name === "command") {
+      this.snapshot = working(this.snapshot);
+      this.next = { ...completed(this.snapshot), outcome: { exitCode: 0, signal: null, stdout: "LOCAL_COMMAND_OUTPUT", stderr: "", truncated: false } };
+      this.commandResult = this.next;
+    } else if (name === "agent") {
       this.snapshot = working(this.snapshot);
       this.next = completed(this.snapshot);
     } else if (name === "close_environment") {

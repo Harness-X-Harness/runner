@@ -95,11 +95,34 @@ Listing and inspecting do not renew either deadline.
 
 ### Chat workbench
 
-MCP Apps clients can render the AgentEnv workbench from `list_environments`,
-`inspect_environment`, `open_environment`, `agent` and `command`. The UI is optional;
-ordinary tool results remain usable without it. It needs neither Tasks nor
-Events. The template is linked by `_meta.ui.resourceUri` and read through
+MCP Apps clients can intentionally launch the AgentEnv workbench through
+`list_environments` or `open_environment`. These are the minimal launcher set:
+list recovers an existing workspace without starting work; open also allocates
+one. All seven tools remain visible to both model and app, with the same
+`environments:use` authentication and Tasks/ordinary result contracts.
+
+| Tool | ChatGPT-initiated call: Workbench URI | Inside an existing card |
+| --- | --- | --- |
+| `list_environments` | Yes: explicit Workbench/list launcher | Replace this card with the owned list |
+| `open_environment` | Yes: explicit create/open launcher | Replace this card with the opening snapshot |
+| `inspect_environment` | No | Refresh/select one snapshot or a specific retained operation |
+| `agent` | No | Send through the Agent composer; retain this card |
+| `command` | No | Run through the literal-argv composer; retain this card |
+| `update_operation` | No | Answer/stop the exact active operation |
+| `close_environment` | No | Confirm closure; retain this card and available result |
+
+The template is linked by `_meta.ui.resourceUri` and read through
 `resources/read`; `resources/list` remains the live Environment directory.
+The UI is optional; ordinary results remain usable without it. It needs neither
+Tasks nor Events. The template URI is `ui://agentenv/workbench-v2.html`, versioned to avoid
+reusing the previous context-publishing template.
+
+This matrix controls our advertised entrypoints, not ChatGPT's view identity.
+A repeated launcher may create another independent iframe. Sharing a URI does
+not merge cards, and a chat tool result does not automatically update an older
+card. Host presentation outside this metadata is host-dependent. In-card
+`app.callServerTool` responses update only that card, without asking for a new
+view. No cross-iframe synchronization, global ordering or polling is invented.
 
 The workbench shows an explicitly dated snapshot, not a live monitor. Selecting
 an Environment or clicking **Refresh** performs one read. There is no
@@ -124,21 +147,46 @@ machine fields, never excerpts of stdout, stderr or Agent prose. Cancelled Tasks
 currently omit command outcomes; their cancellation label and available literal
 output snapshot remain visible without inventing exit or signal evidence.
 
-The `command` URI binding uses the existing credential-free workbench resource,
-CSP and authenticated tools. It adds no permissions or execution credential
-projection. MCP Apps discovery and local AppBridge rendering can be tested with
-fixtures. Opening the card in ChatGPT, including Tasks result handoff, requires
-independent host acceptance; fixture success does not prove that capability.
+To view command evidence from chat, launch the Workbench with
+`list_environments`, select the Environment, then refresh. To select a retained
+historical result, choose **查看操作结果** and enter its operation ID from the
+chat tool result. Stop continues to target the active operation independently.
+The authenticated snapshot is still the only evidence source.
 
-Send an Agent request from the workbench input or the ChatGPT input box; use
-chat for commands. A confirmed admission refusal allows editing and a new
-submission. An unknown response retains the original text and submission key
-for an explicit retry; unrelated results do not clear that key. An error after
-admission is not evidence that no work started. The standard
-`ui/update-model-context` bridge shares the selected Environment and operation
-for subsequent conversation turns; it does not send a message or start work.
+The default composer sends Agent requests. **运行命令** accepts a JSON array of
+literal argv, with no shell parsing or expansion, in cwd `.`. UI bounds are
+1–64 arguments, 2048 characters per argument, 8192 input characters and an
+integer timeout of 1–300 seconds. These are frontend bounds, not a change to
+the server command contract. A user can explicitly invoke a shell through argv;
+there is no shell added by the card. Do not enter credentials. Command argv,
+logs and prompts never enter Model Context. The UI receives no credentials.
+An unconfirmed command retains its original canonical argv, timeout and
+idempotency key for an explicit retry; editing cannot silently submit different
+work with that key. A confirmed rejection permits a new submission. Passive
+results and refresh do not end a submission lease.
+
+**Use this environment in chat** is the only context-publication action. It
+capability-checks `ui/update-model-context` and publishes only stable
+`environmentId`, with no operation ID, timestamp, status, logs, prompt or
+credentials. Empty lists, capacity refusals, tool notifications, selections and
+refreshes publish nothing. The action waits for host acknowledgement, reports
+failure or unsupported capability visibly, and suppresses an acknowledged
+repeat within the same card. It sends no chat message or work request.
+
+Acknowledgement means the bridge accepted the request, not that a model used it.
+This temporary Model Context is distinct from ChatGPT Saved Memory and tool
+results. Its scope, lifetime, replacement and ordering across cards depend on
+the host. A late passive result from any card cannot publish a selection. A
+person can explicitly select a different card, but the bridge offers no global
+ordering guarantee; per-card deduplication cannot prove which selection is
+current elsewhere. Use authenticated `inspect_environment` for current facts.
+Unsupported hosts retain all tool/card operations.
+
 **Answer in ChatGPT** sends a user-requested `ui/message` for an unsupported
 question form. Host approval and capability rules still apply.
+MCP Apps discovery and local AppBridge rendering are fixture checks; opening
+cards in real ChatGPT and native Tasks result handoff require independent host
+acceptance in [#210](https://github.com/Harness-X-Harness/runner/issues/210).
 
 Buttons use the same authenticated tools as chat. The component receives no
 OAuth token and makes no direct network connections. Native question forms submit

@@ -78,6 +78,123 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
       await waitFor('d.querySelector("h1")?.textContent === "选择助手"');
     });
 
+    await t.test("passive bridge results and refresh never publish context", async () => {
+      await open("empty");
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).length');
+      assert.equal(await contexts(), 0);
+      await click("Codex 打开 Codex");
+      await idle();
+      await click("刷新");
+      await idle();
+      assert.equal(await contexts(), 0);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+    });
+
+    await t.test("launcher metadata controls simulated chat views; refresh retains one iframe", async () => {
+      await open("opening");
+      await evaluate('window.originalFrame = document.querySelector("iframe"); true');
+      await click("刷新");
+      await waitFor('d.querySelector(".status")?.textContent === "就绪"');
+      for (const name of ["command", "agent", "inspect_environment"]) {
+        await evaluate(`window.previewHost.chatTool("${name}").then(() => true)`);
+        assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      }
+      assert.equal(await evaluate('document.querySelector("iframe") === window.originalFrame'), true);
+      await evaluate('window.previewHost.chatTool("list_environments").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe").length === 2 && document.querySelectorAll("iframe")[1].contentDocument?.querySelector("main"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      await evaluate('window.previewHost.chatTool("open_environment").then(() => true)');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
+    });
+
+    await t.test("context is explicit, minimal, acknowledged and deduplicated; late views stay silent", async () => {
+      await open("command-historical");
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');
+      assert.deepEqual(await contexts(), []);
+      await click("Use this environment in chat");
+      await idle();
+      assert.match(await text(), /宿主已确认/);
+      assert.deepEqual(await contexts(), [{ content: [{ type: "text", text: `AgentEnv selection: environmentId=env_${"a".repeat(32)}` }] }]);
+      await click("Use this environment in chat");
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      assert.match(await text(), /相同选择/);
+      await click("刷新");
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      await open("ready", "&context=unsupported");
+      await click("Use this environment in chat");
+      await idle();
+      assert.match(await text(), /不支持共享选择/);
+      assert.deepEqual(await contexts(), []);
+      await open("ready", "&context=fail-once");
+      await click("Use this environment in chat");
+      await idle();
+      assert.match(await text(), /未确认选择/);
+      await click("Use this environment in chat");
+      await idle();
+      assert.match(await text(), /宿主已确认/);
+      assert.equal((await contexts()).length, 2);
+      await open("ready", "&multiple=1");
+      await evaluate(`Array.from(${doc}.querySelectorAll("button")).find(button => button.textContent === "Use this environment in chat").click(); true`);
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      await evaluate('window.previewHost.lateResults().then(() => true)');
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+    });
+
+    await t.test("in-card literal command and historical lookup keep trusted output reachable", async () => {
+      await open("ready");
+      await act("combobox", "输入模式", "select", "command");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["printf", "$(literal)", "a b"]');
+      await click("运行命令");
+      await idle();
+      const calls = await toolCalls();
+      assert.equal(calls[0].name, "工具 → command");
+      assert.deepEqual(calls[0].args.argv, ["printf", "$(literal)", "a b"]);
+      assert.equal(calls[0].args.timeoutSeconds, 30);
+      assert.equal(calls[0].args.cwd, ".");
+      await click("刷新");
+      await idle();
+      assert.match(await text(), /命令成功.*LOCAL_COMMAND_OUTPUT/s);
+      const resultId = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await act("combobox", "输入模式", "select", "result");
+      await act("textbox", "操作 ID", "fill", resultId);
+      await click("查看结果");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`), resultId);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      await open("ready");
+      await act("combobox", "输入模式", "select", "command");
+      await act("combobox", "下一次工具调用", "select", "unknown");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await click("运行命令");
+      await idle();
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["git", "status"]');
+      await click("运行命令");
+      await idle();
+      assert.equal((await toolCalls()).length, 1);
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await click("运行命令");
+      await idle();
+      const retried = await toolCalls();
+      assert.equal(retried.length, 2);
+      assert.equal(retried[0].args.idempotencyKey, retried[1].args.idempotencyKey);
+      await open("command-historical");
+      const historical = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await click("停止");
+      await waitFor('d.querySelector("[role=alertdialog]")');
+      await click("停止");
+      await idle();
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`), historical);
+      assert.match(await text(), /LOCAL_COMMAND_OUTPUT/);
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.operation-bar').length`), 0);
+    });
+
     await t.test("stop targets the active operation, even when an older result is selected", async () => {
       await open("historical");
       await click("停止");
@@ -166,7 +283,7 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
       assert.equal(await evaluate(`${doc}.querySelector('.composer button').getAttribute('aria-label')`), "发送");
       assert.equal(await evaluate(`${doc}.querySelectorAll('main details, main footer button, .result-block h2').length`), 0);
       assert.equal(await evaluate(`${doc}.querySelector('.status span:last-child').className`), "sr-only");
-      assert.ok(await evaluate(`${doc}.querySelector('main').getBoundingClientRect().height < 360`));
+      assert.ok(await evaluate(`${doc}.querySelector('main').getBoundingClientRect().height < 440`));
       assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).borderTopWidth`), "2px");
       assert.notEqual(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).boxShadow`), "none");
       await act("button", "刷新", "focus");

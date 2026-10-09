@@ -6,11 +6,11 @@ import { MarkdownReply } from "./components/markdown-reply.tsx";
 import { CommandResultPanel } from "./components/command-result-panel.tsx";
 import { selectSemanticPresentation } from "./semantic-presentation.ts";
 import { QuestionForm } from "./questions.tsx";
-import { cancelArguments, commandFailed, commandText, commandTitle, connectionNote, decidePromptSend, executorName, finalText, lifecycleLabel, listStatus, modelLine, nextSentence, operationStatusText, questionFields, refreshArguments, relativeTime, type PromptLease, type View } from "./view.ts";
+import { cancelArguments, commandFailed, commandText, commandTitle, connectionNote, decidePromptSend, parseCommandDraft, selectedOperationArguments, executorName, finalText, lifecycleLabel, listStatus, modelLine, nextSentence, operationStatusText, questionFields, refreshArguments, relativeTime, type PromptLease, type View } from "./view.ts";
 
 type Confirm = { kind: "stop" | "close"; id: string } | undefined;
 
-export function Screen({ view, error, busy, connected, canCall, canMessage, now, creationKey, onCall, onSend, onMessage, onOpenLink }: {
+export function Screen({ view, error, busy, connected, canCall, canMessage, now, creationKey, onCall, onSend, onMessage, onOpenLink, onCommand, onUseInChat, contextFeedback = "" }: {
   view?: View;
   error: string;
   busy: boolean;
@@ -22,11 +22,20 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   onCall: (name: string, args: Record<string, unknown>) => void;
   onSend: (args: { environmentId: string; prompt: string; idempotencyKey: string }) => Promise<"sent" | "rejected" | "unknown">;
   onMessage: () => void;
+  onCommand?: (args: { environmentId: string; argv: string[]; cwd: string; timeoutSeconds: number; idempotencyKey: string }) => Promise<"sent" | "rejected" | "unknown">;
+  onUseInChat?: () => void;
+  contextFeedback?: string;
   onOpenLink?: (url: string) => void;
 }) {
   const [confirm, setConfirm] = useState<Confirm>();
   const [prompt, setPrompt] = useState("");
   const [lease, setLease] = useState<PromptLease>();
+  const [mode, setMode] = useState("agent");
+  const [commandDraft, setCommandDraft] = useState("");
+  const [timeout, setTimeoutSeconds] = useState(30);
+  const [commandLease, setCommandLease] = useState<PromptLease>();
+  const [commandError, setCommandError] = useState("");
+  const [operationDraft, setOperationDraft] = useState("");
   const snapshot = view?.kind === "environment" ? view.snapshot : undefined;
   const environmentId = snapshot?.environmentId;
   const previousEnvironment = useRef<string | undefined>(undefined);
@@ -35,6 +44,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
     if (environmentId) previousEnvironment.current = environmentId;
     if (!environmentId || !previous || previous === environmentId) return;
     setPrompt("");
+    setCommandDraft(""); setCommandLease(undefined); setCommandError(""); setOperationDraft("");
     setLease(current => current?.environmentId === environmentId ? current : undefined);
   }, [environmentId]);
   const phase = snapshot?.environmentStatus;
@@ -138,7 +148,49 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
           {progress.truncated && <p className="muted">输出未完整显示。</p>}
         </div>}
       </div>}
-      {showPrompt && <form className="prompt" onSubmit={event => {
+      <div className="workbench-actions">
+        <label className="sr-only" htmlFor="workbench-mode">输入模式</label>
+        <select id="workbench-mode" value={mode} disabled={!canCall || Boolean(lease || commandLease)} onChange={event => setMode(event.target.value)}>
+          <option value="agent">助手指令</option><option value="command">运行命令</option><option value="result">查看操作结果</option>
+        </select>
+        {onUseInChat && <Button variant="quiet" disabled={!connected || busy || phase === "closed"} onClick={onUseInChat}>Use this environment in chat</Button>}
+      </div>
+      {contextFeedback && <p className="notice" role="status">{contextFeedback}</p>}
+      {mode === "result" && <form className="prompt" onSubmit={event => {
+        event.preventDefault();
+        const args = selectedOperationArguments(snapshot.environmentId, operationDraft.trim());
+        if (args && canCall) onCall("inspect_environment", args);
+      }}>
+        <label htmlFor="selected-operation">操作 ID</label>
+        <input id="selected-operation" value={operationDraft} maxLength={80} disabled={!canCall} onChange={event => setOperationDraft(event.target.value)} />
+        <Button type="submit" disabled={!canCall || !selectedOperationArguments(snapshot.environmentId, operationDraft.trim())}>查看结果</Button>
+        <p className="muted">使用对话工具返回的操作 ID。查看旧结果不会改变停止目标。</p>
+      </form>}
+      {showPrompt && mode === "command" && <form className="prompt" onSubmit={event => {
+        event.preventDefault();
+        if (!canCall || !onCommand) return;
+        try {
+          const parsed = parseCommandDraft(commandDraft, timeout);
+          const decision = decidePromptSend(commandLease, snapshot.environmentId, JSON.stringify(parsed), crypto.randomUUID());
+          if (decision.action === "blocked") { setCommandError("未收到响应。请先重试原命令及超时。"); return; }
+          setCommandLease(decision.lease); setCommandError("");
+          void onCommand({ environmentId: snapshot.environmentId, ...parsed, idempotencyKey: decision.key }).then(result => {
+            if (result === "sent" || result === "rejected") setCommandLease(undefined);
+            if (result === "sent") setCommandDraft("");
+          });
+        } catch { setCommandError("请输入 JSON 参数数组（1–64 项，最多 8192 字符）和 1–300 秒超时。"); }
+      }}>
+        <label htmlFor="command-argv">命令参数（JSON 数组）</label>
+        <p className="muted">直接执行参数，不进行 shell 展开。请勿输入凭据。</p>
+        <div className="composer">
+          <textarea id="command-argv" rows={2} maxLength={8192} value={commandDraft} disabled={!canCall} placeholder={'["git", "status", "--short"]'} onChange={event => setCommandDraft(event.target.value)} />
+          <Button className="icon-button" type="submit" variant="primary" aria-label="运行命令" data-hint="运行命令" disabled={!canCall || !onCommand || !commandDraft.trim()}><Icon name="send" /></Button>
+        </div>
+        <label htmlFor="command-timeout">超时（秒）</label>
+        <input id="command-timeout" type="number" min={1} max={300} step={1} value={timeout} disabled={!canCall} onChange={event => setTimeoutSeconds(Number(event.target.value))} />
+        {commandError && <p className="error" role="alert">{commandError}</p>}
+      </form>}
+      {showPrompt && mode === "agent" && <form className="prompt" onSubmit={event => {
         event.preventDefault();
         const text = prompt.trim();
         if (!text || !canCall) return;

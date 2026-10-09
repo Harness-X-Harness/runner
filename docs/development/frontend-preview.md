@@ -112,3 +112,40 @@ The full-outcome cancellation fixture exercises the display contract only.
 Current Task projection omits outcomes for cancelled Tasks; that real shape falls
 back to the operation's cancellation label and literal output snapshot. Missing
 command evidence must not be reconstructed from that snapshot.
+
+
+## Launcher and context acceptance (#217 / #218)
+
+The [tool-to-UI matrix](../chatgpt-app.md#chat-workbench) reserves Workbench
+launching for `list_environments` and `open_environment`. Ordinary
+command/agent/inspect calls have no Workbench URI. Repeated launchers can still
+create independent cards; chat calls cannot be forced to converge on one view.
+Existing-card Refresh reads once and replaces its snapshot in place.
+
+In the ready scene, choose **运行命令**, enter `["git", "status", "--short"]`
+and a timeout, run, then refresh. This returns literal fixture output and the
+trusted command panel without executing a command. Choose **查看操作结果** to
+inspect a retained operation ID. Stop uses the active ID even while an older
+command result is selected. Unknown command response fixtures retain argv,
+timeout and the original submission key; only an explicit identical retry
+uses that key. They do not prove runtime idempotency.
+
+**Use this environment in chat** publishes just the Environment ID on click.
+The interaction trace records that request and its acknowledgement. Opening,
+listing, selecting and refreshing never publish Model Context. Repeat clicks
+in the same card are suppressed after acknowledgement. `?scene=ready&context=unsupported`
+omits the capability; `?scene=ready&context=fail-once` rejects the first request
+so visible feedback and retry can be checked. `?scene=ready&multiple=1` mounts
+two independent AppBridge cards. The automated suite sends late results to
+both and verifies no automatic publication. These loopback fixture controls are
+not included in the production card.
+
+Browser tests use the production routing rule to simulate host view creation;
+unit tests separately verify all seven discovered tools, visibility, scope and
+URI metadata. The simulated host creates views only for advertised launchers
+and does not create views for in-card `callServerTool` responses. This proves
+our routing and bridge behavior locally, not ChatGPT's actual presentation
+policy. The real host must independently verify launcher behavior, ordinary
+chat tools, in-place refresh, literal command logs, explicit context and native
+Tasks result handoff. Cross-view scope and ordering remain host-dependent;
+there is no global selection service or background polling.

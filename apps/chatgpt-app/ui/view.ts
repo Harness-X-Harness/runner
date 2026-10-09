@@ -85,19 +85,10 @@ export function resultText(result: Result): string {
   return content.success ? content.data.flatMap(item => item.type === "text" && item.text ? [item.text] : []).join("\n") : "";
 }
 
+/** Stable selection only; publication requires a separate explicit user action. */
 export function selectedContext(view: View) {
-  if (view.kind === "list") return { content: [{ type: "text" as const,
-    text: "AgentEnv workbench: no environment selected. Use list_environments to find live environments." }] };
-  if (view.kind === "capacity") {
-    const text = view.existing
-      ? `AgentEnv selection: environmentId=${view.existing.environmentId}. The open was rejected because this environment already exists. Use this environment. Do not open another. This is a snapshot, not live state.`
-      : "AgentEnv workbench: no environment selected. Global capacity rejected the open. Do not poll. This is a snapshot, not live state.";
-    return { content: [{ type: "text" as const, text }] };
-  }
-  const s = view.snapshot;
-  return { content: [{ type: "text" as const,
-    text: `AgentEnv selection: environmentId=${s.environmentId}${s.operationId ? `, operationId=${s.operationId}` : ""}. Last viewed at ${new Date(view.receivedAt).toISOString()}: environment=${s.environmentStatus}${s.operationStatus ? `, operation=${s.operationStatus}` : ""}. This is a snapshot, not live state. Use this environment for the user's next request; do not open another environment or poll.`,
-  }] };
+  if (view.kind !== "environment" || !/^env_[a-f0-9]{32}$/.test(view.snapshot.environmentId)) return undefined;
+  return { content: [{ type: "text" as const, text: `AgentEnv selection: environmentId=${view.snapshot.environmentId}` }] };
 }
 
 export function refreshArguments(view: View) {
@@ -306,4 +297,20 @@ export function decidePromptSend(
   if (current && current.text !== normalized) return { action: "blocked" };
   if (current) return { action: "send", key: current.key, lease: current };
   return { action: "send", key: newKey, lease: { environmentId, key: newKey, text: normalized } };
+}
+
+
+/** UI bounds only; argv is JSON, never shell-split, expanded or logged as context. */
+export function parseCommandDraft(text: string, timeoutSeconds: number) {
+  if (text.length > 8192) throw new Error("命令最多 8192 个字符。");
+  const argv = z.tuple([z.string().min(1).max(2048)]).rest(z.string().max(2048)).parse(JSON.parse(text));
+  if (argv.length > 64 || argv.some(arg => arg.includes("\0"))) throw new Error("命令最多 64 个参数，不能包含空字符。");
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 300) throw new Error("超时必须为 1–300 秒。");
+  return { argv, cwd: ".", timeoutSeconds };
+}
+
+export function selectedOperationArguments(environmentId: string, operationId: string) {
+  if (!/^env_[a-f0-9]{32}$/.test(environmentId)
+    || !new RegExp(`^task_${environmentId.slice(4)}_(?:[a-f0-9]{32}|open|close)$`).test(operationId)) return undefined;
+  return { environmentId, operationId };
 }

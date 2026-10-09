@@ -8,6 +8,8 @@ on:
       - "apps/chatgpt-app/preview/**"
       - "apps/chatgpt-app/src/environment-tools.ts"
       - "apps/chatgpt-app/src/workbench-resource.ts"
+      - "apps/chatgpt-app/src/workbench-routing.ts"
+      - "tests/environment-task-authority.test.ts"
       - "apps/chatgpt-app/package*.json"
       - "tests/semantic-presentation.test.ts"
       - "tests/workbench*.test.ts"
@@ -18,6 +20,8 @@ on:
       - "apps/chatgpt-app/preview/**"
       - "apps/chatgpt-app/src/environment-tools.ts"
       - "apps/chatgpt-app/src/workbench-resource.ts"
+      - "apps/chatgpt-app/src/workbench-routing.ts"
+      - "tests/environment-task-authority.test.ts"
       - "apps/chatgpt-app/package*.json"
       - "tests/semantic-presentation.test.ts"
       - "tests/workbench*.test.ts"
@@ -52,7 +56,7 @@ jobs:
         run: npm run typecheck --prefix apps/chatgpt-app
 
       - name: Run semantic presentation and workbench contracts
-        run: node --test tests/semantic-presentation.test.ts tests/workbench*.test.ts
+        run: node --test tests/semantic-presentation.test.ts tests/workbench*.test.ts tests/environment-task-authority.test.ts
 
       - name: Run credential-free local browser fixtures
         env:

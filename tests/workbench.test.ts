@@ -15,10 +15,13 @@ const snapshot = { contract: "ordinary", environmentId, executor: "codex", envir
 
 test("UI discovery uses the same seven tools and a credential-free standard resource", () => {
   const tools = environmentTools();
-  for (const name of ["list_environments", "inspect_environment", "command"]) {
+  assert.equal(tools.length, 7);
+  for (const name of tools.map(tool => tool.name)) {
     const tool = tools.find(tool => tool.name === name)!;
-    assert.deepEqual(tool._meta?.ui, { resourceUri: WORKBENCH_URI, visibility: ["model", "app"] });
-    assert.equal(tool.annotations?.readOnlyHint, name !== "command");
+    assert.deepEqual(tool._meta?.ui, { visibility: ["model", "app"],
+      ...(["list_environments", "open_environment"].includes(name) ? { resourceUri: WORKBENCH_URI } : {}) });
+    assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["environments:use"] }]);
+    assert.equal(tool.annotations?.readOnlyHint, ["list_environments", "inspect_environment"].includes(name));
   }
   const resource = readWorkbench().contents[0]!;
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
@@ -45,7 +48,7 @@ test("read-only entry and explicit refresh retain exact selection without creati
   const view = readView({ structuredContent: snapshot }, 200);
   assert.deepEqual(refreshArguments(view), { name: "inspect_environment", arguments: { environmentId, operationId } });
   assert.match(selectedContext(view).content[0]!.text, new RegExp(environmentId));
-  assert.match(selectedContext(view).content[0]!.text, /snapshot, not live state/);
+  assert.deepEqual(selectedContext(view), { content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }] });
   assert.equal(view.receivedAt, 200);
   assert.throws(() => readView({ isError: true, content: [{ type: "text", text: "Read unavailable" }] }, 300), /Read unavailable/);
   assert.throws(() => readView({ structuredContent: { taskId: operationId, status: "working" } }, 300), /未返回工作区/);
@@ -119,7 +122,7 @@ test("the workbench tells a person the next fact and keeps a rejected open actio
   if (capacity.kind !== "capacity") return;
   assert.equal(capacity.existing?.environmentId, environmentId);
   assert.deepEqual(refreshArguments(capacity), { name: "inspect_environment", arguments: { environmentId } });
-  assert.match(selectedContext(capacity).content[0]!.text, /snapshot, not live state/);
+  assert.equal(selectedContext(capacity), undefined);
 });
 
 test("a closed environment still shows the selected operation result", () => {
@@ -296,4 +299,13 @@ test("semantic command panel keeps evidence separate from literal logs and activ
   const fallback = render("ready", { ...base, outcome: { finalResponse: JSON.stringify(base.outcome) } });
   assert.match(fallback, /aria-label="助手回复"/);
   assert.doesNotMatch(fallback, /aria-label="命令结果"/);
+});
+
+
+test("context contains only an explicitly selected Environment, never list/capacity or snapshot churn", () => {
+  assert.equal(selectedContext(readView({ structuredContent: { environments: [] } }, 100)), undefined);
+  const old = readView({ structuredContent: { ...snapshot, historical: true, outcome: { finalResponse: "PRIVATE_PROMPT" }, output: { text: "PRIVATE_LOG", revision: 1, truncated: false } } }, 100);
+  const refreshed = readView({ structuredContent: { ...snapshot, operationId: "old", environmentStatus: "opening" } }, 99999);
+  assert.deepEqual(selectedContext(old), selectedContext(refreshed));
+  assert.doesNotMatch(JSON.stringify(selectedContext(old)), /operationId|PRIVATE|working|ready|1970|no environment selected/);
 });
