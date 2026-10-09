@@ -29,7 +29,8 @@ const connection = acp.agent({ name: "harness-test-agent" })
     turns.set(sessionId, 0);
     sessionServers.set(sessionId, ctx.params.mcpServers.map(server => server.name));
     serverConfigs.set(sessionId, ctx.params.mcpServers);
-    return { sessionId };
+    return { sessionId, modes: { currentModeId: process.env.FIXTURE_AGENT_MODE ?? "agent-full-access",
+      availableModes: [{ id: "agent-full-access", name: "Full access" }, { id: "agent", name: "Agent" }] } };
   })
   .onRequest(acp.methods.agent.session.prompt, async ctx => {
     const prompt = ctx.params.prompt.find(block => block.type === "text")?.text;
