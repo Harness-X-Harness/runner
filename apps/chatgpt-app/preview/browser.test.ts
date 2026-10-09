@@ -107,42 +107,92 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
       assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
     });
 
-    await t.test("context is explicit, minimal, acknowledged and deduplicated; late views stay silent", async () => {
+    await t.test("context is explicit, minimal and reassertable; late views stay silent", async () => {
       await open("command-historical");
       const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');
       assert.deepEqual(await contexts(), []);
-      await click("Use this environment in chat");
+      await click("在对话中使用此工作区");
       await idle();
       assert.match(await text(), /宿主已确认/);
       assert.deepEqual(await contexts(), [{ content: [{ type: "text", text: `AgentEnv selection: environmentId=env_${"a".repeat(32)}` }] }]);
-      await click("Use this environment in chat");
+      await click("在对话中使用此工作区");
       await idle();
-      assert.equal((await contexts()).length, 1);
-      assert.match(await text(), /相同选择/);
+      assert.equal((await contexts()).length, 2);
+      assert.match(await text(), /宿主已确认/);
       await click("刷新");
       await idle();
-      assert.equal((await contexts()).length, 1);
+      assert.equal((await contexts()).length, 2);
       await open("ready", "&context=unsupported");
-      await click("Use this environment in chat");
+      await click("在对话中使用此工作区");
       await idle();
       assert.match(await text(), /不支持共享选择/);
       assert.deepEqual(await contexts(), []);
       await open("ready", "&context=fail-once");
-      await click("Use this environment in chat");
+      await click("在对话中使用此工作区");
       await idle();
       assert.match(await text(), /未确认选择/);
-      await click("Use this environment in chat");
+      await click("在对话中使用此工作区");
       await idle();
       assert.match(await text(), /宿主已确认/);
       assert.equal((await contexts()).length, 2);
       await open("ready", "&multiple=1");
-      await evaluate(`Array.from(${doc}.querySelectorAll("button")).find(button => button.textContent === "Use this environment in chat").click(); true`);
+      await evaluate(`Array.from(${doc}.querySelectorAll("button")).find(button => button.textContent === "在对话中使用此工作区").click(); true`);
       await idle();
       assert.equal((await contexts()).length, 1);
       await evaluate('window.previewHost.lateResults().then(() => true)');
       await idle();
       assert.equal((await contexts()).length, 1);
       assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+    });
+
+    await t.test("independent AppBridge cards allow explicit A to B to A re-selection", async () => {
+      await open("ready", "&multiple=1");
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector("#workbench-mode"))');
+      const environmentA = `env_${"a".repeat(32)}`;
+      const environmentB = `env_${"b".repeat(32)}`;
+      await evaluate(`window.previewHost.selectEnvironment(1, "${environmentB}", "grok").then(() => true)`);
+      await browser("wait", "--fn", 'document.querySelectorAll("iframe")[1].contentDocument.querySelector("h1")?.textContent === "Grok"');
+      const share = async (card: number) => {
+        await evaluate(`Array.from(document.querySelectorAll("iframe")[${card}].contentDocument.querySelectorAll("button")).find(button => button.textContent === "在对话中使用此工作区").click(); true`);
+        await browser("wait", "--fn", `Boolean(document.querySelectorAll("iframe")[${card}].contentDocument.querySelector("main")?.getAttribute("aria-busy") === "false")`);
+      };
+      await share(0);
+      await share(1);
+      await share(0);
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');
+      assert.deepEqual(await contexts(), [environmentA, environmentB, environmentA].map(environmentId => ({
+        content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }],
+      })));
+      await evaluate('window.previewHost.lateResults().then(() => true)');
+      await idle();
+      assert.equal((await contexts()).length, 3);
+    });
+
+    await t.test("a different Environment resets input mode and drafts in the same iframe", async () => {
+      await open("ready");
+      await evaluate('window.selectionFrame = document.querySelector("iframe"); true');
+      await act("combobox", "输入模式", "select", "result");
+      await act("textbox", "操作 ID", "fill", `task_${"a".repeat(32)}_${"b".repeat(32)}`);
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "result");
+      assert.match(await evaluate(`${doc}.querySelector('#selected-operation').value`), /^task_/);
+      await evaluate(`window.previewHost.selectEnvironment(0, "env_${"b".repeat(32)}", "grok").then(() => true)`);
+      await waitFor('d.querySelector("h1")?.textContent === "Grok"');
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "agent");
+      assert.equal(await evaluate(`${doc}.querySelector('#next-request').value`), "");
+      assert.equal(await evaluate('document.querySelector("iframe") === window.selectionFrame'), true);
+      await act("combobox", "输入模式", "select", "result");
+      assert.equal(await evaluate(`${doc}.querySelector('#selected-operation').value`), "");
+      await act("combobox", "输入模式", "select", "command");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await evaluate(`window.previewHost.selectEnvironment(0, "env_${"a".repeat(32)}", "codex").then(() => true)`);
+      await waitFor('d.querySelector("h1")?.textContent === "Codex"');
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "agent");
+      await act("combobox", "输入模式", "select", "command");
+      assert.equal(await evaluate(`${doc}.querySelector('#command-argv').value`), "");
     });
 
     await t.test("in-card literal command and historical lookup keep trusted output reachable", async () => {

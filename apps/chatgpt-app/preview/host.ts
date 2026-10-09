@@ -26,6 +26,10 @@ let bridges: AppBridge[] = [];
     if (launchesWorkbench(name)) await mount(new PreviewSession("opening", executor.value as Executor), true);
     else record(`聊天工具 → ${name}（无卡片）`, {});
   },
+  selectEnvironment: async (card: number, environmentId: string, selectedExecutor: Executor = executor.value as Executor) => {
+    const ready = new PreviewSession("ready", selectedExecutor).initial();
+    await bridges[card]!.sendToolResult({ ...ready, structuredContent: { ...ready.structuredContent, environmentId } });
+  },
   lateResults: async () => {
     for (const host of bridges) await host.sendToolResult(new PreviewSession("command-historical", executor.value as Executor).initial());
   },

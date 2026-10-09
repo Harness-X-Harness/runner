@@ -165,21 +165,24 @@ idempotency key for an explicit retry; editing cannot silently submit different
 work with that key. A confirmed rejection permits a new submission. Passive
 results and refresh do not end a submission lease.
 
-**Use this environment in chat** is the only context-publication action. It
+**在对话中使用此工作区** is the only context-publication action. It
 capability-checks `ui/update-model-context` and publishes only stable
 `environmentId`, with no operation ID, timestamp, status, logs, prompt or
 credentials. Empty lists, capacity refusals, tool notifications, selections and
 refreshes publish nothing. The action waits for host acknowledgement, reports
-failure or unsupported capability visibly, and suppresses an acknowledged
-repeat within the same card. It sends no chat message or work request.
+failure or unsupported capability visibly, and suppresses overlapping requests
+while one is in flight. Every later explicit click publishes again, including
+returning to card A after selecting card B. A card cannot know the host’s
+current selection from its own earlier acknowledgement. It sends no chat
+message or work request.
 
 Acknowledgement means the bridge accepted the request, not that a model used it.
 This temporary Model Context is distinct from ChatGPT Saved Memory and tool
 results. Its scope, lifetime, replacement and ordering across cards depend on
 the host. A late passive result from any card cannot publish a selection. A
 person can explicitly select a different card, but the bridge offers no global
-ordering guarantee; per-card deduplication cannot prove which selection is
-current elsewhere. Use authenticated `inspect_environment` for current facts.
+ordering guarantee; no card can prove which selection is current elsewhere.
+Use authenticated `inspect_environment` for current facts.
 Unsupported hosts retain all tool/card operations.
 
 **Answer in ChatGPT** sends a user-requested `ui/message` for an unsupported

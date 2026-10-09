@@ -130,14 +130,18 @@ command result is selected. Unknown command response fixtures retain argv,
 timeout and the original submission key; only an explicit identical retry
 uses that key. They do not prove runtime idempotency.
 
-**Use this environment in chat** publishes just the Environment ID on click.
+**在对话中使用此工作区** publishes just the Environment ID on click.
 The interaction trace records that request and its acknowledgement. Opening,
-listing, selecting and refreshing never publish Model Context. Repeat clicks
-in the same card are suppressed after acknowledgement. `?scene=ready&context=unsupported`
+listing, selecting and refreshing never publish Model Context. An explicit
+click after acknowledgement publishes again so a person can reassert card A
+after selecting card B. Only overlapping in-flight requests are suppressed.
+`?scene=ready&context=unsupported`
 omits the capability; `?scene=ready&context=fail-once` rejects the first request
 so visible feedback and retry can be checked. `?scene=ready&multiple=1` mounts
 two independent AppBridge cards. The automated suite sends late results to
-both and verifies no automatic publication. These loopback fixture controls are
+both and verifies no automatic publication, and tests explicit A → B → A
+re-selection with distinct fixture Environment IDs. These loopback fixture
+controls are
 not included in the production card.
 
 Browser tests use the production routing rule to simulate host view creation;
@@ -149,3 +153,8 @@ policy. The real host must independently verify launcher behavior, ordinary
 chat tools, in-place refresh, literal command logs, explicit context and native
 Tasks result handoff. Cross-view scope and ordering remain host-dependent;
 there is no global selection service or background polling.
+
+Changing the selected Environment inside the same iframe resets input mode to
+Agent and clears drafts/leases. Refreshing the same Environment preserves its
+mode and drafts. The browser regression distinguishes this from scene reset,
+which remounts the card and cannot establish selection-switch behavior.

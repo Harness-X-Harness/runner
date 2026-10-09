@@ -5,7 +5,7 @@ import { readView, parseCommandDraft, decidePromptSend, selectedOperationArgumen
 const environmentId = `env_${"a".repeat(32)}`;
 const view = readView({ structuredContent: { contract: "ordinary", environmentId, executor: "codex", environmentStatus: "ready", disposition: "accepted", workFinished: false, expiresAt: null } }, 1);
 
-test("explicit context needs capability and acknowledgement; duplicates are per card", async () => {
+test("explicit context needs capability and acknowledgement; a later click can reassert selection", async () => {
   const publisher = new ContextPublisher();
   const deliveries: unknown[] = [];
   const send = async (context: unknown) => { deliveries.push(context); return {}; };
@@ -15,10 +15,26 @@ test("explicit context needs capability and acknowledgement; duplicates are per 
   assert.equal(await publisher.publish(view, true, async () => ({ isError: true })), "failed");
   assert.equal(await publisher.publish(view, true, async () => { throw new Error("host failure"); }), "failed");
   assert.equal(await publisher.publish(view, true, send), "sent");
-  assert.equal(await publisher.publish({ ...view, receivedAt: 9999 }, true, send), "duplicate");
-  assert.deepEqual(deliveries, [{ content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }] }]);
+  assert.equal(await publisher.publish({ ...view, receivedAt: 9999 }, true, send), "sent");
+  assert.deepEqual(deliveries, Array(2).fill({ content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }] }));
   // Independent views cannot assert a shared global selection or ordering.
   assert.equal(await new ContextPublisher().publish(view, true, send), "sent");
+});
+
+test("two independent cards allow explicit A to B to A re-selection", async () => {
+  const cardA = new ContextPublisher();
+  const cardB = new ContextPublisher();
+  if (view.kind !== "environment") throw new Error("fixture");
+  const environmentB = `env_${"b".repeat(32)}`;
+  const viewB = { ...view, snapshot: { ...view.snapshot, environmentId: environmentB } };
+  const deliveries: unknown[] = [];
+  const send = async (context: unknown) => { deliveries.push(context); return {}; };
+  assert.equal(await cardA.publish(view, true, send), "sent");
+  assert.equal(await cardB.publish(viewB, true, send), "sent");
+  assert.equal(await cardA.publish(view, true, send), "sent");
+  assert.deepEqual(deliveries, [environmentId, environmentB, environmentId].map(id => ({
+    content: [{ type: "text", text: `AgentEnv selection: environmentId=${id}` }],
+  })));
 });
 
 test("pending explicit context is suppressed; failed delivery can retry", async () => {

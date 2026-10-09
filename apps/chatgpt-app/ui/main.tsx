@@ -87,7 +87,7 @@ async function useInChat() {
   // A late acknowledgement must not label a different selection as shared.
   if (latest?.kind === "environment" && selected?.kind === "environment"
     && latest.snapshot.environmentId === selected.snapshot.environmentId) {
-    contextFeedback = ({ sent: "宿主已确认此工作区选择。", duplicate: "此卡片已提交相同选择。",
+    contextFeedback = ({ sent: "宿主已确认此工作区选择。",
       unsupported: "宿主不支持共享选择；请在对话中使用 inspect_environment。", unavailable: "无法共享此选择。",
       failed: "宿主未确认选择。请重试。", pending: "正在请求宿主…" })[feedback];
   } else contextFeedback = "";

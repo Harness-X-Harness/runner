@@ -43,6 +43,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
     const previous = previousEnvironment.current;
     if (environmentId) previousEnvironment.current = environmentId;
     if (!environmentId || !previous || previous === environmentId) return;
+    setMode("agent");
     setPrompt("");
     setCommandDraft(""); setCommandLease(undefined); setCommandError(""); setOperationDraft("");
     setLease(current => current?.environmentId === environmentId ? current : undefined);
@@ -153,7 +154,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         <select id="workbench-mode" value={mode} disabled={!canCall || Boolean(lease || commandLease)} onChange={event => setMode(event.target.value)}>
           <option value="agent">助手指令</option><option value="command">运行命令</option><option value="result">查看操作结果</option>
         </select>
-        {onUseInChat && <Button variant="quiet" disabled={!connected || busy || phase === "closed"} onClick={onUseInChat}>Use this environment in chat</Button>}
+        {onUseInChat && <Button variant="quiet" disabled={!connected || busy || phase === "closed"} onClick={onUseInChat}>在对话中使用此工作区</Button>}
       </div>
       {contextFeedback && <p className="notice" role="status">{contextFeedback}</p>}
       {mode === "result" && <form className="prompt" onSubmit={event => {
