@@ -18,6 +18,8 @@ test("Codex launch enables native user questions outside plan mode", () => {
   assert.equal(Object.keys(config).some(key => key.startsWith("features.")), false);
   assert.equal(config.approval_policy, "never");
   assert.equal(config.sandbox_mode, "danger-full-access");
+  assert.equal(process.env.INITIAL_AGENT_MODE, "agent-full-access");
+  assert.equal(providerProcess("grok", "/workspace", {}).env.INITIAL_AGENT_MODE, undefined);
 });
 
 const fixturePath = fileURLToPath(new URL("../.github/actions/agent-runtime/fixtures/agent.ts", import.meta.url));

@@ -81,6 +81,10 @@ export async function withEnvironment<T>(
     },
       client => client.buildSession({ cwd: process.workspace, mcpServers: [...(process.mcpServers ?? []), ciTool!.config] }).withSession(async session => {
         lifetime.signal.throwIfAborted();
+        // ACP sets the effective per-turn sandbox independently from CODEX_CONFIG.
+        if (executor === "codex" && session.modes?.currentModeId !== "agent-full-access") {
+          throw new Error("CODEX_AGENT_MODE_MISMATCH");
+        }
         if (dependencies?.readAgentReport) {
           // Unavailable discovery is reported, not replaced by another directory.
           // Commands remain usable; an agent call still validates its own selection.

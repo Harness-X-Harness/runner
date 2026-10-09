@@ -7,7 +7,7 @@ export function providerProcess(executor: "codex" | "grok", workspace: string,
     command: executor === "codex" ? fileURLToPath(new URL("./node_modules/.bin/codex-acp", import.meta.url)) : "grok",
     args: executor === "codex" ? [] : ["--always-approve", "agent", "--no-leader", "stdio"],
     workspace,
-    env: executor === "codex" ? { ...env, CODEX_PATH: "codex", CODEX_CONFIG: JSON.stringify({
+    env: executor === "codex" ? { ...env, CODEX_PATH: "codex", INITIAL_AGENT_MODE: "agent-full-access", CODEX_CONFIG: JSON.stringify({
       sandbox_mode: "danger-full-access", approval_policy: "never",
       // ACP also merges feature flags; keep one nested table, not overlapping dotted keys.
       features: { default_mode_request_user_input: true },

@@ -81,6 +81,16 @@ slot. Unconfirmed process-group cleanup seals the runtime and rejects close;
 the Environment owner must retain teardown responsibility. A successful local
 close is not proof that the GitHub run or entire Environment has stopped.
 
+Codex ACP sessions have a distinct effective execution mode: the adapter maps
+agent to network-disabled workspaceWrite even when CODEX_CONFIG specifies
+danger-full-access. The Runner starts Codex ACP with
+INITIAL_AGENT_MODE=agent-full-access and rejects a mismatched native session
+before serving. The native auth probe verifies this mode using session/new.
+This grants model-run commands access to the runner user's filesystem and
+network, consistent with the single-user trust boundary in [SECURITY.md](../../SECURITY.md).
+It does not change direct-command environment projection or create process
+isolation. The ACP adapter version is pinned to 2.1.1.
+
 Agent turns use the supplied SDK session and client; the Environment caller must
 bind these to its own workspace and provider. The slot stays occupied until both
 the prompt response and SDK update consumer finish. Native cancellation returns
