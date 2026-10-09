@@ -57,7 +57,7 @@ test("Codex Linux sandbox preparation is scoped, credential-free and fail-closed
   assert.ok(setup.run!.includes("sudo apt-get install --yes --no-install-recommends bubblewrap apparmor-profiles"));
   assert.ok(setup.run!.includes("sudo apparmor_parser -r /usr/share/apparmor/extra-profiles/bwrap-userns-restrict"));
   assert.ok(probe.run!.includes("bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true"));
-  assert.ok(probe.run!.includes("codex sandbox linux -- /usr/bin/true"));
+  assert.ok(probe.run!.includes("codex sandbox -- /usr/bin/true"));
   assert.doesNotMatch(setup.run! + probe.run!, /\bsysctl\b|setcap|--share-net|--dangerously-bypass/);
   assert.doesNotMatch(probe.run!, /\bsudo\b|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN/);
   assert.doesNotMatch(JSON.stringify(steps.slice(0, position("Serve Environment"))), /secrets\./);

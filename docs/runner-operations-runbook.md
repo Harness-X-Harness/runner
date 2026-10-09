@@ -28,7 +28,7 @@ globally. This setup is local to the disposable runner job; the other
 executor's launch path is unchanged.
 
 After installing Codex, the job verifies both system Bubblewrap namespace
-creation and `codex sandbox linux -- /usr/bin/true`, without a model call or
+creation and `codex sandbox -- /usr/bin/true`, without a model call or
 provider credentials. Failure stops the job before `Serve Environment`.
 The repository test workflow also exercises this same preparation and native
 sandbox check on GitHub-hosted Ubuntu, without secrets.

@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           test "$(readlink -f "$(command -v bwrap)")" = /usr/bin/bwrap
           bwrap --unshare-user --unshare-net --ro-bind / / -- /usr/bin/true
-          codex sandbox linux -- /usr/bin/true
+          codex sandbox -- /usr/bin/true
 
       - name: Install Grok
         if: steps.claim.outputs.executor == 'grok'
