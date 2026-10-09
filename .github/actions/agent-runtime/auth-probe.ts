@@ -20,6 +20,9 @@ async function probe(executor: "codex" | "grok") {
     await withAcpAgent({ ...providerProcess(executor, workspace, env), signal }, {
       sessionUpdate: () => {}, requestPermission: () => ({ outcome: { outcome: "cancelled" } }),
     }, client => client.buildSession({ cwd: workspace, mcpServers: [] }).withSession(async session => {
+      if (executor === "codex" && session.modes?.currentModeId !== "agent-full-access") {
+        throw new Error("CODEX_AGENT_MODE_MISMATCH");
+      }
       const result = await runtime.agent(client, session, executor, "Do not use tools. Reply exactly OK.");
       if (result.status !== "completed") throw new Error("AUTH_PROBE_INCOMPLETE");
     }));

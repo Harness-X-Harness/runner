@@ -10,6 +10,13 @@ const processConfig = { command: process.execPath,
 };
 const handlers = { sessionUpdate: () => {}, requestPermission: () => ({ outcome: { outcome: "cancelled" as const } }) };
 
+test("Codex rejects an ACP session with the wrong effective mode before serving", async () => {
+  await assert.rejects(withEnvironment({ ...processConfig, env: { FIXTURE_AGENT_MODE: "agent" } },
+    "codex", Date.now() + 5000, {}, handlers, async () => {
+      throw new Error("SHOULD_NOT_SERVE");
+    }), /CODEX_AGENT_MODE_MISMATCH/);
+});
+
 for (const active of [false, true]) test(`provider exit closes Environment without waiting for its deadline, active=${active}`, { timeout: 7000 }, async () => {
   let pid = 0;
   let served: Promise<void> | undefined;
