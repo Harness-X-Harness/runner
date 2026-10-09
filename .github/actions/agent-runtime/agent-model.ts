@@ -5,7 +5,7 @@ export type AgentSelection = { model: string; reasoningEffort: string };
 export type AgentModel = { id: string; effort: string; efforts: string[] };
 export type AgentModelReport = { models: AgentModel[] };
 export const AGENT_MODEL_DEFAULTS: Record<AgentExecutor, AgentSelection> = {
-  codex: { model: "gpt-6-sol", reasoningEffort: "high" },
+  codex: { model: "gpt-6.1-sol", reasoningEffort: "high" },
   grok: { model: "grok-4.7", reasoningEffort: "xhigh" },
 };
 

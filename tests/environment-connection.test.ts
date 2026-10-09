@@ -303,12 +303,12 @@ test("channel transports a native ACP question and resumes its exact answer", { 
     const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
       "00000000-0000-4000-8000-000000000001", async () => "fixture", AbortSignal.timeout(3000));
     await serveEnvironmentConnection(connection, environment, () => 1);
-  }, undefined, { readAgentReport: async () => ({ models: [{ id: "gpt-6-sol", effort: "high", efforts: ["high"] }] }) });
+  }, undefined, { readAgentReport: async () => ({ models: [{ id: "gpt-6.1-sol", effort: "high", efforts: ["high"] }] }) });
   assert.equal(modelStates[0]?.selection, null);
-  assert.deepEqual(modelStates.at(-1)?.selection, { model: "gpt-6-sol", reasoningEffort: "high" });
+  assert.deepEqual(modelStates.at(-1)?.selection, { model: "gpt-6.1-sol", reasoningEffort: "high" });
   assert.deepEqual(await result.promise, { ok: true, value: { status: "completed",
     finalResponse: JSON.stringify({ action: "accept", content: { marker: "WIRE_RESUMED" } }),
-    model: "gpt-6-sol", reasoningEffort: "high" } });
+    model: "gpt-6.1-sol", reasoningEffort: "high" } });
   assert.ok(outputSnapshots.some(output => output.text === "VISIBLE_BEFORE_INPUT"));
   assert.ok(!JSON.stringify(outputSnapshots).includes("PRIVATE_REASONING"));
   assert.ok(outputSnapshots.at(-1)!.text.includes("WIRE_RESUMED"));

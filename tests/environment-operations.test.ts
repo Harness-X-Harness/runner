@@ -32,7 +32,7 @@ test("failure receipts do not expose diagnostics or evict replay protection", as
   let executions = 0;
   const operations = new EnvironmentOperations({ signal: new AbortController().signal, close: async () => {},
     command: async () => { executions++; throw new Error("PRIVATE-fixture-diagnostic"); },
-    agent: async () => ({ status: "completed", finalResponse: "unused", model: "gpt-6-sol", reasoningEffort: "high" }),
+    agent: async () => ({ status: "completed", finalResponse: "unused", model: "gpt-6.1-sol", reasoningEffort: "high" }),
   }, async () => {});
   const input = { kind: "command", argv: ["fixture"], timeoutSeconds: 5 };
   for (let index = 0; index < 256; index++) {

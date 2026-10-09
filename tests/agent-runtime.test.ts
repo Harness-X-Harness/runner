@@ -147,7 +147,7 @@ test("a closed operator log pipe does not end the Environment supervisor", { tim
 });
 
 const reportedModels = { models: [
-  { id: "gpt-6-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
+  { id: "gpt-6.1-sol", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
   { id: "gpt-5.5", effort: "medium", efforts: ["low", "medium", "high", "xhigh"] },
 ] };
 
@@ -201,7 +201,7 @@ test("a rejected agent model can be corrected before the native session changes"
     { status: "completed", finalResponse: "FINAL_OK", model: "gpt-5.5", reasoningEffort: "high" });
   assert.equal(prompts(), 1);
   await assert.rejects(runtime.agent(client as never, session as never, "codex",
-    { prompt: "other", model: "gpt-6-sol" }), /AGENT_MODEL_CONFLICT/);
+    { prompt: "other", model: "gpt-6.1-sol" }), /AGENT_MODEL_CONFLICT/);
   assert.deepEqual(await runtime.agent(client as never, session as never, "codex", { prompt: "again" }),
     { status: "completed", finalResponse: "FINAL_OK", model: "gpt-5.5", reasoningEffort: "high" });
   assert.equal(prompts(), 2);
@@ -212,7 +212,7 @@ test("an agent receipt uses the executor's current configuration, not a differen
   const { session, prompts } = configSession();
   const client = { async request() {
     return { configOptions: [
-      { id: "model", currentValue: "gpt-6-sol" },
+      { id: "model", currentValue: "gpt-6.1-sol" },
       { id: "reasoning_effort", currentValue: "high" },
     ] };
   }, async notify() {} };
@@ -227,7 +227,7 @@ test("an agent receipt uses the executor's current configuration, not a differen
 test("a partial agent configuration failure does not run another prompt", async () => {
   const runtime = modelRuntime();
   const { session, prompts } = configSession();
-  let actual = "gpt-6-sol";
+  let actual = "gpt-6.1-sol";
   const client = { async request(_method: string, params: { configId: string; value: string }) {
     if (params.configId === "model") { actual = params.value; return { configOptions: [] }; }
     throw new Error("effort was not applied");
@@ -257,6 +257,6 @@ test("a failed native model change leaves the agent configuration uncertain", as
   await assert.rejects(runtime.agent(client as never, session as never, "codex",
     { prompt: "switch", model: "gpt-5.5", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
   await assert.rejects(runtime.agent(client as never, session as never, "codex",
-    { prompt: "correct", model: "gpt-6-sol", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
+    { prompt: "correct", model: "gpt-6.1-sol", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
   assert.equal(prompts(), 0);
 });
