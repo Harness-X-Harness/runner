@@ -20,10 +20,12 @@ for (const [id, select] of Object.entries({ scene, executor, theme, width })) {
 }
 let bridge: AppBridge | undefined;
 let bridges: AppBridge[] = [];
+let primarySession: PreviewSession;
 // Local fixture controls exercise actual AppBridge deliveries and production metadata.
 (globalThis as typeof globalThis & { previewHost: unknown }).previewHost = {
   chatTool: async (name: string) => {
-    if (launchesWorkbench(name)) await mount(new PreviewSession("opening", executor.value as Executor), true);
+    if (name === "show_workbench" && launchesWorkbench(name)) await mount(primarySession, true, name);
+    else if (launchesWorkbench(name)) await mount(new PreviewSession("opening", executor.value as Executor), true);
     else record(`聊天工具 → ${name}（无卡片）`, {});
   },
   selectEnvironment: async (card: number, environmentId: string, selectedExecutor: Executor = executor.value as Executor) => {
@@ -68,11 +70,12 @@ async function reset() {
   document.getElementById("hint")!.textContent = scenes.find(item => item.id === scene.value)!.hint;
   status.textContent = "正在连接正式卡片…";
   const session = new PreviewSession(scene.value as SceneId, executor.value as Executor);
+  primarySession = session;
   await mount(session);
   if (params.get("multiple") === "1") await mount(new PreviewSession("ready", executor.value as Executor), true);
 }
 
-async function mount(session: PreviewSession, append = false) {
+async function mount(session: PreviewSession, append = false, launcher?: "show_workbench") {
   const frame = document.createElement("iframe");
   frame.title = "AgentEnv 正式卡片（本地示例数据）";
   // This loopback-only host is a UI workbench, not a replica of ChatGPT's sandbox.
@@ -114,7 +117,7 @@ async function mount(session: PreviewSession, append = false) {
   host.onsizechange = ({ height }) => { if (height !== undefined) frame.style.height = `${height}px`; };
   host.oninitialized = async () => {
     await host.sendToolInput({ arguments: {} });
-    await host.sendToolResult(session.initial());
+    await host.sendToolResult(launcher ? session.call(launcher) : session.initial());
     status.textContent = "本地宿主已连接";
   };
   host.onerror = error => { status.textContent = `预览宿主错误：${error.message}`; };

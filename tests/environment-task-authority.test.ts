@@ -95,10 +95,25 @@ test("standard HTTP Task calls reach the Environment authority without exposing 
   assert.equal(catalog.result?.ttlMs, 0);
   assert.equal(catalog.result?.cacheScope, "private");
   const tools = z.array(z.looseObject({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })).parse(catalog.result?.tools);
+  assert.equal(tools.length, 8);
+  assert.ok(tools.some(tool => tool.name === "show_workbench"));
   assert.ok(tools.some(tool => tool.name === "update_operation"));
   assert.deepEqual(tools.map(tool => tool.name), tools.map(tool => tool.name).sort());
   assert.equal(reservations, 0);
   assert.ok(!JSON.stringify(tools).includes('"kind"'));
+  for (const capable of [false, true]) {
+    const shown = await rpc("tools/call", { name: "show_workbench", arguments: {} }, capable);
+    assert.equal(shown.error, undefined);
+    assert.equal(shown.result?.resultType, "complete");
+    assert.equal(shown.result?.taskId, undefined);
+    assert.equal(shown.result?.isError, undefined);
+    const data = z.looseObject({ contract: z.literal("ordinary"), tool: z.literal("show_workbench"),
+      environmentId: z.literal(environmentId), environmentStatus: z.literal("ready"),
+    }).parse(shown.result?.structuredContent);
+    assert.equal(data.expiresAt, 1000);
+    assert.equal(reservations, 0);
+    assert.equal(closeExecutions, 0);
+  }
   const command = tools.find(tool => tool.name === "command")!;
   const commandSchema = z.fromJSONSchema(command.inputSchema as Parameters<typeof z.fromJSONSchema>[0]);
   assert.doesNotThrow(() => commandSchema.parse(params.arguments));

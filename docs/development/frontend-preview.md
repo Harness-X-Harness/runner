@@ -114,13 +114,34 @@ back to the operation's cancellation label and literal output snapshot. Missing
 command evidence must not be reconstructed from that snapshot.
 
 
-## Launcher and context acceptance (#217 / #218)
+## Launcher and context acceptance (#217 / #218 / #219 / #220)
 
 The [tool-to-UI matrix](../chatgpt-app.md#chat-workbench) reserves Workbench
-launching for `list_environments` and `open_environment`. Ordinary
+launching for `show_workbench`, `list_environments` and `open_environment`. Ordinary
 command/agent/inspect calls have no Workbench URI. Repeated launchers can still
 create independent cards; chat calls cannot be forced to converge on one view.
 Existing-card Refresh reads once and replaces its snapshot in place.
+
+Intent examples: **在这里显示 AgentEnv 工作区**, **回到当前 Codex 工作区**,
+**show current workbench here** → `show_workbench({})`; **browse my workspaces**
+→ `list_environments({})`; **create a new Codex workspace** → `open_environment`
+with the executor only on explicit create intent; **what is the workspace status?**
+→ silent `inspect_environment`, with no new card.
+
+The simulated host's `window.previewHost.chatTool("show_workbench")` appends an
+independent AppBridge view with the current fixture snapshot, or executor choices
+for an empty scene. The browser regression checks direct command presentation,
+repeated explicit re-entry, same-view Refresh, silent ordinary chat tools and
+zero automatic Model Context. Server tests separately check owner-authenticated
+zero/one/multiple routing, normalization, read races/errors and no mutations;
+fixtures do not exercise production capacity or authentication.
+
+The new card belongs near the current tool call on supporting hosts; this is
+pending real ChatGPT validation in #210 after the user deploys the reviewed SHA.
+No pinned/floating card or global cross-card identity is promised. Re-entry
+starts no runner, Agent session, Task or work, renews no deadline, adds no OAuth
+consent, polling or automatic per-turn card. Hosts without MCP Apps receive the
+ordinary result. Listing browses; showing resumes; opening creates.
 
 In the ready scene, choose **运行命令**, enter `["git", "status", "--short"]`
 and a timeout, run, then refresh. This returns literal fixture output and the
@@ -145,7 +166,7 @@ controls are
 not included in the production card.
 
 Browser tests use the production routing rule to simulate host view creation;
-unit tests separately verify all seven discovered tools, visibility, scope and
+unit tests separately verify all eight discovered tools, visibility, scope and
 URI metadata. The simulated host creates views only for advertised launchers
 and does not create views for in-card `callServerTool` responses. This proves
 our routing and bridge behavior locally, not ChatGPT's actual presentation

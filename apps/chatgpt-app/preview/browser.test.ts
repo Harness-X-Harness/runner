@@ -107,6 +107,41 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
       assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
     });
 
+    await t.test("on-demand show_workbench appends a current card; refresh stays there without context churn", async () => {
+      await open("command-historical", "&width=375&theme=dark");
+      await evaluate('window.originalFrame = document.querySelector("iframe"); true');
+      for (const name of ["inspect_environment", "command", "agent"]) {
+        await evaluate(`window.previewHost.chatTool("${name}").then(() => true)`);
+      }
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector(".command-panel"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      assert.equal(await evaluate('document.querySelector("iframe") === window.originalFrame'), true);
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1].contentDocument.querySelector(".command-status").textContent'), "命令成功");
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1].contentDocument.querySelector(".command-evidence").textContent.includes("较早的结果")'), true);
+      await evaluate(`window.currentFrame = document.querySelectorAll("iframe")[1]; window.currentFrame.contentDocument.querySelector('[aria-label="刷新"]').click(); true`);
+      await browser("wait", "--fn", 'Boolean(window.currentFrame.contentDocument.querySelector("main")?.getAttribute("aria-busy") === "false")');
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1] === window.currentFrame'), true);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[2]?.contentDocument?.querySelector(".command-panel"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
+      assert.equal(await evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).length'), 0);
+      await open("opening");
+      await click("刷新");
+      await waitFor('d.querySelector(".status")?.textContent === "就绪"');
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector(".status")?.textContent === "就绪")');
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await open("empty");
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector("h1")?.textContent === "选择助手")');
+      assert.equal((await toolCalls()).length, 0);
+      assert.equal(await evaluate('document.querySelectorAll("#log li").length'), 0);
+    });
+
     await t.test("context is explicit, minimal and reassertable; late views stay silent", async () => {
       await open("command-historical");
       const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');

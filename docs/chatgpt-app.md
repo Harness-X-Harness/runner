@@ -96,20 +96,43 @@ Listing and inspecting do not renew either deadline.
 ### Chat workbench
 
 MCP Apps clients can intentionally launch the AgentEnv workbench through
-`list_environments` or `open_environment`. These are the minimal launcher set:
-list recovers an existing workspace without starting work; open also allocates
-one. All seven tools remain visible to both model and app, with the same
+`show_workbench`, `list_environments` or `open_environment`, on explicit user
+intent. Show resumes/displays the existing workspace here; list browses owned
+workspaces; open allocates one only when the user explicitly asks to create.
+All eight tools remain visible to both model and app, with the same
 `environments:use` authentication and Tasks/ordinary result contracts.
 
 | Tool | ChatGPT-initiated call: Workbench URI | Inside an existing card |
 | --- | --- | --- |
-| `list_environments` | Yes: explicit Workbench/list launcher | Replace this card with the owned list |
+| `show_workbench` | Yes: explicit display/resume HERE launcher | Replace this card with the current owned snapshot or chooser |
+| `list_environments` | Yes: explicit browse/list launcher | Replace this card with the owned list |
 | `open_environment` | Yes: explicit create/open launcher | Replace this card with the opening snapshot |
 | `inspect_environment` | No | Refresh/select one snapshot or a specific retained operation |
 | `agent` | No | Send through the Agent composer; retain this card |
 | `command` | No | Run through the literal-argv composer; retain this card |
 | `update_operation` | No | Answer/stop the exact active operation |
 | `close_environment` | No | Confirm closure; retain this card and available result |
+
+For a long conversation, say **在这里显示 AgentEnv 工作区**, **回到当前 Codex 工作区**,
+or **show current workbench here**. Call `show_workbench` with `{}` at that turn.
+Exactly one owned live Environment opens directly with the latest normalized
+ordinary snapshot, including the current active operation/questions and trusted
+result/output when present, without a list click. Zero live Environments shows
+executor choices and starts nothing. Multiple entries show an owner-scoped
+chooser (defensive fallback; current production capacity is one per Principal).
+Directory, ownership and snapshot failures remain errors. Opening, ready,
+unavailable and closing are supported; closure during the read can yield a
+retained closed snapshot or an error, never a fabricated empty view.
+
+**列出我的工作区 / browse my workspaces** calls `list_environments`;
+**创建一个新的 Codex 工作区 / create a new Codex workspace** calls `open_environment`
+only on that explicit creation intent. **当前工作区是什么状态？ / what is the workspace
+status?** calls `inspect_environment` for facts and a chat answer without a card.
+Show does not create/reopen an Environment, runner, Agent session, Task or work;
+it does not renew deadlines, ask for OAuth consent, publish Model Context, or
+add polling, subscriptions or per-turn automatic cards. It uses the same valid
+`environments:use` grant. Hosts without MCP Apps support receive honest ordinary
+data without a promised card.
 
 The template is linked by `_meta.ui.resourceUri` and read through
 `resources/read`; `resources/list` remains the live Environment directory.
@@ -118,8 +141,11 @@ Tasks nor Events. The template URI is `ui://agentenv/workbench-v2.html`, version
 reusing the previous context-publishing template.
 
 This matrix controls our advertised entrypoints, not ChatGPT's view identity.
-A repeated launcher may create another independent iframe. Sharing a URI does
-not merge cards, and a chat tool result does not automatically update an older
+An explicit `show_workbench` asks for a new card near its current tool result,
+so the user need not scroll to an older card. Actual placement is host-dependent
+and requires post-deployment validation in #210. A repeated launcher may create
+another independent iframe. There is no pinned/floating card guarantee. Sharing
+a URI does not merge cards, and a chat tool result does not automatically update an older
 card. Host presentation outside this metadata is host-dependent. In-card
 `app.callServerTool` responses update only that card, without asking for a new
 view. No cross-iframe synchronization, global ordering or polling is invented.
@@ -148,8 +174,11 @@ currently omit command outcomes; their cancellation label and available literal
 output snapshot remain visible without inventing exit or signal evidence.
 
 To view command evidence from chat, launch the Workbench with
-`list_environments`, select the Environment, then refresh. To select a retained
-historical result, choose **查看操作结果** and enter its operation ID from the
+`show_workbench` to go directly to the sole owned live Environment. To browse,
+use `list_environments` and select the Environment. Refresh explicitly as needed.
+Zero-argument show selects the current server operation, not an older card’s
+historical selection; it cannot recover that selection across views. To select a
+retained historical result, choose **查看操作结果** and enter its operation ID from the
 chat tool result. Stop continues to target the active operation independently.
 The authenticated snapshot is still the only evidence source.
 
@@ -259,7 +288,8 @@ See [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-events).
 | `agent` | Send another prompt to its native Agent session |
 | `command` | Run argv directly in the same workspace without a model |
 | `inspect_environment` | Read current Environment and operation state once |
-| `list_environments` | Find live owned Environments across clients |
+| `list_environments` | Browse live owned Environments across clients |
+| `show_workbench` | Display/resume the existing workspace HERE without starting work |
 | `update_operation` | Answer questions or cancel one operation, keeping the Environment |
 | `close_environment` | Stop the exact runtime and confirm cleanup |
 

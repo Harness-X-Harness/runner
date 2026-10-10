@@ -165,6 +165,8 @@ export class PreviewSession {
   }
 
   call(name: string, args: Record<string, unknown> = {}): PreviewResult {
+    if (name === "show_workbench") return this.snapshot && this.snapshot.environmentStatus !== "closed"
+      ? result(this.snapshot) : this.list();
     if (name === "list_environments") return this.list();
     if (name === "open_environment") {
       this.snapshot = { ...ready(args.executor === "grok" ? "grok" : "codex", this.now), environmentStatus: "opening" };

@@ -13,16 +13,28 @@ const snapshot = { contract: "ordinary", environmentId, executor: "codex", envir
   disposition: "accepted", workFinished: false, expiresAt: 12345, activeOperationId: operationId,
   activeOperationStatus: "working", operationId, operationStatus: "working" };
 
-test("UI discovery uses the same seven tools and a credential-free standard resource", () => {
+test("UI discovery uses the same eight tools and a credential-free standard resource", () => {
   const tools = environmentTools();
-  assert.equal(tools.length, 7);
+  assert.equal(tools.length, 8);
+  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "inspect_environment", "list_environments", "open_environment", "show_workbench", "update_operation"]);
   for (const name of tools.map(tool => tool.name)) {
     const tool = tools.find(tool => tool.name === name)!;
     assert.deepEqual(tool._meta?.ui, { visibility: ["model", "app"],
-      ...(["list_environments", "open_environment"].includes(name) ? { resourceUri: WORKBENCH_URI } : {}) });
+      ...(["list_environments", "open_environment", "show_workbench"].includes(name) ? { resourceUri: WORKBENCH_URI } : {}) });
     assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["environments:use"] }]);
-    assert.equal(tool.annotations?.readOnlyHint, ["list_environments", "inspect_environment"].includes(name));
+    assert.equal(tool.annotations?.readOnlyHint, ["list_environments", "inspect_environment", "show_workbench"].includes(name));
   }
+  const show = tools.find(tool => tool.name === "show_workbench")!;
+  assert.deepEqual(show.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+  assert.deepEqual(show.inputSchema.properties, {});
+  assert.equal(show.inputSchema.additionalProperties, false);
+  assert.match(show.description!, /show current [Ww]orkbench here/);
+  assert.match(show.description!, /在这里显示 AgentEnv 工作区/);
+  assert.match(show.description!, /回到当前 Codex 工作区/);
+  assert.match(show.description!, /HERE/);
+  assert.match(tools.find(tool => tool.name === "open_environment")!.description!, /explicit.*creat/);
+  assert.match(tools.find(tool => tool.name === "inspect_environment")!.description!, /[Ss]ilent/);
+  assert.match(tools.find(tool => tool.name === "list_environments")!.description!, /[Bb]rowse/);
   const resource = readWorkbench().contents[0]!;
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
   assert.deepEqual(resource._meta.ui.csp, { connectDomains: [], resourceDomains: [] });
