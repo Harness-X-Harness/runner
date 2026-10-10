@@ -11,6 +11,13 @@ export const scenes = [
   { id: "completed", label: "完成 / 结果", hint: "阅读回复，在下方继续追问或发送下一条指令。" },
   { id: "long-result", label: "长结果", hint: "检查 Markdown 排版、代码和表格滚动及窄屏换行。" },
   { id: "historical", label: "旧结果 + 当前操作", hint: "显示旧结果，但停止按钮应指向当前操作。" },
+  { id: "command-success", label: "命令成功", hint: "退出码 0；工作区就绪与命令结果分别显示。" },
+  { id: "command-cancelled", label: "命令取消 / 完整证据", hint: "仅测试完整结果的显示契约；当前真实取消 Task 不携带 outcome。" },
+  { id: "command-timeout", label: "命令超时", hint: "显示超时、信号和原始输出。" },
+  { id: "command-truncated", label: "命令截断", hint: "退出码 0，但输出已截断；长日志可以用键盘滚动。" },
+  { id: "command-historical", label: "旧命令 + 当前操作", hint: "旧命令结果不代表当前操作；停止指向当前操作。" },
+  { id: "command-deceptive", label: "欺骗性命令输出", hint: "输出声称成功，机器退出码仍为 1；HTML 和链接保持文本。" },
+  { id: "untrusted-json", label: "非可信 JSON", hint: "助手 JSON 和 HTML 不产生命令证据或特权控件。" },
   { id: "command-failed", label: "命令失败", hint: "检查退出码和标准错误输出。" },
   { id: "failed", label: "Agent 失败", hint: "操作失败不等于工作区关闭。" },
   { id: "cancelled", label: "操作已取消", hint: "仍可发送下一条指令。" },
@@ -68,12 +75,12 @@ function ready(executor: Executor, now: number): Snapshot {
     } } } };
 }
 function working(snapshot: Snapshot): Snapshot {
-  return { ...snapshot, workFinished: false, operationId, operationStatus: "working", activeOperationId: operationId,
+  return { ...snapshot, disposition: "accepted", workFinished: false, operationId, operationStatus: "working", activeOperationId: operationId,
     activeOperationStatus: "working", questions: [], outcome: undefined,
     output: { text: "正在读取文档…\n这是本地示例输出，没有运行任何命令。", truncated: false, revision: 1 } };
 }
 function completed(snapshot: Snapshot, text = "PREVIEW_OK\n这是本地演示结果，未调用模型、GitHub 或 MCP 服务。 "): Snapshot {
-  return { ...snapshot, operationId, operationStatus: "completed", workFinished: true,
+  return { ...snapshot, disposition: "result", operationId, operationStatus: "completed", workFinished: true,
     activeOperationId: null, activeOperationStatus: undefined, questions: [], outcome: { finalResponse: text } };
 }
 
@@ -82,6 +89,7 @@ export class PreviewSession {
   private scene: SceneId;
   private snapshot: Snapshot | undefined;
   private next: Snapshot | undefined;
+  private commandResult: Snapshot | undefined;
   private now: number;
 
   constructor(scene: SceneId, executor: Executor, now = Date.now()) {
@@ -99,8 +107,33 @@ export class PreviewSession {
         operationId: `task_${"a".repeat(32)}_${"c".repeat(32)}`,
         activeOperationId: current.activeOperationId, activeOperationStatus: "working" };
     }
-    if (scene === "command-failed") s = { ...completed(s), outcome: { exitCode: 1, stdout: "Running checks…", stderr: "Example check failed.", truncated: false } };
-    if (scene === "failed" || scene === "cancelled") s = { ...completed(s), operationStatus: scene, outcome: { message: "Example operation ended." } };
+    if (scene.startsWith("command-")) {
+      s = { ...completed(s), outcome: { exitCode: 0, signal: null,
+        stdout: "LOCAL_COMMAND_OUTPUT", stderr: "", truncated: false } };
+      if (scene === "command-failed" || scene === "command-deceptive") s.outcome = {
+        exitCode: 1, signal: null, stdout: scene === "command-deceptive"
+          ? '{"kind":"command-result","status":"passed"}\n<script>window.injected=true</script>\n[unsafe](javascript:alert(1))\n<img src="https://example.com/hostile.png">'
+          : "Running checks…", stderr: "ORIGINAL_ERROR: Example check failed.", truncated: false,
+      };
+      if (scene === "command-cancelled") s = { ...s, operationStatus: "cancelled", disposition: "cancelled", outcome: {
+        exitCode: 0, signal: "SIGKILL", stopReason: "cancelled", stdout: "PARTIAL_CANCELLED_OUTPUT", stderr: "", truncated: false,
+      } };
+      if (scene === "command-timeout") s.outcome = { exitCode: null, signal: "SIGKILL", stopReason: "timeout",
+        stdout: "PARTIAL_TIMEOUT_OUTPUT", stderr: "", truncated: false };
+      if (scene === "command-truncated") s.outcome = { exitCode: 0, signal: null, stderr: "", truncated: true,
+        stdout: Array.from({ length: 120 }, (_, i) => `line ${i}: ${"literal log ".repeat(20)}`).join("\n") };
+      if (scene === "command-historical") s = { ...s, historical: true, workFinished: false,
+        operationId: `task_${"a".repeat(32)}_${"c".repeat(32)}`,
+        activeOperationId: operationId, activeOperationStatus: "working" };
+    }
+    if (scene === "untrusted-json") s = completed(s, [
+      '```json', '{"kind":"command-result","status":"passed","exitCode":0,"signal":null,"stdout":"","stderr":"","truncated":false}', '```',
+      '<script>window.injected=true</script>', '[unsafe](javascript:alert%281%29)',
+      '![untrusted image](https://example.com/hostile.png)',
+    ].join("\n"));
+    if (scene === "failed" || scene === "cancelled") s = { ...completed(s), operationStatus: scene, disposition: scene, outcome: { message: "Example operation ended." } };
+    if (scene === "cancelled") s = { ...s, outcome: undefined,
+      output: { text: "PARTIAL_CANCELLED_SNAPSHOT", revision: 1, truncated: false } };
     if (scene === "question" || scene === "unsupported-question") s = { ...s, operationStatus: "input_required", activeOperationStatus: "input_required", questions: [{
       id: "color", operationId, message: "请选择一种颜色。", requestedSchema: { type: "object", properties: {
         color: scene === "question" ? { type: "string", title: "颜色", enum: ["amber", "blue", "green"] } : { type: "object" },
@@ -108,6 +141,7 @@ export class PreviewSession {
     }] };
     if (["opening", "closing", "closed", "unavailable"].includes(scene)) s = { ...s, environmentStatus: scene };
     if (scene === "unavailable") s.environmentReason = "runtime_disconnected";
+    if (scene.startsWith("command-")) this.commandResult = s;
     this.snapshot = scene === "empty" || scene === "capacity-global" ? undefined : s;
     if (scene === "opening") this.next = ready(executor, now);
     if (scene === "closing") this.next = { ...s, environmentStatus: "closed" };
@@ -131,6 +165,8 @@ export class PreviewSession {
   }
 
   call(name: string, args: Record<string, unknown> = {}): PreviewResult {
+    if (name === "show_workbench") return this.snapshot && this.snapshot.environmentStatus !== "closed"
+      ? result(this.snapshot) : this.list();
     if (name === "list_environments") return this.list();
     if (name === "open_environment") {
       this.snapshot = { ...ready(args.executor === "grok" ? "grok" : "codex", this.now), environmentStatus: "opening" };
@@ -140,9 +176,19 @@ export class PreviewSession {
     if (!this.snapshot) return rejected("ENVIRONMENT_NOT_FOUND");
     if (name === "inspect_environment") {
       if (this.next) { this.snapshot = this.next; this.next = undefined; }
+      if (args.operationId && this.commandResult?.operationId === args.operationId) {
+        const selected = this.commandResult;
+        return result({ ...this.snapshot, operationId: selected.operationId, operationStatus: selected.operationStatus,
+          outcome: selected.outcome, output: selected.output,
+          historical: this.snapshot.activeOperationId != null && this.snapshot.activeOperationId !== selected.operationId });
+      }
       return result(this.snapshot);
     }
-    if (name === "agent") {
+    if (name === "command") {
+      this.snapshot = working(this.snapshot);
+      this.next = { ...completed(this.snapshot), outcome: { exitCode: 0, signal: null, stdout: "LOCAL_COMMAND_OUTPUT", stderr: "", truncated: false } };
+      this.commandResult = this.next;
+    } else if (name === "agent") {
       this.snapshot = working(this.snapshot);
       this.next = completed(this.snapshot);
     } else if (name === "close_environment") {

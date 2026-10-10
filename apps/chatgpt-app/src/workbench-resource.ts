@@ -1,6 +1,6 @@
 import html from "../dist/workbench.ts";
 
-export const WORKBENCH_URI = "ui://agentenv/workbench-v1.html";
+export const WORKBENCH_URI = "ui://agentenv/workbench-v2.html";
 export const workbenchResource = {
   uri: WORKBENCH_URI, name: "agentenv-workbench", title: "AgentEnv",
   description: "An on-demand view of your environments and operations.",

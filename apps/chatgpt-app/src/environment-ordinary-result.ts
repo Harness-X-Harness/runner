@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { EnvironmentSnapshot } from "./environment-object.ts";
 import type { OutputSnapshot } from "../../../shared/environment-output.ts";
 
-export type OrdinaryTool = "agent" | "close_environment" | "command" | "inspect_environment" | "open_environment" | "update_operation";
+export type OrdinaryTool = "agent" | "close_environment" | "command" | "inspect_environment" | "open_environment" | "show_workbench" | "update_operation";
 export type OrdinaryDispatch = "accepted" | "unknown" | "rejected" | "already-issued";
 export type OrdinaryView = {
   tool: OrdinaryTool;
@@ -40,7 +40,8 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
   const facts = { ...selected, questions: active?.questions.length ? active.questions : selected.questions };
   const assessment = assess(view, selected.commandError);
   // Reading or controlling a failed/cancelled operation is not itself a failed tool call.
-  const isError = assessment.isError && view.tool !== "inspect_environment" && view.tool !== "update_operation";
+  const inspection = view.tool === "inspect_environment" || view.tool === "show_workbench";
+  const isError = assessment.isError && !inspection && view.tool !== "update_operation";
   const content: { type: "text"; text: string }[] = [{ type: "text", text: describe(view, assessment, facts) }];
   if (selected.resultText) content.push({ type: "text", text: selected.resultText });
   return CallToolResultV2Schema.parse({ resultType: "complete",
@@ -50,8 +51,8 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,
       expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
       executor: view.environment.executor,
-      agent: view.tool === "inspect_environment" ? view.environment.agent : undefined,
-      reconnectDiagnostic: view.tool === "inspect_environment" ? view.environment.reconnectDiagnostic : undefined,
+      agent: inspection ? view.environment.agent : undefined,
+      reconnectDiagnostic: inspection ? view.environment.reconnectDiagnostic : undefined,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,
       activeOperationStatus: view.activeOperation?.status
         ?? (view.operation && view.environment.activeTaskId === view.operation.taskId ? view.operation.status : undefined),
@@ -125,7 +126,7 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
   const reason = environment.reason ? ` (${environment.reason})` : "";
   const parts = [`Ordinary result for ${view.tool}.`,
     `Environment ${environment.environmentId} is ${environment.status}${reason}.`];
-  if (view.tool === "inspect_environment" && environment.reconnectDiagnostic) {
+  if ((view.tool === "inspect_environment" || view.tool === "show_workbench") && environment.reconnectDiagnostic) {
     const diagnostic = environment.reconnectDiagnostic;
     parts.push(`Current reconnect observation: ${diagnostic.category}, observedAt ${diagnostic.observedAt}. This observation is not proof of stopped execution.`);
   }
@@ -136,7 +137,7 @@ function describe(view: OrdinaryView, assessment: Assessment, facts: ReturnType<
     if (lifecycleKind(view) === "open" && view.operation.status === "completed" && environment.status !== "ready") {
       parts.push("The open operation completed earlier. Current status is not ready.");
     }
-  } else if (view.tool === "inspect_environment" && !view.activeUnreadable) {
+  } else if ((view.tool === "inspect_environment" || view.tool === "show_workbench") && !view.activeUnreadable) {
     parts.push(environment.activeTaskId ? "The active operation could not be read." : "There is no active operation.");
   }
   if (view.activeOperation) parts.push(`Active operation ${view.activeOperation.taskId} is ${view.activeOperation.status}.`);

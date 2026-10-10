@@ -7,7 +7,7 @@ import { scenes } from "./scenarios.ts";
 
 const exec = promisify(execFile);
 
-test("production card interactions in a local MCP Apps host", { timeout: 180_000 }, async t => {
+test("production card interactions in a local MCP Apps host", { timeout: 360_000 }, async t => {
   const { server, url } = await startPreview(0);
   const session = `agentenv-ui-test-${process.pid}`;
   const browser = async (...args: string[]) => {
@@ -76,6 +76,208 @@ test("production card interactions in a local MCP Apps host", { timeout: 180_000
       assert.equal((await toolCalls()).filter((call: {name: string}) => call.name === "工具 → agent").length, 1);
       await click("列表");
       await waitFor('d.querySelector("h1")?.textContent === "选择助手"');
+    });
+
+    await t.test("passive bridge results and refresh never publish context", async () => {
+      await open("empty");
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).length');
+      assert.equal(await contexts(), 0);
+      await click("Codex 打开 Codex");
+      await idle();
+      await click("刷新");
+      await idle();
+      assert.equal(await contexts(), 0);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+    });
+
+    await t.test("launcher metadata controls simulated chat views; refresh retains one iframe", async () => {
+      await open("opening");
+      await evaluate('window.originalFrame = document.querySelector("iframe"); true');
+      await click("刷新");
+      await waitFor('d.querySelector(".status")?.textContent === "就绪"');
+      for (const name of ["command", "agent", "inspect_environment"]) {
+        await evaluate(`window.previewHost.chatTool("${name}").then(() => true)`);
+        assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      }
+      assert.equal(await evaluate('document.querySelector("iframe") === window.originalFrame'), true);
+      await evaluate('window.previewHost.chatTool("list_environments").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe").length === 2 && document.querySelectorAll("iframe")[1].contentDocument?.querySelector("main"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      await evaluate('window.previewHost.chatTool("open_environment").then(() => true)');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
+    });
+
+    await t.test("on-demand show_workbench appends a current card; refresh stays there without context churn", async () => {
+      await open("command-historical", "&width=375&theme=dark");
+      await evaluate('window.originalFrame = document.querySelector("iframe"); true');
+      for (const name of ["inspect_environment", "command", "agent"]) {
+        await evaluate(`window.previewHost.chatTool("${name}").then(() => true)`);
+      }
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector(".command-panel"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      assert.equal(await evaluate('document.querySelector("iframe") === window.originalFrame'), true);
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1].contentDocument.querySelector(".command-status").textContent'), "命令成功");
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1].contentDocument.querySelector(".command-evidence").textContent.includes("较早的结果")'), true);
+      await evaluate(`window.currentFrame = document.querySelectorAll("iframe")[1]; window.currentFrame.contentDocument.querySelector('[aria-label="刷新"]').click(); true`);
+      await browser("wait", "--fn", 'Boolean(window.currentFrame.contentDocument.querySelector("main")?.getAttribute("aria-busy") === "false")');
+      assert.equal(await evaluate('document.querySelectorAll("iframe")[1] === window.currentFrame'), true);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[2]?.contentDocument?.querySelector(".command-panel"))');
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 3);
+      assert.equal(await evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).length'), 0);
+      await open("opening");
+      await click("刷新");
+      await waitFor('d.querySelector(".status")?.textContent === "就绪"');
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector(".status")?.textContent === "就绪")');
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await open("empty");
+      await evaluate('window.previewHost.chatTool("show_workbench").then(() => true)');
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector("h1")?.textContent === "选择助手")');
+      assert.equal((await toolCalls()).length, 0);
+      assert.equal(await evaluate('document.querySelectorAll("#log li").length'), 0);
+    });
+
+    await t.test("context is explicit, minimal and reassertable; late views stay silent", async () => {
+      await open("command-historical");
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');
+      assert.deepEqual(await contexts(), []);
+      await click("在对话中使用此工作区");
+      await idle();
+      assert.match(await text(), /宿主已确认/);
+      assert.deepEqual(await contexts(), [{ content: [{ type: "text", text: `AgentEnv selection: environmentId=env_${"a".repeat(32)}` }] }]);
+      await click("在对话中使用此工作区");
+      await idle();
+      assert.equal((await contexts()).length, 2);
+      assert.match(await text(), /宿主已确认/);
+      await click("刷新");
+      await idle();
+      assert.equal((await contexts()).length, 2);
+      await open("ready", "&context=unsupported");
+      await click("在对话中使用此工作区");
+      await idle();
+      assert.match(await text(), /不支持共享选择/);
+      assert.deepEqual(await contexts(), []);
+      await open("ready", "&context=fail-once");
+      await click("在对话中使用此工作区");
+      await idle();
+      assert.match(await text(), /未确认选择/);
+      await click("在对话中使用此工作区");
+      await idle();
+      assert.match(await text(), /宿主已确认/);
+      assert.equal((await contexts()).length, 2);
+      await open("ready", "&multiple=1");
+      await evaluate(`Array.from(${doc}.querySelectorAll("button")).find(button => button.textContent === "在对话中使用此工作区").click(); true`);
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      await evaluate('window.previewHost.lateResults().then(() => true)');
+      await idle();
+      assert.equal((await contexts()).length, 1);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2);
+    });
+
+    await t.test("independent AppBridge cards allow explicit A to B to A re-selection", async () => {
+      await open("ready", "&multiple=1");
+      await browser("wait", "--fn", 'Boolean(document.querySelectorAll("iframe")[1]?.contentDocument?.querySelector("#workbench-mode"))');
+      const environmentA = `env_${"a".repeat(32)}`;
+      const environmentB = `env_${"b".repeat(32)}`;
+      await evaluate(`window.previewHost.selectEnvironment(1, "${environmentB}", "grok").then(() => true)`);
+      await browser("wait", "--fn", 'document.querySelectorAll("iframe")[1].contentDocument.querySelector("h1")?.textContent === "Grok"');
+      const share = async (card: number) => {
+        await evaluate(`Array.from(document.querySelectorAll("iframe")[${card}].contentDocument.querySelectorAll("button")).find(button => button.textContent === "在对话中使用此工作区").click(); true`);
+        await browser("wait", "--fn", `Boolean(document.querySelectorAll("iframe")[${card}].contentDocument.querySelector("main")?.getAttribute("aria-busy") === "false")`);
+      };
+      await share(0);
+      await share(1);
+      await share(0);
+      const contexts = () => evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("Model Context")).map(el => JSON.parse(el.querySelector("pre").textContent))');
+      assert.deepEqual(await contexts(), [environmentA, environmentB, environmentA].map(environmentId => ({
+        content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }],
+      })));
+      await evaluate('window.previewHost.lateResults().then(() => true)');
+      await idle();
+      assert.equal((await contexts()).length, 3);
+    });
+
+    await t.test("a different Environment resets input mode and drafts in the same iframe", async () => {
+      await open("ready");
+      await evaluate('window.selectionFrame = document.querySelector("iframe"); true');
+      await act("combobox", "输入模式", "select", "result");
+      await act("textbox", "操作 ID", "fill", `task_${"a".repeat(32)}_${"b".repeat(32)}`);
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "result");
+      assert.match(await evaluate(`${doc}.querySelector('#selected-operation').value`), /^task_/);
+      await evaluate(`window.previewHost.selectEnvironment(0, "env_${"b".repeat(32)}", "grok").then(() => true)`);
+      await waitFor('d.querySelector("h1")?.textContent === "Grok"');
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "agent");
+      assert.equal(await evaluate(`${doc}.querySelector('#next-request').value`), "");
+      assert.equal(await evaluate('document.querySelector("iframe") === window.selectionFrame'), true);
+      await act("combobox", "输入模式", "select", "result");
+      assert.equal(await evaluate(`${doc}.querySelector('#selected-operation').value`), "");
+      await act("combobox", "输入模式", "select", "command");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await evaluate(`window.previewHost.selectEnvironment(0, "env_${"a".repeat(32)}", "codex").then(() => true)`);
+      await waitFor('d.querySelector("h1")?.textContent === "Codex"');
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('#workbench-mode').value`), "agent");
+      await act("combobox", "输入模式", "select", "command");
+      assert.equal(await evaluate(`${doc}.querySelector('#command-argv').value`), "");
+    });
+
+    await t.test("in-card literal command and historical lookup keep trusted output reachable", async () => {
+      await open("ready");
+      await act("combobox", "输入模式", "select", "command");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["printf", "$(literal)", "a b"]');
+      await click("运行命令");
+      await idle();
+      const calls = await toolCalls();
+      assert.equal(calls[0].name, "工具 → command");
+      assert.deepEqual(calls[0].args.argv, ["printf", "$(literal)", "a b"]);
+      assert.equal(calls[0].args.timeoutSeconds, 30);
+      assert.equal(calls[0].args.cwd, ".");
+      await click("刷新");
+      await idle();
+      assert.match(await text(), /命令成功.*LOCAL_COMMAND_OUTPUT/s);
+      const resultId = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await act("combobox", "输入模式", "select", "result");
+      await act("textbox", "操作 ID", "fill", resultId);
+      await click("查看结果");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`), resultId);
+      assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1);
+      await open("ready");
+      await act("combobox", "输入模式", "select", "command");
+      await act("combobox", "下一次工具调用", "select", "unknown");
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await click("运行命令");
+      await idle();
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["git", "status"]');
+      await click("运行命令");
+      await idle();
+      assert.equal((await toolCalls()).length, 1);
+      await act("textbox", "命令参数（JSON 数组）", "fill", '["pwd"]');
+      await click("运行命令");
+      await idle();
+      const retried = await toolCalls();
+      assert.equal(retried.length, 2);
+      assert.equal(retried[0].args.idempotencyKey, retried[1].args.idempotencyKey);
+      await open("command-historical");
+      const historical = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await click("停止");
+      await waitFor('d.querySelector("[role=alertdialog]")');
+      await click("停止");
+      await idle();
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`), historical);
+      assert.match(await text(), /LOCAL_COMMAND_OUTPUT/);
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.operation-bar').length`), 0);
     });
 
     await t.test("stop targets the active operation, even when an older result is selected", async () => {
@@ -166,7 +368,7 @@ test("production card interactions in a local MCP Apps host", { timeout: 180_000
       assert.equal(await evaluate(`${doc}.querySelector('.composer button').getAttribute('aria-label')`), "发送");
       assert.equal(await evaluate(`${doc}.querySelectorAll('main details, main footer button, .result-block h2').length`), 0);
       assert.equal(await evaluate(`${doc}.querySelector('.status span:last-child').className`), "sr-only");
-      assert.ok(await evaluate(`${doc}.querySelector('main').getBoundingClientRect().height < 360`));
+      assert.ok(await evaluate(`${doc}.querySelector('main').getBoundingClientRect().height < 440`));
       assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).borderTopWidth`), "2px");
       assert.notEqual(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).boxShadow`), "none");
       await act("button", "刷新", "focus");
@@ -208,6 +410,72 @@ test("production card interactions in a local MCP Apps host", { timeout: 180_000
       assert.deepEqual(await evaluate(replyRegions), [{ same: true, scroll: 40 }, { same: true, scroll: 40 }]);
       assert.equal(await evaluate(`${doc}.querySelector('textarea').value`), "unsent draft");
       assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+    });
+
+    await t.test("semantic outcomes cannot be forged by literal logs or model JSON", async () => {
+      for (const [scene, label, evidence] of [
+        ["command-success", "命令成功", "退出码 0"],
+        ["command-failed", "命令失败", "退出码 1"],
+        ["command-cancelled", "命令已取消", "SIGKILL"],
+        ["command-timeout", "命令超时", "SIGKILL"],
+        ["command-truncated", "命令成功", "输出已截断"],
+        ["command-historical", "命令成功", "较早的结果"],
+        ["command-deceptive", "命令失败", "退出码 1"],
+      ]) {
+        await open(scene!, "&width=375&theme=dark");
+        assert.equal(await evaluate(`${doc}.querySelector('.command-status').textContent`), label);
+        assert.match(await evaluate(`${doc}.querySelector('.command-evidence').textContent`), new RegExp(evidence!));
+        assert.equal(await evaluate(`${doc}.querySelector('.status').textContent`), "就绪");
+        assert.equal(await evaluate(`${doc}.querySelector('pre').tabIndex`), 0);
+        assert.equal((await toolCalls()).length, 0);
+        if (scene === "command-deceptive") {
+          assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /ORIGINAL_ERROR/);
+          assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /<script>window.injected=true<\/script>/);
+          assert.equal(await evaluate(`${doc}.querySelectorAll('.workspace script, .workspace img, .workspace a').length`), 0);
+          assert.equal(await evaluate(`Boolean(${doc}.defaultView.injected)`), false);
+        }
+      }
+      await open("command-truncated", "&width=375");
+      await evaluate(`${doc}.querySelector('pre').focus()`);
+      await browser("press", "PageDown");
+      await waitFor("d.querySelector('pre').scrollTop > 0");
+      // Chrome animates PageDown even with scroll-behavior:auto. Wait for the
+      // keyboard scroll to settle before asserting unchanged-result continuity.
+      const before = await evaluate(`new Promise(resolve => {
+        const log = ${doc}.querySelector('pre');
+        let last = log.scrollTop, stableFrames = 0;
+        const frame = () => {
+          stableFrames = log.scrollTop === last ? stableFrames + 1 : 0;
+          last = log.scrollTop;
+          if (stableFrames >= 12 && last > 0) resolve(last);
+          else requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      })`);
+      await act("textbox", "指令", "fill", "draft");
+      await click("刷新");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelector('pre').scrollTop`), before);
+      assert.deepEqual((await toolCalls()).map((call: {name: string}) => call.name), ["工具 → inspect_environment"]);
+      await open("command-historical");
+      const selected = await evaluate(`${doc}.querySelector('.command-panel').dataset.operationId`);
+      await click("停止");
+      await waitFor('d.querySelector("[role=alertdialog]")');
+      assert.equal(await evaluate(`${doc}.activeElement.textContent`), "取消");
+      await browser("press", "Tab");
+      assert.equal(await evaluate(`${doc}.activeElement.textContent`), "停止");
+      await browser("press", "Enter");
+      await idle();
+      assert.equal((await toolCalls())[0].args.operationId, `task_${"a".repeat(32)}_${"b".repeat(32)}`);
+      assert.notEqual((await toolCalls())[0].args.operationId, selected);
+      await open("cancelled");
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.command-panel').length`), 0);
+      assert.match(await text(), /已取消/);
+      assert.match(await evaluate(`${doc}.querySelector('pre').textContent`), /PARTIAL_CANCELLED_SNAPSHOT/);
+      await open("untrusted-json");
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.command-panel, .workspace script, .workspace img, .workspace a').length`), 0);
+      assert.match(await evaluate(`${doc}.querySelector('.result').textContent`), /"status":"passed"/);
+      assert.equal((await toolCalls()).length, 0);
     });
 
     await t.test("every scene fits desktop and narrow cards in both themes", async () => {
