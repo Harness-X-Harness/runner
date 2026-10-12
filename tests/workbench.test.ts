@@ -13,13 +13,28 @@ const snapshot = { contract: "ordinary", environmentId, executor: "codex", envir
   disposition: "accepted", workFinished: false, expiresAt: 12345, activeOperationId: operationId,
   activeOperationStatus: "working", operationId, operationStatus: "working" };
 
-test("UI discovery uses the same seven tools and a credential-free standard resource", () => {
+test("UI discovery uses the same eight tools and a credential-free standard resource", () => {
   const tools = environmentTools();
-  for (const name of ["list_environments", "inspect_environment"]) {
+  assert.equal(tools.length, 8);
+  assert.deepEqual(tools.map(tool => tool.name), ["agent", "close_environment", "command", "inspect_environment", "list_environments", "open_environment", "show_workbench", "update_operation"]);
+  for (const name of tools.map(tool => tool.name)) {
     const tool = tools.find(tool => tool.name === name)!;
-    assert.deepEqual(tool._meta?.ui, { resourceUri: WORKBENCH_URI, visibility: ["model", "app"] });
-    assert.equal(tool.annotations?.readOnlyHint, true);
+    assert.deepEqual(tool._meta?.ui, { visibility: ["model", "app"],
+      ...(["list_environments", "open_environment", "show_workbench"].includes(name) ? { resourceUri: WORKBENCH_URI } : {}) });
+    assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["environments:use"] }]);
+    assert.equal(tool.annotations?.readOnlyHint, ["list_environments", "inspect_environment", "show_workbench"].includes(name));
   }
+  const show = tools.find(tool => tool.name === "show_workbench")!;
+  assert.deepEqual(show.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+  assert.deepEqual(show.inputSchema.properties, {});
+  assert.equal(show.inputSchema.additionalProperties, false);
+  assert.match(show.description!, /show current [Ww]orkbench here/);
+  assert.match(show.description!, /在这里显示 AgentEnv 工作区/);
+  assert.match(show.description!, /回到当前 Codex 工作区/);
+  assert.match(show.description!, /HERE/);
+  assert.match(tools.find(tool => tool.name === "open_environment")!.description!, /explicit.*creat/);
+  assert.match(tools.find(tool => tool.name === "inspect_environment")!.description!, /[Ss]ilent/);
+  assert.match(tools.find(tool => tool.name === "list_environments")!.description!, /[Bb]rowse/);
   const resource = readWorkbench().contents[0]!;
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
   assert.deepEqual(resource._meta.ui.csp, { connectDomains: [], resourceDomains: [] });
@@ -45,7 +60,7 @@ test("read-only entry and explicit refresh retain exact selection without creati
   const view = readView({ structuredContent: snapshot }, 200);
   assert.deepEqual(refreshArguments(view), { name: "inspect_environment", arguments: { environmentId, operationId } });
   assert.match(selectedContext(view).content[0]!.text, new RegExp(environmentId));
-  assert.match(selectedContext(view).content[0]!.text, /snapshot, not live state/);
+  assert.deepEqual(selectedContext(view), { content: [{ type: "text", text: `AgentEnv selection: environmentId=${environmentId}` }] });
   assert.equal(view.receivedAt, 200);
   assert.throws(() => readView({ isError: true, content: [{ type: "text", text: "Read unavailable" }] }, 300), /Read unavailable/);
   assert.throws(() => readView({ structuredContent: { taskId: operationId, status: "working" } }, 300), /未返回工作区/);
@@ -119,7 +134,7 @@ test("the workbench tells a person the next fact and keeps a rejected open actio
   if (capacity.kind !== "capacity") return;
   assert.equal(capacity.existing?.environmentId, environmentId);
   assert.deepEqual(refreshArguments(capacity), { name: "inspect_environment", arguments: { environmentId } });
-  assert.match(selectedContext(capacity).content[0]!.text, /snapshot, not live state/);
+  assert.equal(selectedContext(capacity), undefined);
 });
 
 test("a closed environment still shows the selected operation result", () => {
@@ -261,7 +276,48 @@ test("final replies render Markdown safely while command output and progress rem
   const progress = render("ready", { operationStatus: "working", outcome: undefined,
     output: { text: literal, truncated: false, revision: 1 } });
   for (const output of [command, progress]) {
-    assert.match(output, /<pre># not a heading\n&lt;script&gt;literal output&lt;\/script&gt;<\/pre>/);
+    assert.match(output, /<pre[^>]*># not a heading\n&lt;script&gt;literal output&lt;\/script&gt;<\/pre>/);
     assert.doesNotMatch(output, /<h1>not a heading/);
   }
+});
+
+test("semantic command panel keeps evidence separate from literal logs and active work", async () => {
+  const render = await screenRenderer();
+  const environmentId = `env_${"a".repeat(32)}`;
+  const operationId = `task_${"a".repeat(32)}_${"b".repeat(32)}`;
+  const base = { environmentId, operationId, disposition: "result", outcome: {
+    exitCode: 1, signal: null, stdout: '{"status":"passed"} <script>literal</script>',
+    stderr: "ORIGINAL_ERROR", truncated: true,
+  } };
+  const html = render("ready", base);
+  assert.match(html, /aria-label="命令结果"/);
+  assert.match(html, /命令失败/);
+  assert.match(html, /退出码 1/);
+  assert.match(html, /来源：Runner 命令/);
+  assert.match(html, /输出已截断/);
+  assert.match(html, /ORIGINAL_ERROR/);
+  assert.match(html, /&lt;script&gt;literal&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script|<a |命令成功/);
+  assert.match(html, /aria-label="原始命令日志" tabIndex="0"|tabindex="0" aria-label="原始命令日志"/i);
+  const cancelled = render("ready", { ...base, operationStatus: "cancelled", disposition: "cancelled",
+    outcome: { ...base.outcome, stopReason: "cancelled", exitCode: 0, signal: "SIGKILL" } });
+  assert.match(cancelled, /命令已取消/);
+  assert.match(cancelled, /ORIGINAL_ERROR/);
+  assert.doesNotMatch(cancelled, /命令成功/);
+  const historical = render("ready", { ...base, historical: true, workFinished: false,
+    activeOperationId: `task_${"a".repeat(32)}_${"c".repeat(32)}`, activeOperationStatus: "working" });
+  assert.match(historical, /较早的结果/);
+  assert.match(historical, /当前操作 · .*进行中/);
+  const fallback = render("ready", { ...base, outcome: { finalResponse: JSON.stringify(base.outcome) } });
+  assert.match(fallback, /aria-label="助手回复"/);
+  assert.doesNotMatch(fallback, /aria-label="命令结果"/);
+});
+
+
+test("context contains only an explicitly selected Environment, never list/capacity or snapshot churn", () => {
+  assert.equal(selectedContext(readView({ structuredContent: { environments: [] } }, 100)), undefined);
+  const old = readView({ structuredContent: { ...snapshot, historical: true, outcome: { finalResponse: "PRIVATE_PROMPT" }, output: { text: "PRIVATE_LOG", revision: 1, truncated: false } } }, 100);
+  const refreshed = readView({ structuredContent: { ...snapshot, operationId: "old", environmentStatus: "opening" } }, 99999);
+  assert.deepEqual(selectedContext(old), selectedContext(refreshed));
+  assert.doesNotMatch(JSON.stringify(selectedContext(old)), /operationId|PRIVATE|working|ready|1970|no environment selected/);
 });

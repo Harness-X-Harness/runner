@@ -2,8 +2,12 @@ import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables } from
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import { Screen } from "./screen.tsx";
-import { readView, replyMessage, selectedContext, submissionDisposition, userFacingError, type Result, type View } from "./view.ts";
+import { readView, replyMessage, submissionDisposition, userFacingError, type Result, type View } from "./view.ts";
 
+import { ContextPublisher } from "./context-publisher.ts";
+
+const publisher = new ContextPublisher();
+let contextFeedback = "";
 const app = new App({ name: "AgentEnv workbench", version: "1.0.0" }, {});
 let latest: View | undefined;
 let error = "";
@@ -16,14 +20,13 @@ const changed = () => listeners.forEach(notify => notify());
 type CallOutcome = "sent" | "rejected" | "unknown";
 
 async function receive(result: Result): Promise<CallOutcome> {
+  // Only host-delivered tool results and callServerTool responses enter here.
+  // readView validates the display shape; neither it nor the selector authenticates data.
   try {
     latest = readView(result, Date.now());
     error = "";
+    contextFeedback = "";
     changed();
-    if (app.getHostCapabilities()?.updateModelContext) {
-      try { await app.updateModelContext(selectedContext(latest)); }
-      catch { error = "未能同步当前选择。"; }
-    }
     return "sent";
   } catch (failure) {
     const message = failure instanceof Error ? failure.message : "";
@@ -73,6 +76,25 @@ async function message() {
   }
 }
 
+async function useInChat() {
+  if (busy) return;
+  const selected = latest;
+  busy = true;
+  contextFeedback = "正在请求宿主…";
+  changed();
+  const feedback = await publisher.publish(selected, connected && Boolean(app.getHostCapabilities()?.updateModelContext),
+    context => app.updateModelContext(context));
+  // A late acknowledgement must not label a different selection as shared.
+  if (latest?.kind === "environment" && selected?.kind === "environment"
+    && latest.snapshot.environmentId === selected.snapshot.environmentId) {
+    contextFeedback = ({ sent: "宿主已确认此工作区选择。",
+      unsupported: "宿主不支持共享选择；请在对话中使用 inspect_environment。", unavailable: "无法共享此选择。",
+      failed: "宿主未确认选择。请重试。", pending: "正在请求宿主…" })[feedback];
+  } else contextFeedback = "";
+  busy = false;
+  changed();
+}
+
 async function openLink(url: string) {
   try {
     const result = await app.openLink({ url });
@@ -104,6 +126,8 @@ function Workbench() {
     canMessage={connected && !busy && Boolean(app.getHostCapabilities()?.message?.text)}
     onCall={(name, args) => { void call(name, args); }}
     onSend={args => call("agent", args)}
+    onCommand={args => call("command", args)}
+    contextFeedback={contextFeedback} onUseInChat={() => { void useInChat(); }}
     onMessage={() => { void message(); }}
     onOpenLink={connected && app.getHostCapabilities()?.openLinks ? openLink : undefined} />;
 }

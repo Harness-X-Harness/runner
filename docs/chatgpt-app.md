@@ -95,11 +95,60 @@ Listing and inspecting do not renew either deadline.
 
 ### Chat workbench
 
-MCP Apps clients can render the AgentEnv workbench from `list_environments`,
-`inspect_environment`, `open_environment` and `agent`. The UI is optional;
-ordinary tool results remain usable without it. It needs neither Tasks nor
-Events. The template is linked by `_meta.ui.resourceUri` and read through
+MCP Apps clients can intentionally launch the AgentEnv workbench through
+`show_workbench`, `list_environments` or `open_environment`, on explicit user
+intent. Show resumes/displays the existing workspace here; list browses owned
+workspaces; open allocates one only when the user explicitly asks to create.
+All eight tools remain visible to both model and app, with the same
+`environments:use` authentication and Tasks/ordinary result contracts.
+
+| Tool | ChatGPT-initiated call: Workbench URI | Inside an existing card |
+| --- | --- | --- |
+| `show_workbench` | Yes: explicit display/resume HERE launcher | Replace this card with the current owned snapshot or chooser |
+| `list_environments` | Yes: explicit browse/list launcher | Replace this card with the owned list |
+| `open_environment` | Yes: explicit create/open launcher | Replace this card with the opening snapshot |
+| `inspect_environment` | No | Refresh/select one snapshot or a specific retained operation |
+| `agent` | No | Send through the Agent composer; retain this card |
+| `command` | No | Run through the literal-argv composer; retain this card |
+| `update_operation` | No | Answer/stop the exact active operation |
+| `close_environment` | No | Confirm closure; retain this card and available result |
+
+For a long conversation, say **在这里显示 AgentEnv 工作区**, **回到当前 Codex 工作区**,
+or **show current workbench here**. Call `show_workbench` with `{}` at that turn.
+Exactly one owned live Environment opens directly with the latest normalized
+ordinary snapshot, including the current active operation/questions and trusted
+result/output when present, without a list click. Zero live Environments shows
+executor choices and starts nothing. Multiple entries show an owner-scoped
+chooser (defensive fallback; current production capacity is one per Principal).
+Directory, ownership and snapshot failures remain errors. Opening, ready,
+unavailable and closing are supported; closure during the read can yield a
+retained closed snapshot or an error, never a fabricated empty view.
+
+**列出我的工作区 / browse my workspaces** calls `list_environments`;
+**创建一个新的 Codex 工作区 / create a new Codex workspace** calls `open_environment`
+only on that explicit creation intent. **当前工作区是什么状态？ / what is the workspace
+status?** calls `inspect_environment` for facts and a chat answer without a card.
+Show does not create/reopen an Environment, runner, Agent session, Task or work;
+it does not renew deadlines, ask for OAuth consent, publish Model Context, or
+add polling, subscriptions or per-turn automatic cards. It uses the same valid
+`environments:use` grant. Hosts without MCP Apps support receive honest ordinary
+data without a promised card.
+
+The template is linked by `_meta.ui.resourceUri` and read through
 `resources/read`; `resources/list` remains the live Environment directory.
+The UI is optional; ordinary results remain usable without it. It needs neither
+Tasks nor Events. The template URI is `ui://agentenv/workbench-v2.html`, versioned to avoid
+reusing the previous context-publishing template.
+
+This matrix controls our advertised entrypoints, not ChatGPT's view identity.
+An explicit `show_workbench` asks for a new card near its current tool result,
+so the user need not scroll to an older card. Actual placement is host-dependent
+and requires post-deployment validation in #210. A repeated launcher may create
+another independent iframe. There is no pinned/floating card guarantee. Sharing
+a URI does not merge cards, and a chat tool result does not automatically update an older
+card. Host presentation outside this metadata is host-dependent. In-card
+`app.callServerTool` responses update only that card, without asking for a new
+view. No cross-iframe synchronization, global ordering or polling is invented.
 
 The workbench shows an explicitly dated snapshot, not a live monitor. Selecting
 an Environment or clicking **Refresh** performs one read. There is no
@@ -107,15 +156,69 @@ automatic query, retry, subscription or background model wakeup. The local clock
 only updates relative timestamps. Tool results
 replace the displayed snapshot. Viewing the workbench does not renew deadlines.
 
-Send an Agent request from the workbench input or the ChatGPT input box; use
-chat for commands. A confirmed admission refusal allows editing and a new
-submission. An unknown response retains the original text and submission key
-for an explicit retry; unrelated results do not clear that key. An error after
-admission is not evidence that no work started. The standard
-`ui/update-model-context` bridge shares the selected Environment and operation
-for subsequent conversation turns; it does not send a message or start work.
-**Explain result** and **Answer in ChatGPT** send a
-user-requested `ui/message`. Host approval and capability rules still apply.
+Final command outcomes have a compact evidence panel above the unchanged literal
+logs. Success means a terminal command exit of zero with no signal or stop reason;
+it does not certify the user's broader objective. Nonzero exits, signals,
+cancellation, timeout, truncation and historical results remain distinct from
+Environment availability. A historical selected result does not describe or stop
+the active operation. Whole-workspace `workFinished` can be false while that
+selected historical operation is terminal.
+
+Only owner-authorized MCP tool `structuredContent`, delivered through the host
+tool-result bridge, supplies evidence. Schema checks validate shape, not identity
+or authorization. Model text, parsed JSON strings and output resources cannot
+establish command status. Missing or inconsistent command evidence retains the
+existing Markdown/literal-log display. Generated evidence includes only bounded
+machine fields, never excerpts of stdout, stderr or Agent prose. Cancelled Tasks
+currently omit command outcomes; their cancellation label and available literal
+output snapshot remain visible without inventing exit or signal evidence.
+
+To view command evidence from chat, launch the Workbench with
+`show_workbench` to go directly to the sole owned live Environment. To browse,
+use `list_environments` and select the Environment. Refresh explicitly as needed.
+Zero-argument show selects the current server operation, not an older card’s
+historical selection; it cannot recover that selection across views. To select a
+retained historical result, choose **查看操作结果** and enter its operation ID from the
+chat tool result. Stop continues to target the active operation independently.
+The authenticated snapshot is still the only evidence source.
+
+The default composer sends Agent requests. **运行命令** accepts a JSON array of
+literal argv, with no shell parsing or expansion, in cwd `.`. UI bounds are
+1–64 arguments, 2048 characters per argument, 8192 input characters and an
+integer timeout of 1–300 seconds. These are frontend bounds, not a change to
+the server command contract. A user can explicitly invoke a shell through argv;
+there is no shell added by the card. Do not enter credentials. Command argv,
+logs and prompts never enter Model Context. The UI receives no credentials.
+An unconfirmed command retains its original canonical argv, timeout and
+idempotency key for an explicit retry; editing cannot silently submit different
+work with that key. A confirmed rejection permits a new submission. Passive
+results and refresh do not end a submission lease.
+
+**在对话中使用此工作区** is the only context-publication action. It
+capability-checks `ui/update-model-context` and publishes only stable
+`environmentId`, with no operation ID, timestamp, status, logs, prompt or
+credentials. Empty lists, capacity refusals, tool notifications, selections and
+refreshes publish nothing. The action waits for host acknowledgement, reports
+failure or unsupported capability visibly, and suppresses overlapping requests
+while one is in flight. Every later explicit click publishes again, including
+returning to card A after selecting card B. A card cannot know the host’s
+current selection from its own earlier acknowledgement. It sends no chat
+message or work request.
+
+Acknowledgement means the bridge accepted the request, not that a model used it.
+This temporary Model Context is distinct from ChatGPT Saved Memory and tool
+results. Its scope, lifetime, replacement and ordering across cards depend on
+the host. A late passive result from any card cannot publish a selection. A
+person can explicitly select a different card, but the bridge offers no global
+ordering guarantee; no card can prove which selection is current elsewhere.
+Use authenticated `inspect_environment` for current facts.
+Unsupported hosts retain all tool/card operations.
+
+**Answer in ChatGPT** sends a user-requested `ui/message` for an unsupported
+question form. Host approval and capability rules still apply.
+MCP Apps discovery and local AppBridge rendering are fixture checks; opening
+cards in real ChatGPT and native Tasks result handoff require independent host
+acceptance in [#210](https://github.com/Harness-X-Harness/runner/issues/210).
 
 Buttons use the same authenticated tools as chat. The component receives no
 OAuth token and makes no direct network connections. Native question forms submit
@@ -185,7 +288,8 @@ See [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-events).
 | `agent` | Send another prompt to its native Agent session |
 | `command` | Run argv directly in the same workspace without a model |
 | `inspect_environment` | Read current Environment and operation state once |
-| `list_environments` | Find live owned Environments across clients |
+| `list_environments` | Browse live owned Environments across clients |
+| `show_workbench` | Display/resume the existing workspace HERE without starting work |
 | `update_operation` | Answer questions or cancel one operation, keeping the Environment |
 | `close_environment` | Stop the exact runtime and confirm cleanup |
 

@@ -95,16 +95,14 @@ export function environmentTaskAuthority(env: Environment, authorize: () => Prom
           fields.includes(String(issue.path[0])) ? String(issue.path[0]) : "arguments"))];
         return ordinaryError(`Invalid ${name} input: ${invalid.join(", ")}. Follow the tool input schema.`);
       }
-      if (name === "list_environments") {
+      if (name === "list_environments" || name === "show_workbench") {
         const snapshots = await listOwnedEnvironments(env, props);
-        const environments = snapshots.map(({ environmentId, executor, status, reason, expiresAt, idleExpiresAt }) =>
-          ({ environmentId, executor, status, expiresAt, ...(reason ? { reason } : {}),
-            ...(idleExpiresAt !== undefined ? { idleExpiresAt } : {}) }));
-        return CallToolResultV2Schema.parse({ resultType: "complete", structuredContent: { environments },
-          content: [{ type: "text", text: environments.length
-            ? environments.map(value => `${value.environmentId}: ${value.executor}, ${value.status}${value.reason ? ` (${value.reason})` : ""}`).join("\n")
-            : "You have no live Environments." }],
-        });
+        if (name === "show_workbench" && snapshots.length === 1) {
+          // Re-read through the ordinary owner-checked projection: membership and
+          // lifecycle can race. Missing/failed reads must never become an empty list.
+          return inspectOrdinary(env, props, { environmentId: snapshots[0]!.environmentId }, "show_workbench");
+        }
+        return directoryResult(snapshots);
       }
       if (name === "inspect_environment") return inspectOrdinary(env, props, inspectInput.parse(parsed.data));
       if (name === "update_operation") {
@@ -182,7 +180,7 @@ async function projectLifecycle(env: Environment, props: unknown, capable: boole
 }
 
 async function inspectOrdinary(env: Environment, props: unknown, input: { environmentId: string; operationId?: string },
-  tool: "inspect_environment" | "update_operation" = "inspect_environment") {
+  tool: "inspect_environment" | "show_workbench" | "update_operation" = "inspect_environment") {
   if (input.operationId && !input.operationId.startsWith(`task_${input.environmentId.slice(4)}_`)) {
     return ordinaryError("Invalid inspect_environment input: operationId. Follow the tool input schema.");
   }
@@ -218,6 +216,17 @@ async function inspectOrdinary(env: Environment, props: unknown, input: { enviro
     : undefined;
   return ordinaryToolResult({ tool, environment, operation, activeOperation, activeUnreadable, historical,
     output: output ?? undefined });
+}
+
+function directoryResult(snapshots: EnvironmentSnapshot[]) {
+  const environments = snapshots.map(({ environmentId, executor, status, reason, expiresAt, idleExpiresAt }) =>
+    ({ environmentId, executor, status, expiresAt, ...(reason ? { reason } : {}),
+      ...(idleExpiresAt !== undefined ? { idleExpiresAt } : {}) }));
+  return CallToolResultV2Schema.parse({ resultType: "complete", structuredContent: { environments },
+    content: [{ type: "text", text: environments.length
+      ? environments.map(value => `${value.environmentId}: ${value.executor}, ${value.status}${value.reason ? ` (${value.reason})` : ""}`).join("\n")
+      : "You have no live Environments." }],
+  });
 }
 
 function readOwnedEnvironment(env: Environment, props: unknown, environmentId: string): Promise<EnvironmentSnapshot | null> {

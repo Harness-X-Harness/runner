@@ -87,7 +87,8 @@ This creates its own headless browser session and loopback server, then closes
 both. It does not restore a login or touch existing browser sessions. Tests
 cover the actual iframe bridge, send/busy/refresh, stop and close confirmation,
 answers, rejection/unconfirmed-response UX, and all narrow dark-mode scenes.
-Browser regression is a separate local command; CI does not install a browser.
+Browser regression also runs in the focused Semantic presentation TDD workflow,
+using pinned `agent-browser@0.38.2` and the hosted Ubuntu Chrome executable.
 
 ## Evidence boundary
 
@@ -99,3 +100,82 @@ when those integration boundaries change, not for each text or layout change.
 
 Do not add a second card implementation or runtime state machine to the preview.
 Add a fixture to `apps/chatgpt-app/preview/scenarios.ts` for a new display state.
+
+Command fixtures cover success, nonzero exit, cancellation with full outcome,
+timeout, truncation, historical results with active work and deceptive stdout.
+The untrusted JSON scene keeps model-authored JSON in Markdown without creating
+command evidence. All scenes are checked at 375px and 780px in both themes.
+The browser suite also checks literal logs, keyboard scrolling, unchanged-result
+scroll position, safe confirmation focus and exact active-operation cancellation.
+
+The full-outcome cancellation fixture exercises the display contract only.
+Current Task projection omits outcomes for cancelled Tasks; that real shape falls
+back to the operation's cancellation label and literal output snapshot. Missing
+command evidence must not be reconstructed from that snapshot.
+
+
+## Launcher and context acceptance (#217 / #218 / #219 / #220)
+
+The [tool-to-UI matrix](../chatgpt-app.md#chat-workbench) reserves Workbench
+launching for `show_workbench`, `list_environments` and `open_environment`. Ordinary
+command/agent/inspect calls have no Workbench URI. Repeated launchers can still
+create independent cards; chat calls cannot be forced to converge on one view.
+Existing-card Refresh reads once and replaces its snapshot in place.
+
+Intent examples: **在这里显示 AgentEnv 工作区**, **回到当前 Codex 工作区**,
+**show current workbench here** → `show_workbench({})`; **browse my workspaces**
+→ `list_environments({})`; **create a new Codex workspace** → `open_environment`
+with the executor only on explicit create intent; **what is the workspace status?**
+→ silent `inspect_environment`, with no new card.
+
+The simulated host's `window.previewHost.chatTool("show_workbench")` appends an
+independent AppBridge view with the current fixture snapshot, or executor choices
+for an empty scene. The browser regression checks direct command presentation,
+repeated explicit re-entry, same-view Refresh, silent ordinary chat tools and
+zero automatic Model Context. Server tests separately check owner-authenticated
+zero/one/multiple routing, normalization, read races/errors and no mutations;
+fixtures do not exercise production capacity or authentication.
+
+The new card belongs near the current tool call on supporting hosts; this is
+pending real ChatGPT validation in #210 after the user deploys the reviewed SHA.
+No pinned/floating card or global cross-card identity is promised. Re-entry
+starts no runner, Agent session, Task or work, renews no deadline, adds no OAuth
+consent, polling or automatic per-turn card. Hosts without MCP Apps receive the
+ordinary result. Listing browses; showing resumes; opening creates.
+
+In the ready scene, choose **运行命令**, enter `["git", "status", "--short"]`
+and a timeout, run, then refresh. This returns literal fixture output and the
+trusted command panel without executing a command. Choose **查看操作结果** to
+inspect a retained operation ID. Stop uses the active ID even while an older
+command result is selected. Unknown command response fixtures retain argv,
+timeout and the original submission key; only an explicit identical retry
+uses that key. They do not prove runtime idempotency.
+
+**在对话中使用此工作区** publishes just the Environment ID on click.
+The interaction trace records that request and its acknowledgement. Opening,
+listing, selecting and refreshing never publish Model Context. An explicit
+click after acknowledgement publishes again so a person can reassert card A
+after selecting card B. Only overlapping in-flight requests are suppressed.
+`?scene=ready&context=unsupported`
+omits the capability; `?scene=ready&context=fail-once` rejects the first request
+so visible feedback and retry can be checked. `?scene=ready&multiple=1` mounts
+two independent AppBridge cards. The automated suite sends late results to
+both and verifies no automatic publication, and tests explicit A → B → A
+re-selection with distinct fixture Environment IDs. These loopback fixture
+controls are
+not included in the production card.
+
+Browser tests use the production routing rule to simulate host view creation;
+unit tests separately verify all eight discovered tools, visibility, scope and
+URI metadata. The simulated host creates views only for advertised launchers
+and does not create views for in-card `callServerTool` responses. This proves
+our routing and bridge behavior locally, not ChatGPT's actual presentation
+policy. The real host must independently verify launcher behavior, ordinary
+chat tools, in-place refresh, literal command logs, explicit context and native
+Tasks result handoff. Cross-view scope and ordering remain host-dependent;
+there is no global selection service or background polling.
+
+Changing the selected Environment inside the same iframe resets input mode to
+Agent and clears drafts/leases. Refreshing the same Environment preserves its
+mode and drafts. The browser regression distinguishes this from scene reset,
+which remounts the card and cannot establish selection-switch behavior.
