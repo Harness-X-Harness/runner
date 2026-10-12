@@ -16,7 +16,7 @@ export const commandInput = z.object({ ...common,
 const modelName = z.string().min(1).max(200).regex(/^[A-Za-z0-9._~-]+$/);
 const effortName = z.string().min(1).max(32).regex(/^[A-Za-z0-9._~-]+$/);
 export const agentInput = z.object({ ...common,
-    prompt: z.string().min(1).regex(/\S/),
+    prompt: z.string().min(1).regex(/^[\s\S]*\S[\s\S]*$/),
     model: modelName.optional(),
     reasoningEffort: effortName.optional(),
   }).strict();
