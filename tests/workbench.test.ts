@@ -37,11 +37,13 @@ test("UI discovery uses the same eight tools and a credential-free standard reso
   assert.match(tools.find(tool => tool.name === "list_environments")!.description!, /[Bb]rowse/);
   const resource = readWorkbench().contents[0]!;
   assert.equal(resource.mimeType, "text/html;profile=mcp-app");
+  assert.equal(resource._meta.ui.prefersBorder, false);
   assert.deepEqual(resource._meta.ui.csp, { connectDomains: [], resourceDomains: [] });
   assert.match(resource.text, /<title>AgentEnv<\/title>/);
   assert.match(resource.text, /px-btn/);
   assert.match(resource.text, /--paper/);
   assert.match(resource.text, /--color-background-primary/);
+  assert.match(resource.text, /body\s*\{[^}]*background:\s*transparent;/);
   assert.match(resource.text, /--font-mono/);
   assert.match(resource.text, /--font-sans/);
   assert.doesNotMatch(resource.text, /min-height:\s*100vh/);

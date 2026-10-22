@@ -108,6 +108,15 @@ command evidence. All scenes are checked at 375px and 780px in both themes.
 The browser suite also checks literal logs, keyboard scrolling, unchanged-result
 scroll position, safe confirmation focus and exact active-operation cancellation.
 
+For inline host framing, verify that the iframe body is transparent, the
+Workbench root fills the available width without its own perimeter border or
+offset shadow, and the title-bar divider, pixel mark and composer retain their
+hard-edged style. The resource requests `prefersBorder: false`; the host can
+ignore this preference or display its own tool header. Browser fixtures check
+our CSS and interaction contracts, not the real ChatGPT card boundary. Review
+one real light/dark Host screenshot after deployment before claiming seamless
+host integration.
+
 The full-outcome cancellation fixture exercises the display contract only.
 Current Task projection omits outcomes for cancelled Tasks; that real shape falls
 back to the operation's cancellation label and literal output snapshot. Missing

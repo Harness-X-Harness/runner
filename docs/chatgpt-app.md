@@ -230,7 +230,12 @@ does not imply terminal state. Progress, final output and historical operations
 remain distinct, and a completed Agent response does not certify its objective.
 
 The UI follows host theme variables and uses the standard MCP Apps bridge, not
-host-name detection or a separate execution model. Its source is in
+host-name detection or a separate execution model. The resource sets
+`_meta.ui.prefersBorder: false` to request no extra host border/background,
+while keeping the complete AgentEnv title bar, status, actions, and composers.
+The iframe's own root has no outer border/shadow/gutter; pixel framing stays
+on internal controls and the host may still render its own tool chrome.
+Its source is in
 [`ui/`](../apps/chatgpt-app/ui/); `npm run build:ui --prefix apps/chatgpt-app`
 bundles its HTML resource before tests, development or deployment. The generated
 `dist/` directory is disposable and is not committed. When making a breaking

@@ -369,8 +369,12 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
       assert.equal(await evaluate(`${doc}.querySelectorAll('main details, main footer button, .result-block h2').length`), 0);
       assert.equal(await evaluate(`${doc}.querySelector('.status span:last-child').className`), "sr-only");
       assert.ok(await evaluate(`${doc}.querySelector('main').getBoundingClientRect().height < 440`));
-      assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).borderTopWidth`), "2px");
-      assert.notEqual(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).boxShadow`), "none");
+      assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.body).backgroundColor`), "rgba(0, 0, 0, 0)");
+      assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).borderTopWidth`), "0px");
+      assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('main')).boxShadow`), "none");
+      assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('header')).borderBottomWidth`), "2px");
+      assert.notEqual(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('.mark')).boxShadow`), "none");
+      assert.notEqual(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.querySelector('.composer')).boxShadow`), "none");
       await act("button", "刷新", "focus");
       assert.equal(await evaluate(`${doc}.defaultView.getComputedStyle(${doc}.activeElement, '::after').visibility`), "visible");
       await click("关闭工作区");

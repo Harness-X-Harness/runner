@@ -16,6 +16,17 @@ Use a quiet reading surface for long output, readable body type, and monospace
 for controls and logs. Pixel identity does not require low-resolution text.
 Respect host theme and accessibility variables without losing the geometry.
 
+## Embedded host framing
+
+The MCP App owns its title bar, Environment status, tools, result surface,
+question forms and input composers. Request no additional host border via
+`prefersBorder: false`, while acknowledging the host controls its own chrome.
+The production card uses the available inline width, without a second full-card
+border, offset shadow or surrounding iframe gutter. Keep the green palette,
+subtle pixel grid, header divider, square buttons, stepped icons and hard shadows
+on meaningful internal controls. This is a framing change, not a reduced UI.
+Never reach into the host DOM or assume it will honor the border preference.
+
 ## Reply typography
 
 Render all final agent replies as Markdown, including plain short replies. Keep
