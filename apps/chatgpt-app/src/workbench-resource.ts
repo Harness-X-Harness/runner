@@ -10,7 +10,8 @@ export const workbenchResource = {
 export function readWorkbench() {
   return { resultType: "complete" as const, ttlMs: 0, cacheScope: "private" as const,
     contents: [{ ...workbenchResource, text: html, _meta: { ui: {
-      prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] },
+      // The host owns the outside card; the Workbench keeps its own pixel controls.
+      prefersBorder: false, csp: { connectDomains: [], resourceDomains: [] },
     } } }],
   };
 }

@@ -39,14 +39,15 @@
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; color: var(--ink); background-color: var(--paper);
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 8px 8px;
+  margin: 0; color: var(--ink); background: transparent;
 }
 ::selection { background: var(--accent); color: var(--accent-ink); }
 main {
-  max-width: 720px; margin: 12px auto 18px; background: var(--panel);
-  border: 2px solid var(--line); box-shadow: 4px 4px 0 var(--shadow);
+  width: 100%; min-width: 0; margin: 0;
+  background-color: var(--panel);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 8px 8px;
+  border: 0; box-shadow: none;
 }
 header {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -217,9 +218,6 @@ input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent);
 .px-dialog-title { margin: 0 0 8px; font-size: 16px; }
 .px-dialog-copy { margin: 0 0 16px; color: var(--muted); }
 .px-dialog .actions { justify-content: flex-end; }
-@media (max-width: 760px) {
-  main { margin: 8px 12px 14px 8px; }
-}
 @media (max-width: 560px) {
   header { flex-wrap: wrap; padding: 12px; gap: 8px; }
   .identity, .controls { width: 100%; }
