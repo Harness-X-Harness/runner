@@ -48,7 +48,7 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
           ready=false
-          for attempt in $(seq 1 75); do
+          for ((attempt=1; attempt<=75; attempt++)); do
             if curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:3773/; then
               ready=true
               break
