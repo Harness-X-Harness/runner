@@ -30,7 +30,7 @@ test("T3 lives across operations, reports public origin, and stops with its Envi
   let command: string[] = [];
   let tunnelStops = 0;
   const service = new T3Service({
-    workspace: join(root, "workspace"), dataDirectory: join(root, "state"),
+    workspace: join(root, "workspace"),
     env: { HOME: root, MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY", GH_TOKEN: "PRIVATE_WORK_TOKEN" },
     port: await unusedPort(),
     launch: ((binary: string, args: string[]) => {
@@ -61,11 +61,11 @@ test("T3 lives across operations, reports public origin, and stops with its Envi
 test("T3 service rejects invalid workspace and never marks an exited server ready", async t => {
   const root = await mkdtemp(join(tmpdir(), "harness-t3-failed-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  assert.throws(() => new T3Service({ workspace: "relative", dataDirectory: root,
+  assert.throws(() => new T3Service({ workspace: "relative",
     env: { HOME: root } }), /INVALID_T3_SERVICE_OPTIONS/);
   const child = mockChild();
   const service = new T3Service({
-    workspace: join(root, "workspace"), dataDirectory: join(root, "state"), env: { HOME: root },
+    workspace: join(root, "workspace"), env: { HOME: root },
     port: await unusedPort(),
     launch: (() => {
       queueMicrotask(() => { child.exitCode = 1; child.emit("exit", 1, null); child.emit("close", 1, null); });

@@ -33,6 +33,10 @@ test("a real provider runs through T3 rather than the Runner's ACP Agent", {
   const data: unknown = JSON.parse(stdout);
   assert.ok(typeof data === "object" && data !== null && "threadId" in data &&
     typeof data.threadId === "string", "must return an authoritative T3 thread ID");
+  const { stdout: reply } = await execute("t3",
+    ["thread", "send", data.threadId as string, "Reply exactly T3_LIVE_OK.", "--wait"],
+    { timeout: 120_000 });
+  assert.match(reply, /T3_LIVE_OK/, "must receive a real T3 provider reply, not just a thread identifier");
   const { stdout: result } = await execute("t3", ["thread", "show", data.threadId as string, "--json"],
     { timeout: 20_000 });
   const parsed: unknown = JSON.parse(result);

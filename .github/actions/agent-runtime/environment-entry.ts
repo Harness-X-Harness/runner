@@ -56,7 +56,7 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
   const { withEnvironment } = await import("./environment.ts");
   const childEnv = agentEnvironment(env);
   const t3 = claim.services?.includes("t3") ? new T3Service({
-    workspace, dataDirectory: path.join(directory, "t3-data"),
+    workspace,
     env: t3ProviderEnvironment(claim.executor, childEnv),
   }) : undefined;
   try {

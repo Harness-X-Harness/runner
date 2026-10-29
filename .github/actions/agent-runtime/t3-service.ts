@@ -12,7 +12,6 @@ export type T3ServiceState =
 export type T3ConnectionPort = Pick<T3Connection, "open" | "close">;
 export type T3ServiceOptions = {
   workspace: string;
-  dataDirectory: string;
   env: NodeJS.ProcessEnv;
   port?: number;
   executable?: string;
@@ -57,7 +56,7 @@ export class T3Service {
     this.options = options;
     this.port = options.port ?? 3773;
     if (!Number.isInteger(this.port) || this.port < 1 || this.port > 65535 ||
-        !isAbsolute(options.workspace) || !isAbsolute(options.dataDirectory) ||
+        !isAbsolute(options.workspace) ||
         !options.env.HOME || !isAbsolute(options.env.HOME)) throw new Error("INVALID_T3_SERVICE_OPTIONS");
   }
 
@@ -85,7 +84,6 @@ export class T3Service {
     const signal = AbortSignal.any([parentSignal, this.lifetime.signal, AbortSignal.timeout(90_000)]);
     try {
       await mkdir(this.options.workspace, { recursive: true, mode: 0o700 });
-      await mkdir(this.options.dataDirectory, { recursive: true, mode: 0o700 });
       await requireUnusedPort(this.port);
       signal.throwIfAborted();
       const executable = this.options.executable ?? join(this.options.env.HOME!, ".local", "bin", "t3");

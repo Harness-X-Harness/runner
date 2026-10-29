@@ -1,0 +1,62 @@
+name: T3 service smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/agent-runtime/t3-*.ts'
+      - '.github/workflows/run-environment.yml'
+      - '.github/workflows/t3-smoke.yml'
+      - 'tests/t3-*.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t3-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install unmodified T3 Code
+        env:
+          T3CODE_VERSION: ${{ vars.T3CODE_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://t3.codes/install.sh | sh
+          test -x "$HOME/.local/bin/t3"
+          "$HOME/.local/bin/t3" --version
+
+      - name: Verify T3 local HTTP and native CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p "$RUNNER_TEMP/t3-smoke-project"
+          "$HOME/.local/bin/t3" serve --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/t3-smoke-project" > "$RUNNER_TEMP/t3-smoke.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 75); do
+            if curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:3773/; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            echo "T3 local readiness failed (no model credentials used)" >&2
+            exit 1
+          fi
+          T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 node --test tests/t3-live.test.ts
