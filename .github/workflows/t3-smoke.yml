@@ -60,4 +60,5 @@ jobs:
             echo "T3 local readiness failed (no model credentials used)" >&2
             exit 1
           fi
+          t3 project add "$RUNNER_TEMP/t3-smoke-project"
           T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 T3_LIVE_PROJECT="$RUNNER_TEMP/t3-smoke-project" node --test tests/t3-live.test.ts
