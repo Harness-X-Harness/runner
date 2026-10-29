@@ -16,7 +16,8 @@ test("an installed, unmodified T3 serves HTTP and exposes real CLI thread state"
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   assert.equal(response.ok, true, "T3 HTTP readiness must be verified, not mocked");
   await response.body?.cancel();
-  const { stdout } = await execute("t3", ["thread", "list", "--json"], { timeout: 20_000 });
+  const project = process.env.T3_LIVE_PROJECT || process.cwd();
+  const { stdout } = await execute("t3", ["thread", "list", "--json"], { timeout: 20_000, cwd: project });
   assert.ok(stdout.length > 0);
   assert.doesNotThrow(() => JSON.parse(stdout));
 });

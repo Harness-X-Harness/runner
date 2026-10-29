@@ -43,6 +43,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           mkdir -p "$RUNNER_TEMP/t3-smoke-project"
+          git -C "$RUNNER_TEMP/t3-smoke-project" init -q
           "$HOME/.local/bin/t3" serve --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/t3-smoke-project" > "$RUNNER_TEMP/t3-smoke.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
@@ -59,4 +60,4 @@ jobs:
             echo "T3 local readiness failed (no model credentials used)" >&2
             exit 1
           fi
-          T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 node --test tests/t3-live.test.ts
+          T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 T3_LIVE_PROJECT="$RUNNER_TEMP/t3-smoke-project" node --test tests/t3-live.test.ts
