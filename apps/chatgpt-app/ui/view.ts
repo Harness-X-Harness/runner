@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // This is a display projection, never a lifecycle or authorization authority.
 const t3Display = z.object({ status: z.enum(["starting", "ready", "failed", "stopped"]),
-  origin: z.string().url().optional(), observedAt: z.number().optional() });
+  origin: z.string().url().optional(), accessUrl: z.string().url().optional(), observedAt: z.number().optional() });
 const servicesDisplay = z.object({ t3: t3Display });
 const environment = z.object({
   environmentId: z.string(), executor: z.string(), status: z.string(),

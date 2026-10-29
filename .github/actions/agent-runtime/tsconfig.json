@@ -19,6 +19,7 @@
     "../../../tests/runner-identity.test.ts",
     "../../../tests/environment-entry.test.ts", "../../../tests/environment-input.test.ts", "../../../tests/grok-question.test.ts",
     "../../../tests/t3-provider.test.ts", "../../../tests/t3-connection.test.ts",
-    "../../../tests/t3-service.test.ts", "../../../tests/t3-live.test.ts"
+    "../../../tests/t3-service.test.ts", "../../../tests/t3-live.test.ts",
+    "../../../tests/t3-mcp.test.ts", "../../../tests/t3-access.test.ts"
   ]
 }

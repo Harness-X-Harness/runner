@@ -135,9 +135,14 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         <span role="status">{snapshot.services.t3.status === "ready" ? "已就绪" :
           snapshot.services.t3.status === "failed" ? "服务异常" :
           snapshot.services.t3.status === "stopped" ? "已停止" : "正在启动"}</span>
+        {snapshot.services.t3.status === "ready" && snapshot.services.t3.accessUrl &&
+          (onOpenLink ? <Button variant="quiet" onClick={() => onOpenLink(snapshot.services!.t3.accessUrl!)}>
+            验证身份并连接 T3</Button> : <a href={snapshot.services.t3.accessUrl} target="_blank" rel="noopener noreferrer">
+              验证身份并连接 T3</a>)}
         {snapshot.services.t3.status === "ready" && snapshot.services.t3.origin &&
           (onOpenLink ? <Button variant="quiet" onClick={() => onOpenLink(snapshot.services!.t3.origin!)}>
-            打开 T3 Web</Button> : <a href={snapshot.services.t3.origin} target="_blank" rel="noopener noreferrer">打开 T3 Web</a>)}
+            已配对？打开 T3</Button> : <a href={snapshot.services.t3.origin} target="_blank" rel="noopener noreferrer">
+              已配对？打开 T3</a>)}
       </div>}
       {notice && !(presentation?.evidence.historical && notice === "较早的操作。") && <p className="notice" role="status">{notice}</p>}
       {!presentation && operationText && operationText !== "已完成" && (!active || snapshot.operationId !== active.operationId) && <p className={`operation-state ${failed ? "bad" : ""}`} role="status">{operationText}</p>}

@@ -12,7 +12,8 @@ import { EnvironmentCiWaits } from "./environment-ci-waits.ts";
 import { startGithubWaitTool } from "./github-wait-tool.ts";
 import { waitForGithubRun } from "./github-run-wait.ts";
 
-export type EnvironmentServices = { read(): { t3: T3ServiceState }; subscribe(changed: () => void): () => void };
+export type EnvironmentServices = { read(): { t3: T3ServiceState }; subscribe(changed: () => void): () => void;
+  issuePairing?(origin: string, signal: AbortSignal): Promise<string> };
 
 export type EnvironmentPort = {
   execute(taskId: string, input: unknown): Promise<OperationResult>;

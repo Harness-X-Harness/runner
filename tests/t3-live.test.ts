@@ -30,14 +30,13 @@ test("a real provider runs through T3 rather than the Runner's ACP Agent", {
   const project = process.env.T3_LIVE_PROJECT;
   assert.ok(project, "T3_LIVE_PROJECT must name the disposable project");
   const message = "Return the exact word T3_LIVE_OK and do not modify files.";
-  const { stdout } = await execute("t3", ["thread", "start", project!, message, "--json"], { timeout: 120_000 });
+  const { stdout } = await execute("t3", ["thread", "start", project!, message, "--wait", "--json"],
+    { timeout: 120_000 });
   const data: unknown = JSON.parse(stdout);
   assert.ok(typeof data === "object" && data !== null && "threadId" in data &&
-    typeof data.threadId === "string", "must return an authoritative T3 thread ID");
-  const { stdout: reply } = await execute("t3",
-    ["thread", "send", data.threadId as string, "Reply exactly T3_LIVE_OK.", "--wait"],
-    { timeout: 120_000 });
-  assert.match(reply, /T3_LIVE_OK/, "must receive a real T3 provider reply, not just a thread identifier");
+    typeof data.threadId === "string" && "status" in data && data.status === "completed" &&
+    "reply" in data && typeof data.reply === "string", "T3 must complete the native model run");
+  assert.match(data.reply as string, /T3_LIVE_OK/, "must receive a real T3 provider reply");
   const { stdout: result } = await execute("t3", ["thread", "show", data.threadId as string, "--json"],
     { timeout: 20_000 });
   const parsed: unknown = JSON.parse(result);

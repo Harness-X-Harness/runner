@@ -16,7 +16,7 @@ import { ordinaryError, ordinaryToolResult, type OrdinaryDispatch, type Ordinary
 import { EVENT_NAME, EventError, eventCatalog, eventRpcValue, grantIdentity } from "./mcp-events.ts";
 import { WORKBENCH_URI, readWorkbench } from "./workbench-resource.ts";
 
-type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
+type Environment = Omit<EnvironmentResources, "ENVIRONMENTS"> & { TASK_CONTROL_PLANE_URL?: string; ENVIRONMENTS: { getByName(name: string): Pick<EnvironmentObject,
   "initialize" | "dispatchExecution" | "requestClose" | "closeExecution" | "readEnvironment" |
   "readLifecycleTask" | "cancelLifecycleTask" | "observeLifecycleTask" |
   "reserveOperation" | "readOperation" | "readOutput" | "cancelOperation" | "observeOperation" | "observeOutput" | "observeEnvironment" | "answerOperation" |
@@ -176,7 +176,7 @@ async function projectLifecycle(env: Environment, props: unknown, capable: boole
   if (capable) return operation.status === "completed" ? operation.result : { ...operation, resultType: "task" as const };
   const environment = await readOwnedEnvironment(env, props, environmentId);
   if (!environment) return ordinaryError(`Environment ${environmentId} was accepted, but its current status could not be read. Inspect that ID before submitting more work.`);
-  return ordinaryToolResult({ tool, operation, dispatch, environment });
+  return ordinaryToolResult({ tool, operation, dispatch, environment, t3AccessUrl: t3AccessUrl(env, environment) });
 }
 
 async function inspectOrdinary(env: Environment, props: unknown, input: { environmentId: string; operationId?: string },
@@ -215,7 +215,7 @@ async function inspectOrdinary(env: Environment, props: unknown, input: { enviro
     ? await env.ENVIRONMENTS.getByName(input.environmentId).readOutput(executionPrincipal(props, ENVIRONMENT_SCOPE), operation.taskId)
     : undefined;
   return ordinaryToolResult({ tool, environment, operation, activeOperation, activeUnreadable, historical,
-    output: output ?? undefined });
+    t3AccessUrl: t3AccessUrl(env, environment), output: output ?? undefined });
 }
 
 function directoryResult(snapshots: EnvironmentSnapshot[]) {
@@ -238,4 +238,12 @@ function operationEnvironmentId(value: unknown): string {
     throw new TaskError("ENVIRONMENT_NOT_FOUND");
   }
   return value.environmentId;
+}
+
+/** Public browser navigation address only, never a credential or authorization bypass. */
+function t3AccessUrl(env: Environment, snapshot: EnvironmentSnapshot): string | undefined {
+  if (snapshot.services?.t3.status !== "ready" || !env.TASK_CONTROL_PLANE_URL) return undefined;
+  const origin = new URL(env.TASK_CONTROL_PLANE_URL);
+  if (origin.protocol !== "https:" || origin.origin !== env.TASK_CONTROL_PLANE_URL) return undefined;
+  return new URL("/t3/connect/" + snapshot.environmentId, origin).toString();
 }

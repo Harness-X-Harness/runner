@@ -72,7 +72,8 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
     }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline,
       env, fetch, fact => parentPort?.postMessage({ event: "environment_reconnect_failure", ...fact })), signal, {
       readAgentReport: (executor, reportSignal) => readExecutorReport(executor, env, fetch, reportSignal),
-      ...(t3 ? { services: { read: () => ({ t3: t3.read() }), subscribe: changed => t3.subscribe(changed) } } : {}),
+      ...(t3 ? { services: { read: () => ({ t3: t3.read() }), subscribe: changed => t3.subscribe(changed),
+        issuePairing: (origin: string, pairSignal: AbortSignal) => t3.issuePairing(origin, pairSignal) } } : {}),
     });
   } finally { await t3?.close(); }
 }

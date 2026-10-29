@@ -77,3 +77,34 @@ test("T3 service rejects invalid workspace and never marks an exited server read
   await assert.rejects(service.start(new AbortController().signal), /T3_STARTUP_UNAVAILABLE/);
   assert.deepEqual(service.read(), { status: "failed" });
 });
+
+test("pairing is available only on a live matching T3 origin, never via ordinary command results", async t => {
+  const root = await mkdtemp(join(tmpdir(), "harness-t3-pairing-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const child = mockChild();
+  const origin = "https://quiet-leaf.trycloudflare.com";
+  let pairingCli: string[] = [];
+  const fakeBinary = join(root, "t3-pairing-fixture");
+  // A real subprocess exercises stdout parsing and ensures no credential is printed by the caller.
+  const { writeFile, chmod } = await import("node:fs/promises");
+  await writeFile(fakeBinary, \`#!/bin/sh
+printf '%s\\\\n' '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_SECRET_TOKEN"}'
+\`);
+  await chmod(fakeBinary, 0o700);
+  const service = new T3Service({
+    workspace: join(root, "workspace"), env: { HOME: root, PATH: "/usr/bin" },
+    executable: fakeBinary, port: await unusedPort(),
+    launch: (() => child as unknown as ChildProcess) as unknown as typeof spawn,
+    fetchImpl: async () => new Response("OK"),
+    connect: () => ({ open: async () => ({ origin }), close: async () => {} }),
+  });
+  await service.start(new AbortController().signal);
+  await assert.rejects(service.issuePairing("https://different.trycloudflare.com", new AbortController().signal),
+    /T3_PAIRING_UNAVAILABLE/);
+  const url = await service.issuePairing(origin, new AbortController().signal);
+  assert.equal(new URL(url).origin, origin);
+  assert.equal(new URL(url).hash, "#token=PRIVATE_SECRET_TOKEN");
+  await service.close();
+  await assert.rejects(service.issuePairing(origin, new AbortController().signal),
+    /T3_PAIRING_UNAVAILABLE/);
+});

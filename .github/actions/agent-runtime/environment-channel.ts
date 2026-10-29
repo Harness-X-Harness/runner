@@ -17,6 +17,8 @@ const messageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready-accepted") }).strict(),
   z.object({ type: z.literal("agent-state-accepted"), generation: z.number().int().positive() }).strict(),
   z.object({ type: z.literal("service-state-accepted"), generation: z.number().int().positive() }).strict(),
+  z.object({ type: z.literal("pairing-request"), generation: z.number().int().positive(),
+    requestId: z.string().uuid(), origin: z.string().regex(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/) }).strict(),
   z.object({ type: z.literal("input-accepted"), generation: z.number().int().positive(),
     taskId: z.string(), inputId: z.string().uuid() }).strict(),
   z.object({ type: z.literal("output-accepted"), generation: z.number().int().positive(),
@@ -137,6 +139,25 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     if (message.type === "input-response") {
       try { environment.inputs.answer(message.taskId, message.inputId, message.response); }
       catch { reject(); }
+      return;
+    }
+    if (message.type === "pairing-request") {
+      const issue = environment.services?.issuePairing;
+      if (pending.size >= 32) return reject();
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      environment.signal.addEventListener("abort", abort, { once: true });
+      const answer = (ok: boolean, pairUrl?: string) => {
+        if (socket.readyState !== WebSocket.OPEN || currentGeneration() !== generation || environment.signal.aborted) return;
+        socket.send(JSON.stringify({ type: "pairing-result", generation, requestId: message.requestId, ok,
+          ...(ok && pairUrl ? { pairUrl } : {}) }));
+      };
+      const delivery = Promise.resolve().then(() => {
+        if (!issue || controller.signal.aborted) throw new Error("T3_PAIRING_UNAVAILABLE");
+        return issue(message.origin, controller.signal);
+      }).then(pairUrl => answer(true, pairUrl)).catch(() => answer(false))
+        .finally(() => { pending.delete(delivery); environment.signal.removeEventListener("abort", abort); });
+      pending.add(delivery);
       return;
     }
     if (message.type === "close") {

@@ -37,7 +37,10 @@ jobs:
           test -x "$HOME/.local/bin/t3"
           "$HOME/.local/bin/t3" --version
 
-      - name: Verify T3 local HTTP and native CLI
+      - name: Install official MCP client for native interoperability checks
+        run: npm ci --prefix .github/actions/agent-runtime
+
+      - name: Verify T3 local HTTP, CLI and MCP
         shell: bash
         run: |
           set -euo pipefail
@@ -62,3 +65,4 @@ jobs:
           fi
           t3 project add "$RUNNER_TEMP/t3-smoke-project"
           T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 T3_LIVE_PROJECT="$RUNNER_TEMP/t3-smoke-project" node --test tests/t3-live.test.ts
+          T3_MCP_LIVE=1 T3_MCP_URL=http://127.0.0.1:3773/mcp node --test tests/t3-mcp.test.ts

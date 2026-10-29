@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { promisify } from "node:util";
+const execute = promisify(execFile);
 import { mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
 import { isAbsolute, join } from "node:path";
@@ -135,6 +137,37 @@ export class T3Service {
       await this.close();
       this.set({ status: "failed" });
       throw new Error("T3_STARTUP_UNAVAILABLE");
+    }
+  }
+
+  /** Mint a native, short-lived owner pairing link; never log or publish it in MCP outputs. */
+  async issuePairing(origin: string, signal: AbortSignal): Promise<string> {
+    if (this.stopping || this.current.status !== "ready" || this.current.origin !== origin) {
+      throw new Error("T3_PAIRING_UNAVAILABLE");
+    }
+    signal.throwIfAborted();
+    const binary = this.options.executable ?? join(this.options.env.HOME!, ".local", "bin", "t3");
+    const env: NodeJS.ProcessEnv = {
+      HOME: this.options.env.HOME,
+      ...(this.options.env.PATH ? { PATH: this.options.env.PATH } : {}),
+      ...(this.options.env.TMPDIR ? { TMPDIR: this.options.env.TMPDIR } : {}),
+    };
+    try {
+      const { stdout } = await execute(binary, [
+        "auth", "pairing", "create", "--base-url", origin, "--ttl", "5m", "--json",
+      ], { env, cwd: this.options.workspace, timeout: 12_000, signal, maxBuffer: 8192 });
+      const result: unknown = JSON.parse(stdout);
+      if (typeof result !== "object" || result === null || !("pairUrl" in result) ||
+          typeof result.pairUrl !== "string") throw new Error("T3_PAIRING_UNAVAILABLE");
+      const url = new URL(result.pairUrl);
+      if (url.origin !== origin || url.pathname !== "/pair" ||
+          !url.hash.startsWith("#token=") || url.hash.length < 14 || url.search) {
+        throw new Error("T3_PAIRING_UNAVAILABLE");
+      }
+      return url.toString();
+    } catch {
+      // Native CLI errors can contain secrets. Never propagate them.
+      throw new Error("T3_PAIRING_UNAVAILABLE");
     }
   }
 

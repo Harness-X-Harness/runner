@@ -4,7 +4,7 @@ import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 export type AuthorizationStateEnv = { AUTHORIZATION_STATES: DurableObjectNamespace };
 export type ConsentState = { authRequest: AuthRequest; browserBindingHash: string };
 export type GitHubState = {
-  payload: { kind: "mcp"; authRequest: AuthRequest };
+  payload: { kind: "mcp"; authRequest: AuthRequest } | { kind: "t3"; environmentId: string };
   codeVerifier: string;
   browserBindingHash: string;
 };

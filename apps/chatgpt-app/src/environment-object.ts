@@ -63,6 +63,8 @@ const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text
     (value.revision !== 0 || (value.text === "" && !value.truncated)));
 const runtimeMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent-state"), generation: z.number().int().positive(), state: agentModelState }).strict(),
+  z.object({ type: z.literal("pairing-result"), generation: z.number().int().positive(),
+    requestId: z.string().uuid(), ok: z.boolean(), pairUrl: z.string().max(2048).optional() }).strict(),
   z.object({ type: z.literal("service-state"), generation: z.number().int().positive(),
     t3: z.discriminatedUnion("status", [
       z.object({ status: z.literal("ready"), origin: z.string().regex(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/) }).strict(),
@@ -93,6 +95,11 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   private readonly operationObservers = new Map<string, Set<() => void>>();
   private readonly outputObservers = new Map<string, Set<() => void>>();
   private readonly environmentObservers = new Set<() => void>();
+  /** Runtime-only owner pairing; no credentials persist in Durable Object storage. */
+  private readonly pairingRequests = new Map<string, {
+    runtimeId: string; generation: number; origin: string;
+    finish: (pairUrl?: string) => void;
+  }>();
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env);
     this.creation = new EnvironmentCreation(ctx.storage, env.ENVIRONMENT_STARTUP_MS);
@@ -307,13 +314,58 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     }, signal));
   }
 
+
+  /** Only the owning GitHub identity may request a native, scoped T3 credential. */
+  async issueT3Pairing(ownerId: string): Promise<string> {
+    const snapshot = await this.readEnvironment(ownerId);
+    const service = snapshot?.services?.t3;
+    if (snapshot?.status !== "ready" || service?.status !== "ready" || !service.origin) {
+      throw new Error("T3_PAIRING_UNAVAILABLE");
+    }
+    if (this.pairingRequests.size !== 0) throw new Error("T3_PAIRING_BUSY");
+    const current = await this.ctx.storage.get<RuntimeBinding>("environment-runtime");
+    const ready = await this.ctx.storage.get<number>("environment-ready-generation");
+    if (!current || ready !== current.generation) throw new Error("T3_PAIRING_UNAVAILABLE");
+    const socket = this.runtimeSocket(current);
+    if (!socket) throw new Error("T3_PAIRING_UNAVAILABLE");
+    const origin = service.origin;
+    const requestId = crypto.randomUUID();
+    return new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const finish = (pairUrl?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.pairingRequests.delete(requestId);
+        if (pairUrl) resolve(pairUrl);
+        else reject(new Error("T3_PAIRING_UNAVAILABLE"));
+      };
+      const timeout = setTimeout(() => finish(), 15_000);
+      this.pairingRequests.set(requestId, { runtimeId: current.runtimeId, generation: current.generation,
+        origin, finish });
+      try { socket.send(JSON.stringify({ type: "pairing-request", generation: current.generation, requestId,
+        origin })); }
+      catch { finish(); }
+    });
+  }
+
+  private failT3Pairing(binding: RuntimeBinding | null): void {
+    for (const request of this.pairingRequests.values()) {
+      if (!binding || (request.runtimeId === binding.runtimeId && request.generation === binding.generation)) {
+        request.finish();
+      }
+    }
+  }
+
   async webSocketClose(socket: WebSocket): Promise<void> {
+    this.failT3Pairing(socket.deserializeAttachment() as RuntimeBinding | null);
     socket.close(1000);
     await this.recordRuntimeDiagnostic(socket, "transport_closed");
     this.environmentChanged();
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
+    this.failT3Pairing(socket.deserializeAttachment() as RuntimeBinding | null);
     socket.close(1011);
     await this.recordRuntimeDiagnostic(socket, "transport_failure");
     this.environmentChanged();
@@ -365,6 +417,10 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const parsed = runtimeMessage.safeParse(payload);
       if (!parsed.success) return false;
       const incoming = parsed.data;
+      if (incoming.type === "pairing-result") {
+        if (incoming.generation !== current.generation) return false;
+        return { type: "pairing-result-accepted" as const, ...incoming };
+      }
       if (incoming.type === "ready") {
         if (await this.ctx.storage.get("environment-ready-generation") === undefined &&
             (await this.creation.readInternal()).admitUntil <= Date.now()) return false;
@@ -473,6 +529,26 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       socket.close(1008, "Runtime message rejected");
       await this.recordRuntimeDiagnostic(socket, "control_plane_rejected");
       this.environmentChanged();
+      return;
+    }
+    if (acknowledgement.type === "pairing-result-accepted") {
+      const request = this.pairingRequests.get(acknowledgement.requestId);
+      if (!request || request.generation !== acknowledgement.generation ||
+          request.runtimeId !== attachment?.runtimeId) {
+        socket.close(1008, "Invalid pairing result");
+        return;
+      }
+      let pairUrl: string | undefined;
+      if (acknowledgement.ok && acknowledgement.pairUrl) {
+        try {
+          const candidate = new URL(acknowledgement.pairUrl);
+          if (candidate.origin === request.origin && candidate.pathname === "/pair" &&
+              candidate.search === "" && candidate.hash.startsWith("#token=") && candidate.hash.length > 13) {
+            pairUrl = candidate.toString();
+          }
+        } catch { /* Invalid native pairing result. */ }
+      }
+      request.finish(pairUrl);
       return;
     }
     if (acknowledgement.taskId !== undefined && acknowledgement.type !== "output-accepted") {
