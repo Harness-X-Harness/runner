@@ -6,8 +6,20 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const require = createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url));
-const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client") as
-  typeof import("../.github/actions/agent-runtime/node_modules/@modelcontextprotocol/client/dist/esm/index.js");
+type NativeMcpClient = {
+  connect(transport: unknown): Promise<void>;
+  close(): Promise<void>;
+  listTools(): Promise<{ tools: Array<{ name: string }> }>;
+  callTool(args: { name: string; arguments: Record<string, unknown> }): Promise<{
+    isError?: boolean; structuredContent?: Record<string, unknown>;
+  }>;
+};
+const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client") as {
+  Client: new (identity: { name: string; version: string }) => NativeMcpClient;
+  StreamableHTTPClientTransport: new (
+    endpoint: URL, configuration: { requestInit: { headers: Record<string, string> } }
+  ) => unknown;
+};
 const execute = promisify(execFile);
 const enabled = process.env.T3_MCP_LIVE === "1";
 const baseUrl = "http://127.0.0.1:3773";
