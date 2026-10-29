@@ -85,13 +85,12 @@ test("pairing is available only on a live matching T3 origin, never via ordinary
   t.after(() => rm(root, { recursive: true, force: true }));
   const child = mockChild();
   const origin = "https://quiet-leaf.trycloudflare.com";
-  let pairingCli: string[] = [];
   const fakeBinary = join(root, "t3-pairing-fixture");
   // A real subprocess exercises stdout parsing and ensures no credential is printed by the caller.
   const { writeFile, chmod } = await import("node:fs/promises");
-  await writeFile(fakeBinary, \`#!/bin/sh
-printf '%s\\\\n' '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_SECRET_TOKEN"}'
-\`);
+  await writeFile(fakeBinary, `#!/bin/sh
+echo '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_SECRET_TOKEN"}'
+`);
   await chmod(fakeBinary, 0o700);
   const service = new T3Service({
     workspace: join(root, "workspace"), env: { HOME: root, PATH: "/usr/bin" },
