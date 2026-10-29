@@ -54,6 +54,7 @@ test("T3 entry requires a precise Environment id and initiates bound PKCE GitHub
   assert.equal(redirect.pathname, "/login/oauth/authorize");
   assert.equal(redirect.searchParams.get("redirect_uri"), "https://runner.example/github/callback");
   assert.equal(redirect.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(redirect.searchParams.has("scope"), false, "GitHub App identity must not request broad repo OAuth scope");
   assert.match(response.headers.get("set-cookie") ?? "", /HttpOnly; Secure/);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(states.size(), 1);

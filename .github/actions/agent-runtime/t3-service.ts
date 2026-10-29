@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { T3Connection, stopManagedProcess } from "./t3-connection.ts";
+import { readT3Descriptor, type T3Descriptor } from "./t3-readiness.ts";
 
 export type T3ServiceState =
   | { status: "starting" | "failed" | "stopped" }
@@ -53,7 +54,7 @@ export class T3Service {
   private connection?: T3ConnectionPort;
   private started = false;
   private stopping = false;
-  private connectionFailed = false;
+  private serviceFailed = false;
   private current: T3ServiceState = { status: "starting" };
   private stopPromise?: Promise<void>;
 
@@ -79,19 +80,11 @@ export class T3Service {
     }
   }
 
-  private async remoteReady(origin: string, signal: AbortSignal): Promise<boolean> {
+  private async remoteReady(origin: string, expected: T3Descriptor, signal: AbortSignal): Promise<boolean> {
     if (this.options.remoteProbe) return this.options.remoteProbe(origin, signal);
-    try {
-      const response = await (this.options.fetchImpl ?? fetch)(new URL("/.well-known/t3/environment", origin), {
-        redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(2500)]),
-      });
-      if (!response.ok) return false;
-      const descriptor: unknown = await response.json().catch(() => undefined);
-      return typeof descriptor === "object" && descriptor !== null &&
-        "environmentId" in descriptor && typeof descriptor.environmentId === "string" &&
-        "serverVersion" in descriptor && typeof descriptor.serverVersion === "string" &&
-        "capabilities" in descriptor && typeof descriptor.capabilities === "object";
-    } catch { return false; }
+    const descriptor = await readT3Descriptor(origin, signal, this.options.fetchImpl);
+    return descriptor !== null && descriptor.environmentId === expected.environmentId &&
+      descriptor.serverVersion === expected.serverVersion;
   }
 
   async start(parentSignal: AbortSignal): Promise<void> {
@@ -116,32 +109,33 @@ export class T3Service {
       let exited = false;
       child.once("error", () => {
         exited = true;
-        if (!this.stopping) this.set({ status: "failed" });
+        if (!this.stopping) {
+          this.serviceFailed = true;
+          this.set({ status: "failed" });
+          void this.close().catch(() => {});
+        }
       });
       child.once("exit", () => {
         exited = true;
         if (!this.stopping) {
+          this.serviceFailed = true;
           this.set({ status: "failed" });
-          void this.connection?.close().catch(() => {});
+          void this.close().catch(() => {});
         }
       });
       const fetchImpl = this.options.fetchImpl ?? fetch;
-      let healthy = false;
+      let local: T3Descriptor | null = null;
       while (!signal.aborted && !exited) {
-        try {
-          const response = await fetchImpl(`http://127.0.0.1:${this.port}/`, {
-            redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(1500)]),
-          });
-          if (response.ok) { await response.body?.cancel(); healthy = true; break; }
-        } catch { /* T3 is still starting. */ }
+        local = await readT3Descriptor(`http://127.0.0.1:${this.port}`, signal, fetchImpl);
+        if (local) break;
         await delay(250, undefined, { signal }).catch(() => {});
       }
-      if (!healthy || exited) throw new Error("T3_STARTUP_UNAVAILABLE");
+      if (!local || exited || signal.aborted) throw new Error("T3_STARTUP_UNAVAILABLE");
       this.connection = (this.options.connect ?? ((port, env) => new T3Connection(port, env)))(
         this.port, this.options.env);
       this.connection.subscribe?.(() => {
         if (!this.stopping) {
-          this.connectionFailed = true;
+          this.serviceFailed = true;
           this.set({ status: "failed" });
           void this.close().catch(() => {});
         }
@@ -151,7 +145,7 @@ export class T3Service {
       let publicReady = false;
       const publicDeadline = Date.now() + 30_000;
       while (!signal.aborted && !exited && Date.now() < publicDeadline) {
-        if (await this.remoteReady(origin, signal)) { publicReady = true; break; }
+        if (await this.remoteReady(origin, local, signal)) { publicReady = true; break; }
         await delay(500, undefined, { signal }).catch(() => {});
       }
       if (!publicReady || exited || signal.aborted) throw new Error("T3_STARTUP_UNAVAILABLE");
@@ -178,7 +172,11 @@ export class T3Service {
     try {
       const { stdout } = await execute(binary, [
         "auth", "pairing", "create", "--base-url", origin, "--ttl", "5m", "--json",
-      ], { env, cwd: this.options.workspace, timeout: 12_000, signal, maxBuffer: 8192 });
+      ], { env, cwd: this.options.workspace, timeout: 12_000,
+        signal: AbortSignal.any([signal, this.lifetime.signal]), maxBuffer: 8192 });
+      if (this.stopping || this.current.status !== "ready" || this.current.origin !== origin) {
+        throw new Error("T3_PAIRING_UNAVAILABLE");
+      }
       const result: unknown = JSON.parse(stdout);
       if (typeof result !== "object" || result === null || !("pairUrl" in result) ||
           typeof result.pairUrl !== "string") throw new Error("T3_PAIRING_UNAVAILABLE");
@@ -199,10 +197,12 @@ export class T3Service {
       this.stopping = true;
       this.lifetime.abort();
       try {
-        await this.connection?.close();
-      } finally {
-        await stopManagedProcess(this.child);
-        this.set({ status: this.connectionFailed ? "failed" : "stopped" });
+        try { await this.connection?.close(); }
+        finally { await stopManagedProcess(this.child); }
+        this.set({ status: this.serviceFailed ? "failed" : "stopped" });
+      } catch {
+        this.set({ status: "failed" });
+        throw new Error("T3_PROCESS_STOP_FAILED");
       }
     })();
   }

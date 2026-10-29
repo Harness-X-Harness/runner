@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "../apps/chatgpt-app/node_modules/esbuild/lib/main.js";
 import { Miniflare } from "../apps/chatgpt-app/node_modules/miniflare/dist/src/index.js";
 
-test("owner-only T3 pairing is bound to one live DO socket and never persisted", { timeout: 12000 }, async t => {
+test("T3 DO preserves owner pairing privacy, idle exemption and hard-deadline close intent", { timeout: 12000 }, async t => {
   const source = fileURLToPath(new URL("../apps/chatgpt-app/src/environment-object.ts", import.meta.url));
   const environmentId = "env_" + "a".repeat(32);
   const runtimeId = "00000000-0000-4000-8000-000000000001";
@@ -14,13 +14,14 @@ test("owner-only T3 pairing is bound to one live DO socket and never persisted",
     "export class TestT3Environment extends EnvironmentObject {",
     "async fixtureSeed(id, owner, origin) {",
     "  const now = Date.now();",
-    '  await this.ctx.storage.put("environment-creation", {environmentId:id, ownerId:owner, executor:"codex", services:["t3"], createdAt:now, admitUntil:now+60000});',
+    '  await this.ctx.storage.put("environment-creation", {environmentId:id, ownerId:owner, executor:"codex", services:["t3"], createdAt:now-16*60000, admitUntil:now+60000});',
     '  await this.ctx.storage.put("environment-runtime", {runtimeId:' + JSON.stringify(runtimeId) + ',generation:1});',
     '  await this.ctx.storage.put("environment-runtime-deadline", now+60000);',
     '  await this.ctx.storage.put("environment-ready-generation", 1);',
     '  await this.ctx.storage.put("environment-t3-state", {t3:{status:"ready", origin}, generation:1, observedAt:now});',
     "}",
     'async fixtureKeys() {return [...(await this.ctx.storage.list()).keys()];}',
+    'async fixtureExpire() {await this.ctx.storage.put("environment-runtime-deadline",1); await this.alarm();}',
     "async fetch(request) {",
     '  if(new URL(request.url).pathname !== "/test-socket") return super.fetch(request);',
     '  const pair = new WebSocketPair(); this.ctx.acceptWebSocket(pair[1]);',
@@ -34,6 +35,7 @@ test("owner-only T3 pairing is bound to one live DO socket and never persisted",
     '  if(input.op==="socket")return object.fetch(new Request("https://internal/test-socket",{headers:{upgrade:"websocket"}}));',
     '  if(input.op==="seed"){await object.fixtureSeed(input.environmentId,input.owner,input.origin);return Response.json({ok:true});}',
     '  if(input.op==="keys")return Response.json(await object.fixtureKeys());',
+    '  if(input.op==="expire"){await object.fixtureExpire();return Response.json({ok:true});}',
     '  if(input.op==="snapshot")return Response.json(await object.readEnvironment(input.owner));',
     '  if(input.op==="pair"){try{return Response.json({url:await object.issueT3Pairing(input.owner)});}catch{return new Response(null,{status:403});}}',
     "  return new Response(null,{status:404});",
@@ -62,6 +64,17 @@ test("owner-only T3 pairing is bound to one live DO socket and never persisted",
   t.after(() => socket.close());
   const snapshot = await (await call("snapshot", {owner:"123"})).json() as {status:string};
   assert.equal(snapshot.status, "ready");
+  const ready = new Promise<string>(resolve => socket.addEventListener("message",
+    event => resolve(JSON.parse(String(event.data)).type), { once: true }));
+  socket.send(JSON.stringify({ type: "ready" }));
+  assert.equal(await ready, "ready-accepted");
+  const held = await (await call("snapshot", {owner:"123"})).json() as {
+    status: string; idleExpiresAt: number | null; expiresAt: number; createdAt: number;
+  };
+  assert.equal(held.status, "ready");
+  assert.equal(held.idleExpiresAt, null, "interactive T3 must not acquire the ordinary idle deadline");
+  assert.ok(Date.now() - held.createdAt > 15 * 60_000, "fixture age crosses the ordinary idle interval");
+  assert.ok(held.expiresAt > Date.now(), "hard deadline remains authoritative");
   assert.equal((await call("pair", {owner:"456"})).status, 403);
   let count = 0;
   const requested = new Promise<void>(resolve => {
@@ -87,4 +100,11 @@ test("owner-only T3 pairing is bound to one live DO socket and never persisted",
   const keys = await (await call("keys")).json() as string[];
   assert.ok(!JSON.stringify(keys).includes("PRIVATE_PAIR_TOKEN"));
   assert.ok(!keys.some(key => key.includes("pairing")));
+  const close = new Promise<string>(resolve => socket.addEventListener("message",
+    event => resolve(JSON.parse(String(event.data)).type), { once: true }));
+  assert.equal((await call("expire")).status, 200);
+  assert.equal(await close, "close");
+  assert.equal((await (await call("snapshot", {owner:"123"})).json() as {status:string}).status, "closing",
+    "elapsed deadline is close intent, not confirmed remote job stop");
+  assert.equal((await call("pair", {owner:"123"})).status, 403);
 });

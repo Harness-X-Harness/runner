@@ -84,3 +84,15 @@ test("public workflow sources do not persist executor credentials or publish pri
     assert.doesNotMatch(source, /GITHUB_STEP_SUMMARY|actions\/upload-artifact|set -x/);
   }
 });
+
+test("T3 pull-request smoke stays credential-free and disables paid acceptance explicitly", async () => {
+  const source = await workflow("t3-smoke");
+  const parsed = workflowSchema.parse(parse(source));
+  assert.deepEqual(Object.keys(parsed.on).sort(), ["pull_request", "workflow_dispatch"]);
+  assert.deepEqual(parsed.permissions, { contents: "read" });
+  assert.doesNotMatch(source, /secrets\.|id-token:|pull_request_target|GITHUB_STEP_SUMMARY|upload-artifact|set -x/);
+  assert.match(source, /persist-credentials: false/);
+  assert.match(source, /T3_LIVE_MODEL: '0'/);
+  assert.match(source, /node tests\/run-t3-acceptance\.ts/);
+  assert.match(source, /vars\.T3CODE_VERSION \|\| '0\.1\.5'/);
+});

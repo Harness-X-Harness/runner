@@ -7,6 +7,8 @@ on:
       - '.github/workflows/run-environment.yml'
       - '.github/workflows/t3-smoke.yml'
       - 'tests/t3-*.test.ts'
+      - 'tests/helpers/t3-live*.ts'
+      - 'tests/run-t3-acceptance.ts'
   workflow_dispatch:
 
 permissions:
@@ -29,7 +31,7 @@ jobs:
 
       - name: Install unmodified T3 Code
         env:
-          T3CODE_VERSION: ${{ vars.T3CODE_VERSION }}
+          T3CODE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -40,29 +42,12 @@ jobs:
       - name: Install official MCP client for native interoperability checks
         run: npm ci --prefix .github/actions/agent-runtime
 
-      - name: Verify T3 local HTTP, CLI and MCP
+      - name: Prove native T3 and OAuth MCP with disposable state
+        env:
+          T3_ACCEPTANCE: '1'
+          T3_LIVE_MODEL: '0'
+          T3_ACCEPTANCE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          mkdir -p "$RUNNER_TEMP/t3-smoke-project"
-          git -C "$RUNNER_TEMP/t3-smoke-project" init -q
-          "$HOME/.local/bin/t3" serve --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/t3-smoke-project" > "$RUNNER_TEMP/t3-smoke.log" 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
-          ready=false
-          for ((attempt=1; attempt<=75; attempt++)); do
-            if curl -fsS --max-time 2 -o /dev/null http://127.0.0.1:3773/; then
-              ready=true
-              break
-            fi
-            if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
-            sleep 1
-          done
-          if [[ "$ready" != true ]]; then
-            echo "T3 local readiness failed (no model credentials used)" >&2
-            exit 1
-          fi
-          t3 project add "$RUNNER_TEMP/t3-smoke-project"
-          T3_LIVE=1 T3_LIVE_ORIGIN=http://127.0.0.1:3773 T3_LIVE_PROJECT="$RUNNER_TEMP/t3-smoke-project" node --test tests/t3-live.test.ts
-          T3_MCP_LIVE=1 T3_MCP_URL=http://127.0.0.1:3773/mcp node --test tests/t3-mcp.test.ts
+          T3_LIVE_BINARY="$HOME/.local/bin/t3" node tests/run-t3-acceptance.ts

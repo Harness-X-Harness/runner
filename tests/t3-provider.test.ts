@@ -17,7 +17,9 @@ test("T3 consumes existing provider configuration without inheriting job control
     const child = t3ProviderEnvironment(executor, source);
     assert.equal(child.MINI_END_USER_KEY, source.MINI_END_USER_KEY);
     assert.equal(child.GH_TOKEN, source.GH_TOKEN);
+    assert.equal(child.XAI_API_KEY, executor === "grok" ? source.MINI_END_USER_KEY : undefined);
     assert.ok(child.PATH?.startsWith("/tmp/runner/.local/bin:"));
+    assert.ok(child.PATH?.includes("/tmp/runner/.grok/bin"));
     for (const key of ["GITHUB_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
       "ACTIONS_ID_TOKEN_REQUEST_URL", "TASK_CONTROL_PLANE_URL"]) {
       assert.equal(child[key], undefined);

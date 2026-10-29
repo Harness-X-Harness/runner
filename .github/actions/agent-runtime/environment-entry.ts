@@ -44,10 +44,14 @@ export async function claimEnvironment(env: NodeJS.ProcessEnv = process.env, fet
     (claim.services?.includes("t3") ? "t3=true\n" : ""));
 }
 
-async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
+async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
   const directory = location(env);
   const claim = bootstrapSchema.parse(JSON.parse(await readFile(path.join(directory, "claim.json"), "utf8")));
   if (claim.deadline <= Date.now()) return;
+  // Bound installation-independent startup as well as the serving phase. T3
+  // startup must not run past the already claimed Environment hard deadline.
+  const signal = AbortSignal.any([parentSignal,
+    AbortSignal.timeout(Math.max(1, Math.min(claim.deadline - Date.now(), 2_147_483_647)))]);
   signal.throwIfAborted();
   if (!env.GH_TOKEN) throw new Error("AGENT_GITHUB_AUTH_REQUIRED");
   await configureProvider(claim.executor, env);

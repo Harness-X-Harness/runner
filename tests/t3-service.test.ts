@@ -37,7 +37,7 @@ test("T3 lives across operations, reports public origin, and stops with its Envi
       command = [binary, ...args];
       return child as unknown as ChildProcess;
     }) as unknown as typeof spawn,
-    fetchImpl: async () => new Response("OK", { status: 200 }),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://quiet-leaf.trycloudflare.com" }),
@@ -96,7 +96,7 @@ echo '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_SECRET
     workspace: join(root, "workspace"), env: { HOME: root, PATH: "/usr/bin" },
     executable: fakeBinary, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as unknown as typeof spawn,
-    fetchImpl: async () => new Response("OK"),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => true,
     connect: () => ({ open: async () => ({ origin }), close: async () => {} }),
   });
@@ -109,4 +109,37 @@ echo '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_SECRET
   await service.close();
   await assert.rejects(service.issuePairing(origin, new AbortController().signal),
     /T3_PAIRING_UNAVAILABLE/);
+});
+
+test("closing during native pairing aborts the credential request without publishing a late link", async t => {
+  const root = await mkdtemp(join(tmpdir(), "t3-pairing-close-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const binary = join(root, "pairing-fixture");
+  const marker = join(root, "started");
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(binary, `#!/usr/bin/env node
+require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started');
+setTimeout(() => console.log(JSON.stringify({pairUrl:'https://quiet-leaf.trycloudflare.com/pair#token=PRIVATE_LATE_CREDENTIAL'})),5000);
+`, { mode: 0o700 });
+  const child = mockChild();
+  const origin = "https://quiet-leaf.trycloudflare.com";
+  const service = new T3Service({ workspace: root, env: { HOME: root, PATH: process.env.PATH }, executable: binary,
+    port: await unusedPort(), launch: (() => child as unknown as ChildProcess) as typeof spawn,
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5",
+      capabilities: { repositoryIdentity: true } }), remoteProbe: async () => true,
+    connect: () => ({ open: async () => ({ origin }), close: async () => {} }),
+  });
+  await service.start(new AbortController().signal);
+  t.after(() => service.close());
+  const pairing = service.issuePairing(origin, new AbortController().signal);
+  const rejected = assert.rejects(pairing, /^Error: T3_PAIRING_UNAVAILABLE$/);
+  const { access } = await import("node:fs/promises");
+  const { setTimeout: delay } = await import("node:timers/promises");
+  let started = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { await access(marker); started = true; break; } catch { await delay(10); }
+  }
+  assert.equal(started, true);
+  await service.close();
+  await rejected;
 });

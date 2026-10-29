@@ -72,7 +72,7 @@ jobs:
         if: steps.claim.outputs.t3 == 'true'
         shell: bash
         env:
-          T3CODE_VERSION: ${{ vars.T3CODE_VERSION }}
+          T3CODE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
         run: |
           set -euo pipefail
           curl -fsSL https://t3.codes/install.sh | sh

@@ -36,7 +36,7 @@ test("unexpected native server exit reports failure and revokes tunnel access", 
   const service = new T3Service({
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
-    fetchImpl: async () => new Response("ok"),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
@@ -49,7 +49,7 @@ test("unexpected native server exit reports failure and revokes tunnel access", 
   await Promise.resolve();
   assert.equal(tunnelClosed, true);
   await service.close();
-  assert.equal(service.read().status, "stopped");
+  assert.equal(service.read().status, "failed");
 });
 
 test("disconnected tunnel invalidates T3 service even if the native process is healthy", async t => {
@@ -61,7 +61,7 @@ test("disconnected tunnel invalidates T3 service even if the native process is h
   const service = new T3Service({
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
-    fetchImpl: async () => new Response("ok"),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
@@ -84,7 +84,7 @@ test("Environment abort tears down T3 and rejects further Pairing", async t => {
   const service = new T3Service({
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
-    fetchImpl: async () => new Response("ok"),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => true,
     connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
       close: async () => {} }),
@@ -108,7 +108,7 @@ test("public URL is not announced as ready until the T3 descriptor can be reache
   const service = new T3Service({
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
-    fetchImpl: async () => new Response("ok"),
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } }),
     remoteProbe: async () => { probes++; controller.abort(); return false; },
     connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
       close: async () => { stopped = true; } }),
@@ -117,4 +117,48 @@ test("public URL is not announced as ready until the T3 descriptor can be reache
   assert.equal(service.read().status, "failed");
   assert.equal(probes, 1);
   assert.equal(stopped, true);
+});
+
+test("a different remote T3 identity cannot satisfy service readiness", async t => {
+  const root = await mkdtemp(join(tmpdir(), "t3-wrong-public-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const child = nativeChild();
+  const controller = new AbortController();
+  let publicProbes = 0;
+  const service = new T3Service({
+    workspace: root, env: { HOME: root }, port: await unusedPort(),
+    launch: (() => child as unknown as ChildProcess) as typeof spawn,
+    fetchImpl: async input => {
+      const remote = new URL(String(input)).protocol === "https:";
+      if (remote) { publicProbes++; if (publicProbes >= 2) controller.abort(); }
+      return Response.json({ environmentId: remote ? "other-server" : "local-server", serverVersion: "0.1.5",
+        capabilities: { repositoryIdentity: true } });
+    },
+    connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }), close: async () => {} }),
+  });
+  const states: string[] = [];
+  service.subscribe(() => states.push(service.read().status));
+  await assert.rejects(service.start(controller.signal), /T3_STARTUP_UNAVAILABLE/);
+  assert.equal(publicProbes, 2);
+  assert.equal(states.includes("ready"), false);
+  assert.equal(service.read().status, "failed");
+});
+
+test("unconfirmed cleanup reports failure and still stops the native process", async t => {
+  const root = await mkdtemp(join(tmpdir(), "t3-cleanup-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const child = nativeChild();
+  const service = new T3Service({
+    workspace: root, env: { HOME: root }, port: await unusedPort(),
+    launch: (() => child as unknown as ChildProcess) as typeof spawn,
+    fetchImpl: async () => Response.json({ environmentId: "native-test", serverVersion: "0.1.5",
+      capabilities: { repositoryIdentity: true } }),
+    remoteProbe: async () => true,
+    connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
+      close: async () => { throw new Error("PRIVATE_NATIVE_DIAGNOSTIC"); } }),
+  });
+  await service.start(new AbortController().signal);
+  await assert.rejects(service.close(), /^Error: T3_PROCESS_STOP_FAILED$/);
+  assert.equal(child.exitCode, 0);
+  assert.equal(service.read().status, "failed");
 });

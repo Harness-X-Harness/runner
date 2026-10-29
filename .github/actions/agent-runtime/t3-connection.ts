@@ -16,27 +16,37 @@ export function t3PublicOrigin(text: string): string | null {
 
 /** Terminate a managed process group and confirm exit before returning. */
 export async function stopManagedProcess(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise<void>(resolve => child.once("close", () => resolve()));
-  if (child.pid) {
-    try { process.kill(-child.pid, "SIGTERM"); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw new Error("T3_PROCESS_STOP_FAILED");
-    }
-  } else child.kill("SIGTERM");
-  let timer: NodeJS.Timeout | undefined;
-  const terminated = await Promise.race([exited.then(() => true), new Promise<false>(resolve => {
-    timer = setTimeout(() => resolve(false), 3000);
-  })]);
-  if (timer) clearTimeout(timer);
-  if (!terminated) {
+  if (!child) return;
+  const signalGroup = (signal: NodeJS.Signals) => {
     if (child.pid) {
-      try { process.kill(-child.pid, "SIGKILL"); }
+      try { process.kill(-child.pid, signal); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw new Error("T3_PROCESS_STOP_FAILED");
       }
-    } else child.kill("SIGKILL");
-    await exited;
+    } else if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+  };
+  // A dead leader can still have live descendants in its detached process group.
+  if (child.exitCode !== null || child.signalCode !== null) { signalGroup("SIGKILL"); return; }
+  // Failed spawn has no PID and may already have emitted close.
+  if (!child.pid && child.spawnfile) return;
+  let onClose: () => void = () => {};
+  const exited = new Promise<void>(resolve => { onClose = resolve; child.once("close", onClose); });
+  const wait = async (ms: number) => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([exited.then(() => true), new Promise<false>(resolve => {
+        timer = setTimeout(() => resolve(false), ms);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    signalGroup("SIGTERM");
+    const terminated = await wait(3000);
+    // Always clean up descendants, including after graceful leader exit.
+    signalGroup("SIGKILL");
+    if (!terminated && !await wait(3000)) throw new Error("T3_PROCESS_STOP_FAILED");
+  } finally {
+    child.off("close", onClose);
   }
 }
 
@@ -106,6 +116,9 @@ export class T3Connection {
           clearTimeout(timer);
           signal.removeEventListener("abort", abort);
           child.stderr?.off("data", output);
+          // Drain subsequent diagnostics privately; an unread pipe can block a
+          // long-running cloudflared process once its pipe buffer fills.
+          child.stderr?.resume();
           child.off("error", abort);
           child.off("exit", abort);
         };

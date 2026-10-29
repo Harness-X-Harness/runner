@@ -17,11 +17,14 @@ export function t3ProviderEnvironment(executor: T3Executor, source: NodeJS.Proce
   // the T3 process while preserving the explicitly approved Agent work token.
   return {
     HOME: home,
-    PATH: [join(home, ".local", "bin"), source.PATH].filter(Boolean).join(":"),
+    PATH: [join(home, ".local", "bin"), join(home, ".grok", "bin"), source.PATH].filter(Boolean).join(":"),
     ...(source.TMPDIR ? { TMPDIR: source.TMPDIR } : {}),
     ...(source.LANG ? { LANG: source.LANG } : {}),
     ...(source.CI ? { CI: source.CI } : {}),
     MINI_END_USER_KEY: source.MINI_END_USER_KEY,
+    // Match Runner's native Grok process and T3's upstream auth probe. The
+    // endpoint still comes from configureProvider(), not a second secret store.
+    ...(executor === "grok" ? { XAI_API_KEY: source.MINI_END_USER_KEY } : {}),
     ...(source.GH_TOKEN ? { GH_TOKEN: source.GH_TOKEN } : {}),
   };
 }
