@@ -134,7 +134,8 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         <strong>T3 Code</strong>
         <span role="status">{snapshot.services.t3.status === "ready" ? "已就绪" :
           snapshot.services.t3.status === "failed" ? "服务异常" :
-          snapshot.services.t3.status === "stopped" ? "已停止" : "正在启动"}</span>
+          snapshot.services.t3.status === "stopped" ? "已停止" :
+          snapshot.services.t3.status === "unavailable" ? "状态不可确认" : "正在启动"}</span>
         {snapshot.services.t3.status === "ready" && snapshot.services.t3.accessUrl &&
           (onOpenLink ? <Button variant="quiet" onClick={() => onOpenLink(snapshot.services!.t3.accessUrl!)}>
             验证身份并连接 T3</Button> : <a href={snapshot.services.t3.accessUrl} target="_blank" rel="noopener noreferrer">

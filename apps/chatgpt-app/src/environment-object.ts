@@ -55,7 +55,8 @@ export type EnvironmentSnapshot = {
   agent?: { state: AgentModelState; observedAt: number; current: boolean };
   reconnectDiagnostic?: ReconnectDiagnostic;
   activeTaskId: string | null;
-  services?: { t3: { status: "starting" | "ready" | "failed" | "stopped"; origin?: string; observedAt?: number } };
+  services?: { t3: { status: "starting" | "ready" | "failed" | "stopped" | "unavailable";
+  origin?: string; observedAt?: number } };
 };
 const operationId = z.string().regex(/^[\w-]{1,128}$/);
 const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text: z.string(), truncated: z.boolean() }).strict()
@@ -169,7 +170,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         snapshot.services = { t3: snapshot.status === "closed" ? { status: "stopped" }
           : snapshot.status === "ready" && service && current && service.generation === current.generation
             ? { ...service.t3, observedAt: service.observedAt }
-            : { status: "starting" } };
+            : { status: snapshot.status === "opening" ? "starting" : "unavailable" } };
       }
       const agent = await this.ctx.storage.get<{ state: AgentModelState; observedAt: number; generation: number }>("environment-agent-state");
       if (agent) snapshot.agent = { state: agent.state, observedAt: agent.observedAt,
@@ -563,7 +564,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     if (acknowledgement.taskId !== undefined && ["output-accepted", "result-accepted"].includes(acknowledgement.type)) {
       for (const changed of this.outputObservers.get(acknowledgement.taskId) ?? []) changed();
     }
-    if (["ready-accepted", "result-accepted", "agent-state-accepted"].includes(acknowledgement.type)) this.environmentChanged();
+    if (["ready-accepted", "result-accepted", "agent-state-accepted", "service-state-accepted"].includes(acknowledgement.type)) {
+      this.environmentChanged();
+    }
     socket.send(JSON.stringify(acknowledgement));
     if (acknowledgement.type === "ready-accepted") await this.deliverRuntimeMessage();
   }
