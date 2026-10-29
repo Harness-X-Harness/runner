@@ -48,8 +48,13 @@ export async function stopManagedProcess(child: ChildProcess | undefined): Promi
 export class T3Connection {
   private child?: ChildProcess;
   private closing = false;
-  constructor(private readonly port: number, private readonly env: NodeJS.ProcessEnv,
-    private readonly launch: Spawn = spawn) {
+  private readonly port: number;
+  private readonly env: NodeJS.ProcessEnv;
+  private readonly launch: Spawn;
+  constructor(port: number, env: NodeJS.ProcessEnv, launch: Spawn = spawn) {
+    this.port = port;
+    this.env = env;
+    this.launch = launch;
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("INVALID_T3_PORT");
   }
 

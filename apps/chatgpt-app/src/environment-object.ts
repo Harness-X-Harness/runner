@@ -887,7 +887,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   // Internal policy comes from the workflow contract, never from MCP input.
   async claimRuntime(value: unknown, token: string): Promise<
     { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number;
-      services: readonly "t3"[] }> {
+      services?: readonly "t3"[] }> {
     const execution = executionSchema.parse(value);
     if (!token) throw new Error("RUNNER_IDENTITY_UNAVAILABLE");
     if (await this.bindExecution(execution) === "stop") return { decision: "stop" };
@@ -901,7 +901,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         return { decision: "stop" as const };
       }
       return { decision: "bound" as const, executor: creation.executor, deadline,
-        services: creation.services ?? [] };
+        ...(creation.services?.length ? { services: creation.services } : {}) };
     });
     this.environmentChanged();
     return result;
