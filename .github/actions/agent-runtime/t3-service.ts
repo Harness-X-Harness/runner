@@ -9,7 +9,8 @@ export type T3ServiceState =
   | { status: "starting" | "failed" | "stopped" }
   | { status: "ready"; origin: string };
 
-export type T3ConnectionPort = Pick<T3Connection, "open" | "close">;
+export type T3ConnectionPort = Pick<T3Connection, "open" | "close"> &
+  Partial<Pick<T3Connection, "subscribe">>;
 export type T3ServiceOptions = {
   workspace: string;
   env: NodeJS.ProcessEnv;
@@ -49,6 +50,7 @@ export class T3Service {
   private connection?: T3ConnectionPort;
   private started = false;
   private stopping = false;
+  private connectionFailed = false;
   private current: T3ServiceState = { status: "starting" };
   private stopPromise?: Promise<void>;
 
@@ -119,6 +121,13 @@ export class T3Service {
       if (!healthy || exited) throw new Error("T3_STARTUP_UNAVAILABLE");
       this.connection = (this.options.connect ?? ((port, env) => new T3Connection(port, env)))(
         this.port, this.options.env);
+      this.connection.subscribe?.(() => {
+        if (!this.stopping) {
+          this.connectionFailed = true;
+          this.set({ status: "failed" });
+          void this.close().catch(() => {});
+        }
+      });
       const { origin } = await this.connection.open(signal);
       if (exited || signal.aborted) throw new Error("T3_STARTUP_UNAVAILABLE");
       this.set({ status: "ready", origin });
@@ -137,7 +146,7 @@ export class T3Service {
         await this.connection?.close();
       } finally {
         await stopManagedProcess(this.child);
-        this.set({ status: "stopped" });
+        this.set({ status: this.connectionFailed ? "failed" : "stopped" });
       }
     })();
   }

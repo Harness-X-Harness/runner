@@ -48,6 +48,7 @@ export async function stopManagedProcess(child: ChildProcess | undefined): Promi
 export class T3Connection {
   private child?: ChildProcess;
   private closing = false;
+  private readonly disconnected = new Set<() => void>();
   private readonly port: number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly launch: Spawn;
@@ -58,13 +59,31 @@ export class T3Connection {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("INVALID_T3_PORT");
   }
 
+  subscribe(onDisconnect: () => void): () => void {
+    this.disconnected.add(onDisconnect);
+    return () => { this.disconnected.delete(onDisconnect); };
+  }
+
   async open(signal: AbortSignal, timeoutMs = 45_000): Promise<T3PublicConnection> {
     if (this.child || this.closing) throw new Error("T3_CONNECTION_ALREADY_STARTED");
     signal.throwIfAborted();
+    // Never forward model or GitHub work credentials to an unrelated tunnel binary.
+    const transportEnv: NodeJS.ProcessEnv = {
+      ...(this.env.PATH ? { PATH: this.env.PATH } : {}),
+      ...(this.env.HOME ? { HOME: this.env.HOME } : {}),
+      ...(this.env.TMPDIR ? { TMPDIR: this.env.TMPDIR } : {}),
+    };
     const child = this.launch("cloudflared",
       ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${this.port}`],
-      { env: this.env, detached: true, stdio: ["ignore", "ignore", "pipe"] });
+      { env: transportEnv, detached: true, stdio: ["ignore", "ignore", "pipe"] });
     this.child = child;
+    const disconnected = () => {
+      if (!this.closing) for (const callback of this.disconnected) {
+        try { callback(); } catch { /* Observers do not own transport lifetime. */ }
+      }
+    };
+    child.on("error", disconnected);
+    child.once("exit", disconnected);
     let buffer = "";
     let settled = false;
     try {

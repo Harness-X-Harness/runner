@@ -23,8 +23,10 @@ test("tunnel address parser accepts only native HTTPS Quick Tunnel origins", () 
 test("managed T3 connection returns only the public origin, never raw logs or pairing secrets", async () => {
   const child = mockChild();
   let invocation: string[] = [];
-  const launch = ((command: string, args: string[]) => {
+  let tunnelEnv: NodeJS.ProcessEnv | undefined;
+  const launch = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
     invocation = [command, ...args];
+    tunnelEnv = options.env;
     queueMicrotask(() => {
       child.stderr.write("private diagnostic\n");
       child.stderr.write("Started https://silent-tree.trycloudflare.com\n");
@@ -32,11 +34,16 @@ test("managed T3 connection returns only the public origin, never raw logs or pa
     });
     return child as unknown as ChildProcess;
   }) as unknown as typeof spawn;
-  const connection = new T3Connection(3773, { PATH: "/usr/bin" }, launch);
+  const connection = new T3Connection(3773, {
+    PATH: "/usr/bin", HOME: "/tmp", GH_TOKEN: "PRIVATE_WORK_TOKEN",
+    MINI_END_USER_KEY: "PRIVATE_PROVIDER_SECRET", GITHUB_TOKEN: "PRIVATE_JOB_TOKEN",
+  }, launch);
   assert.deepEqual(await connection.open(new AbortController().signal), {
     origin: "https://silent-tree.trycloudflare.com",
   });
   assert.deepEqual(invocation, ["cloudflared", "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:3773"]);
+  assert.deepEqual(tunnelEnv, { PATH: "/usr/bin", HOME: "/tmp" });
+  assert.ok(!JSON.stringify(tunnelEnv).includes("PRIVATE_"));
   await connection.close();
   assert.equal(child.exitCode, 0);
 });
