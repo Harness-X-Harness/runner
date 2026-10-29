@@ -16,6 +16,7 @@ const messageSchema = z.discriminatedUnion("type", [
     code: z.enum(["CI_EVENT_COVERAGE_REQUIRED", "CI_WAIT_TASK_NOT_ACTIVE", "CI_WAIT_CAPACITY", "CI_WAIT_ID_CONFLICT"]) }).strict(),
   z.object({ type: z.literal("ready-accepted") }).strict(),
   z.object({ type: z.literal("agent-state-accepted"), generation: z.number().int().positive() }).strict(),
+  z.object({ type: z.literal("service-state-accepted"), generation: z.number().int().positive() }).strict(),
   z.object({ type: z.literal("input-accepted"), generation: z.number().int().positive(),
     taskId: z.string(), inputId: z.string().uuid() }).strict(),
   z.object({ type: z.literal("output-accepted"), generation: z.number().int().positive(),
@@ -113,9 +114,9 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     const parsed = messageSchema.safeParse(value);
     if (!parsed.success) return reject();
     const message = parsed.data;
-    if (message.type === "ready-accepted") { ready = true; publishInputs(); publishOutput(); publishCi(); publishAgentState(); return; }
+    if (message.type === "ready-accepted") { ready = true; publishInputs(); publishOutput(); publishCi(); publishAgentState(); publishServices(); return; }
     if (!ready || message.generation !== generation) return reject();
-    if (message.type === "agent-state-accepted") return;
+    if (message.type === "agent-state-accepted" || message.type === "service-state-accepted") return;
     if (message.type === "result-accepted") return; // Retain replay protection for this runtime's lifetime.
     if (message.type === "input-accepted") return;
     if (message.type === "ci-accepted" || message.type === "ci-result" || message.type === "ci-rejected") {
@@ -172,6 +173,12 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     socket.send(JSON.stringify({ type: "agent-state", generation, state: environment.agentState.read() }));
   };
   const unsubscribeAgent = environment.agentState?.subscribe(publishAgentState);
+  const publishServices = () => {
+    if (!ready || socket.readyState !== WebSocket.OPEN || currentGeneration() !== generation || !environment.services) return;
+    if (socket.bufferedAmount > 1024 * 1024) { socket.terminate(); return; }
+    socket.send(JSON.stringify({ type: "service-state", generation, ...environment.services.read() }));
+  };
+  const unsubscribeServices = environment.services?.subscribe(publishServices);
   const unsubscribeInputs = environment.inputs.subscribe(publishInputs);
   const unsubscribeOutput = environment.output.subscribe(publishOutput);
   environment.signal.addEventListener("abort", stopped, { once: true });
@@ -185,6 +192,7 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     unsubscribeOutput();
     unsubscribeCi();
     unsubscribeAgent?.();
+    unsubscribeServices?.();
     environment.signal.removeEventListener("abort", stopped);
     // Pending execution belongs to EnvironmentOperations, not this dead socket.
   }

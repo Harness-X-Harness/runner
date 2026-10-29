@@ -5,6 +5,7 @@ export const environmentCreationInput = z.object({
   environmentId: z.string().regex(/^env_[a-f0-9]{32}$/),
   ownerId: z.string().regex(/^[1-9]\d{0,19}$/),
   executor: z.enum(["codex", "grok"]),
+  services: z.array(z.literal("t3")).max(1).optional(),
 }).strict();
 const recordSchema = environmentCreationInput.extend({
   createdAt: z.number().int().nonnegative(),
@@ -33,7 +34,10 @@ export class EnvironmentCreation {
       if (stored !== undefined) {
         const record = recordSchema.parse(stored);
         if (record.ownerId !== input.ownerId || record.environmentId !== input.environmentId ||
-            record.executor !== input.executor) throw new Error("ENVIRONMENT_CREATION_CONFLICT");
+            record.executor !== input.executor ||
+            (record.services ?? []).join(",") !== (input.services ?? []).join(",")) {
+          throw new Error("ENVIRONMENT_CREATION_CONFLICT");
+        }
         return record;
       }
       const createdAt = this.now();

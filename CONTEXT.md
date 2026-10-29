@@ -23,6 +23,8 @@ _Avoid_: User Account, GitHub Authorization
 **Environment**:
 A Principal-owned, bounded runtime with one workspace, selected executor and
 native Agent session. Its lifetime is separate from each operation's lifetime.
+It may explicitly include optional managed services such as unmodified T3 Code;
+these do not change the identity or execution authority of the native Agent.
 _Avoid_: Task, desktop session, permanent machine
 
 **Task**:

@@ -61,3 +61,21 @@ test("Environment bootstrap stores only executor/deadline privately and outputs 
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   assert.equal(await readFile(env.GITHUB_OUTPUT, "utf8"), "executor=grok\n");
 });
+
+test("claimed optional services are private bootstrap data and explicit workflow flags", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "harness-t3-bootstrap-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const environmentId = `env_${"c".repeat(32)}`;
+  const env = { ENVIRONMENT_ID: environmentId, RUNNER_TEMP: directory,
+    GITHUB_OUTPUT: join(directory, "outputs"), TASK_CONTROL_PLANE_URL: "https://control.example",
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/token",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "PRIVATE_OIDC", GITHUB_TOKEN: "PRIVATE_JOB_TOKEN" };
+  const fetchImpl: typeof fetch = async input => new URL(String(input)).hostname === "oidc.example"
+    ? Response.json({ value: "PRIVATE_IDENTITY" })
+    : Response.json({ decision: "bound", executor: "codex", deadline: Date.now() + 60_000, services: ["t3"] });
+  await claimEnvironment(env, fetchImpl);
+  const file = join(directory, `harness-${environmentId}`, "claim.json");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")).services, ["t3"]);
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  assert.equal(await readFile(env.GITHUB_OUTPUT, "utf8"), "executor=codex\nt3=true\n");
+});

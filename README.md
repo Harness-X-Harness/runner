@@ -43,6 +43,23 @@ submission; a new key is new work. There is no T3, Lark or widget dependency.
 Environment access requires `environments:use` consent. See the
 [MCP contract](docs/chatgpt-app.md).
 
+## Optional T3 Code service
+
+A new Environment can optionally host **unmodified T3 Code** with its native
+Web UI, provider runtime and orchestration MCP:
+
+```text
+open_environment({ executor: "codex", services: ["t3"], idempotencyKey: "<unique key>" })
+```
+
+The service is independent of the native Runner Agent and survives individual
+`command`/`agent` operations. It reports its observed status and a temporary
+HTTPS origin through the owner-private Environment snapshot. T3's own pairing,
+OAuth, permissions and approvals remain authoritative. No native pairing token
+is returned by Runner. A requested T3 service uses the full Environment hard
+lifetime, rather than the ordinary 15-minute idle deadline. See [T3 service
+operations](docs/t3.md). Unselected Environments retain their previous behavior.
+
 ## Runtime and credentials
 
 The stable Cloudflare Worker authenticates the Principal, stores Environment

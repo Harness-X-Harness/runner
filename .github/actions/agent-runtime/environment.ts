@@ -1,4 +1,5 @@
 import { withAcpAgent, type AgentProcess, type ClientHandlers } from "./acp-client.ts";
+import type { T3ServiceState } from "./t3-service.ts";
 import type { AgentModelReport, AgentModelState } from "./agent-model.ts";
 import { EnvironmentLifetime } from "./environment-lifetime.ts";
 import { EnvironmentRuntime, type AgentTurn } from "./environment-runtime.ts";
@@ -11,6 +12,8 @@ import { EnvironmentCiWaits } from "./environment-ci-waits.ts";
 import { startGithubWaitTool } from "./github-wait-tool.ts";
 import { waitForGithubRun } from "./github-run-wait.ts";
 
+export type EnvironmentServices = { read(): { t3: T3ServiceState }; subscribe(changed: () => void): () => void };
+
 export type EnvironmentPort = {
   execute(taskId: string, input: unknown): Promise<OperationResult>;
   cancel(taskId: string): Promise<void>;
@@ -18,6 +21,7 @@ export type EnvironmentPort = {
   ciWaits: EnvironmentCiWaits;
   output: EnvironmentOutput;
   agentState?: { read(): AgentModelState; subscribe(changed: () => void): () => void };
+  services?: EnvironmentServices;
   command(input: CommandInput): ReturnType<EnvironmentRuntime["command"]>;
   agent(input: string | AgentTurn): ReturnType<EnvironmentRuntime["agent"]>;
   /** Seals admission and awaits the active operation, not the outer process scope. */
@@ -34,7 +38,8 @@ export async function withEnvironment<T>(
   handlers: ClientHandlers,
   serve: (environment: EnvironmentPort) => Promise<T>,
   signal?: AbortSignal,
-  dependencies?: { readAgentReport?: (executor: "codex" | "grok", signal: AbortSignal) => Promise<AgentModelReport> },
+  dependencies?: { readAgentReport?: (executor: "codex" | "grok", signal: AbortSignal) => Promise<AgentModelReport>;
+    services?: EnvironmentServices },
 ): Promise<T> {
   const inputs = new EnvironmentInput();
   const ciWaits = new EnvironmentCiWaits();
@@ -95,6 +100,7 @@ export async function withEnvironment<T>(
           execute: (taskId, input) => operations!.execute(taskId, input),
           cancel: taskId => { inputs.cancel(taskId); ciWaits.cancel(taskId); return operations!.cancel(taskId); },
           inputs, ciWaits,
+          services: dependencies?.services,
           agentState: { read: () => runtime.agentState(executor), subscribe: changed => {
             agentObservers.add(changed); return () => { agentObservers.delete(changed); };
           } },

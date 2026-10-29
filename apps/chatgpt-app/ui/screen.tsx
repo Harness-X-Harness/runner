@@ -31,6 +31,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   const [prompt, setPrompt] = useState("");
   const [lease, setLease] = useState<PromptLease>();
   const [mode, setMode] = useState("agent");
+  const [enableT3, setEnableT3] = useState(false);
   const [commandDraft, setCommandDraft] = useState("");
   const [timeout, setTimeoutSeconds] = useState(30);
   const [commandLease, setCommandLease] = useState<PromptLease>();
@@ -97,9 +98,15 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       {view.environments.length === 0 ? <>
         <h1>选择助手</h1>
         <p>同时只能有一个工作区。</p>
+        <label className="service-option" htmlFor="enable-t3">
+          <input id="enable-t3" type="checkbox" checked={enableT3} disabled={!canCall}
+            onChange={event => setEnableT3(event.target.checked)} />
+          <span>同时启动 T3 Code 服务（可连接原生 Web 与 MCP，持续占用工作区至关闭）</span>
+        </label>
         <div className="choices">
           {(["codex", "grok"] as const).map(executor => <Button className="choice" key={executor} disabled={!canCall}
-            onClick={() => onCall("open_environment", { executor, idempotencyKey: creationKey })}>
+            onClick={() => onCall("open_environment", { executor, idempotencyKey: creationKey,
+              ...(enableT3 ? { services: ["t3"] } : {}) })}>
             <strong>{executorName(executor)}</strong><small>{executor === "codex" ? "打开 Codex" : "打开 Grok"}</small>
           </Button>)}
         </div>
@@ -119,9 +126,19 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       {view.existing && <Button variant="primary" disabled={!canCall}
         onClick={() => onCall("inspect_environment", { environmentId: view.existing!.environmentId })}>打开</Button>}
       {view.capacityKind === "global" && view.executor && view.idempotencyKey && <Button variant="primary" disabled={!canCall}
-        onClick={() => onCall("open_environment", { executor: view.executor, idempotencyKey: view.idempotencyKey })}>重试</Button>}
+        onClick={() => onCall("open_environment", { executor: view.executor, idempotencyKey: view.idempotencyKey,
+          ...(view.services ? { services: view.services } : {}) })}>重试</Button>}
     </section>}
     {snapshot && <section className="workspace" aria-label="工作内容">
+      {snapshot.services?.t3 && <div className="service-details" role="region" aria-label="T3 Code 服务">
+        <strong>T3 Code</strong>
+        <span role="status">{snapshot.services.t3.status === "ready" ? "已就绪" :
+          snapshot.services.t3.status === "failed" ? "服务异常" :
+          snapshot.services.t3.status === "stopped" ? "已停止" : "正在启动"}</span>
+        {snapshot.services.t3.status === "ready" && snapshot.services.t3.origin &&
+          (onOpenLink ? <Button variant="quiet" onClick={() => onOpenLink(snapshot.services!.t3.origin!)}>
+            打开 T3 Web</Button> : <a href={snapshot.services.t3.origin} target="_blank" rel="noopener noreferrer">打开 T3 Web</a>)}
+      </div>}
       {notice && !(presentation?.evidence.historical && notice === "较早的操作。") && <p className="notice" role="status">{notice}</p>}
       {!presentation && operationText && operationText !== "已完成" && (!active || snapshot.operationId !== active.operationId) && <p className={`operation-state ${failed ? "bad" : ""}`} role="status">{operationText}</p>}
       {!!snapshot.questions?.length && snapshot.questions.map(question => <QuestionForm key={`${question.operationId}:${question.id}`}

@@ -51,6 +51,7 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,
       expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
       executor: view.environment.executor,
+      services: (inspection || view.tool === "open_environment") ? view.environment.services : undefined,
       agent: inspection ? view.environment.agent : undefined,
       reconnectDiagnostic: inspection ? view.environment.reconnectDiagnostic : undefined,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,

@@ -55,6 +55,7 @@ export type EnvironmentSnapshot = {
   agent?: { state: AgentModelState; observedAt: number; current: boolean };
   reconnectDiagnostic?: ReconnectDiagnostic;
   activeTaskId: string | null;
+  services?: { t3: { status: "starting" | "ready" | "failed" | "stopped"; origin?: string; observedAt?: number } };
 };
 const operationId = z.string().regex(/^[\w-]{1,128}$/);
 const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text: z.string(), truncated: z.boolean() }).strict()
@@ -62,6 +63,11 @@ const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text
     (value.revision !== 0 || (value.text === "" && !value.truncated)));
 const runtimeMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent-state"), generation: z.number().int().positive(), state: agentModelState }).strict(),
+  z.object({ type: z.literal("service-state"), generation: z.number().int().positive(),
+    t3: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("ready"), origin: z.string().regex(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/) }).strict(),
+      z.object({ status: z.enum(["starting", "failed", "stopped"]) }).strict(),
+    ]) }).strict(),
   z.object({ type: z.literal("ci-register"), generation: z.number().int().positive(), taskId: operationId,
     waitId: z.string().uuid(), target: githubRunInput }).strict(),
   z.object({ type: z.literal("ci-observed"), generation: z.number().int().positive(), taskId: operationId,
@@ -147,6 +153,16 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         snapshot.status = "ready";
       } else if (ready !== undefined) {
         snapshot.status = "unavailable"; snapshot.reason = "runtime_disconnected";
+      }
+      if (creation.services?.includes("t3")) {
+        const service = await this.ctx.storage.get<{
+          t3: NonNullable<EnvironmentSnapshot["services"]>["t3"];
+          generation: number; observedAt: number;
+        }>("environment-t3-state");
+        snapshot.services = { t3: snapshot.status === "closed" ? { status: "stopped" }
+          : snapshot.status === "ready" && service?.generation === current?.generation
+            ? { ...service.t3, observedAt: service.observedAt }
+            : { status: "starting" } };
       }
       const agent = await this.ctx.storage.get<{ state: AgentModelState; observedAt: number; generation: number }>("environment-agent-state");
       if (agent) snapshot.agent = { state: agent.state, observedAt: agent.observedAt,
@@ -251,6 +267,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           }
         }
         await this.ctx.storage.delete("environment-agent-state");
+        await this.ctx.storage.delete("environment-t3-state");
         await this.ctx.storage.delete(["environment-event-latest", "environment-event-revision"]);
         await this.ctx.storage.deleteAlarm();
       });
@@ -353,7 +370,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             (await this.creation.readInternal()).admitUntil <= Date.now()) return false;
         const idle = await this.ctx.storage.get<number>("environment-idle-deadline");
         if (idle !== undefined && idle <= Date.now()) return false;
-        if (idle === undefined && await this.ctx.storage.get("environment-active-operation") === undefined) {
+        if (idle === undefined && !(await this.creation.readInternal()).services?.includes("t3") &&
+            await this.ctx.storage.get("environment-active-operation") === undefined) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
         const previouslyReady = await this.ctx.storage.get("environment-ready-generation");
@@ -366,6 +384,14 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           { kind: "environment", status: "ready" });
         await this.scheduleAlarm(await this.nextDeadline());
         return { type: "ready-accepted" };
+      }
+      if (incoming.type === "service-state") {
+        if (incoming.generation !== current.generation ||
+            await this.ctx.storage.get("environment-ready-generation") !== current.generation ||
+            !(await this.creation.readInternal()).services?.includes("t3")) return false;
+        await this.ctx.storage.put("environment-t3-state",
+          { t3: incoming.t3, observedAt: Date.now(), generation: current.generation });
+        return { type: "service-state-accepted", generation: current.generation };
       }
       if (incoming.type === "agent-state") {
         if (incoming.generation !== current.generation ||
@@ -436,7 +462,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             { kind: "operation", operationId: incoming.taskId, status: task.status });
         }
         await this.ctx.storage.delete("environment-active-operation");
-        await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
+        if (!(await this.creation.readInternal()).services?.includes("t3")) {
+          await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
+        }
         await this.scheduleAlarm(await this.nextDeadline());
       }
       return { type: "result-accepted", generation: current.generation, taskId: incoming.taskId };
@@ -858,7 +886,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
 
   // Internal policy comes from the workflow contract, never from MCP input.
   async claimRuntime(value: unknown, token: string): Promise<
-    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number }> {
+    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number;
+      services: readonly "t3"[] }> {
     const execution = executionSchema.parse(value);
     if (!token) throw new Error("RUNNER_IDENTITY_UNAVAILABLE");
     if (await this.bindExecution(execution) === "stop") return { decision: "stop" };
@@ -871,7 +900,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         await this.ctx.storage.put("environment-close-requested", true);
         return { decision: "stop" as const };
       }
-      return { decision: "bound" as const, executor: creation.executor, deadline };
+      return { decision: "bound" as const, executor: creation.executor, deadline,
+        services: creation.services ?? [] };
     });
     this.environmentChanged();
     return result;

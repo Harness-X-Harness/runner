@@ -4,9 +4,12 @@ import { z } from "zod";
 const environment = z.object({
   environmentId: z.string(), executor: z.string(), status: z.string(),
   expiresAt: z.number().nullable(), idleExpiresAt: z.number().nullable().optional(),
-  reason: z.string().optional(),
+  reason: z.string().optional(), services: servicesDisplay.optional(),
 });
 const modelSelection = z.object({ model: z.string(), reasoningEffort: z.string() });
+const t3Display = z.object({ status: z.enum(["starting", "ready", "failed", "stopped"]),
+  origin: z.string().url().optional(), observedAt: z.number().optional() });
+const servicesDisplay = z.object({ t3: t3Display });
 const agentDisplay = z.object({
   state: z.object({ selection: modelSelection.nullable(), uncertain: z.boolean() }),
   current: z.boolean(),
@@ -24,6 +27,7 @@ export const snapshotSchema = z.object({
   output: z.object({ text: z.string(), truncated: z.boolean(), revision: z.number() }).optional(),
   outcome: z.unknown().optional(),
   agent: z.unknown().optional(),
+  services: servicesDisplay.optional(),
   reconnectDiagnostic: z.unknown().optional(),
 });
 const capacitySchema = z.object({
@@ -41,7 +45,7 @@ export type View = { kind: "list"; environments: Environment[]; receivedAt: numb
   | { kind: "environment"; snapshot: Snapshot; receivedAt: number }
   | { kind: "capacity"; capacityKind: "owner" | "global"; retryable: boolean;
       existing?: { environmentId: string; status?: string };
-      executor?: "codex" | "grok"; idempotencyKey?: string; receivedAt: number };
+      executor?: "codex" | "grok"; services?: readonly "t3"[]; idempotencyKey?: string; receivedAt: number };
 
 export function readView(result: Result, now: number): View {
   const snapshot = snapshotSchema.safeParse(result.structuredContent);

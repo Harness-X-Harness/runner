@@ -30,3 +30,15 @@ test("concurrent conflicting creates cannot change owner or executor", async () 
   assert.equal((await creation.read("1")).executor, "codex");
   await assert.rejects(creation.create({ ...input, ownerId: "2" }), /CREATION_CONFLICT/);
 });
+
+test("optional native services are immutable across idempotent Environment replay", async () => {
+  const creation = new EnvironmentCreation(taskStorage(), 1000, () => 100);
+  const value = { ...input, services: ["t3"] as const };
+  const first = await creation.create({ ...input, services: ["t3"] });
+  assert.deepEqual(first.services, ["t3"]);
+  assert.deepEqual(await creation.create({ ...input, services: ["t3"] }), first);
+  await assert.rejects(creation.create(input), /ENVIRONMENT_CREATION_CONFLICT/);
+  await assert.rejects(creation.create({ ...input, services: [] }), /ENVIRONMENT_CREATION_CONFLICT/);
+  await assert.rejects(creation.create({ ...input, services: ["unknown"] }));
+  await assert.rejects(creation.create({ ...input, services: ["t3", "t3"] }));
+});

@@ -202,6 +202,10 @@ textarea { resize: vertical; min-height: 60px; }
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 legend { font-weight: 700; padding: 0; }
 input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.service-option { display: flex; align-items: center; gap: 10px; margin: 12px 0; line-height: 1.5; }
+.service-option input { flex-shrink: 0; }
+.service-details { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.service-details span { color: var(--muted); }
 .workspace-meta {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
   padding: 0 16px 12px; color: var(--muted); font-size: 11px;
