@@ -38,6 +38,7 @@ test("T3 lives across operations, reports public origin, and stops with its Envi
       return child as unknown as ChildProcess;
     }) as unknown as typeof spawn,
     fetchImpl: async () => new Response("OK", { status: 200 }),
+    remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://quiet-leaf.trycloudflare.com" }),
       close: async () => { tunnelStops++; },
@@ -72,6 +73,7 @@ test("T3 service rejects invalid workspace and never marks an exited server read
       return child as unknown as ChildProcess;
     }) as unknown as typeof spawn,
     fetchImpl: async () => { throw new Error("not ready"); },
+    remoteProbe: async () => true,
     connect: () => { throw new Error("must not open tunnel"); },
   });
   await assert.rejects(service.start(new AbortController().signal), /T3_STARTUP_UNAVAILABLE/);
@@ -96,6 +98,7 @@ printf '%s\\\\n' '{"pairUrl":"https://quiet-leaf.trycloudflare.com/pair#token=PR
     executable: fakeBinary, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as unknown as typeof spawn,
     fetchImpl: async () => new Response("OK"),
+    remoteProbe: async () => true,
     connect: () => ({ open: async () => ({ origin }), close: async () => {} }),
   });
   await service.start(new AbortController().signal);

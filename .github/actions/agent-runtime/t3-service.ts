@@ -21,6 +21,7 @@ export type T3ServiceOptions = {
   args?: string[];
   launch?: typeof spawn;
   fetchImpl?: typeof fetch;
+  remoteProbe?: (origin: string, signal: AbortSignal) => Promise<boolean>;
   connect?: (port: number, env: NodeJS.ProcessEnv) => T3ConnectionPort;
 };
 
@@ -78,6 +79,21 @@ export class T3Service {
     }
   }
 
+  private async remoteReady(origin: string, signal: AbortSignal): Promise<boolean> {
+    if (this.options.remoteProbe) return this.options.remoteProbe(origin, signal);
+    try {
+      const response = await (this.options.fetchImpl ?? fetch)(new URL("/.well-known/t3/environment", origin), {
+        redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(2500)]),
+      });
+      if (!response.ok) return false;
+      const descriptor: unknown = await response.json().catch(() => undefined);
+      return typeof descriptor === "object" && descriptor !== null &&
+        "environmentId" in descriptor && typeof descriptor.environmentId === "string" &&
+        "serverVersion" in descriptor && typeof descriptor.serverVersion === "string" &&
+        "capabilities" in descriptor && typeof descriptor.capabilities === "object";
+    } catch { return false; }
+  }
+
   async start(parentSignal: AbortSignal): Promise<void> {
     if (this.started) throw new Error("T3_ALREADY_STARTED");
     this.started = true;
@@ -131,7 +147,14 @@ export class T3Service {
         }
       });
       const { origin } = await this.connection.open(signal);
-      if (exited || signal.aborted) throw new Error("T3_STARTUP_UNAVAILABLE");
+      // A tunnel URL in cloudflared stderr does not prove public T3 reachability.
+      let publicReady = false;
+      const publicDeadline = Date.now() + 30_000;
+      while (!signal.aborted && !exited && Date.now() < publicDeadline) {
+        if (await this.remoteReady(origin, signal)) { publicReady = true; break; }
+        await delay(500, undefined, { signal }).catch(() => {});
+      }
+      if (!publicReady || exited || signal.aborted) throw new Error("T3_STARTUP_UNAVAILABLE");
       this.set({ status: "ready", origin });
     } catch {
       await this.close();

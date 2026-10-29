@@ -534,6 +534,10 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       return;
     }
     if (acknowledgement.type === "pairing-result-accepted") {
+      if (typeof acknowledgement.requestId !== "string") {
+        socket.close(1008, "Invalid pairing result");
+        return;
+      }
       const request = this.pairingRequests.get(acknowledgement.requestId);
       if (!request || request.generation !== acknowledgement.generation ||
           request.runtimeId !== attachment?.runtimeId) {

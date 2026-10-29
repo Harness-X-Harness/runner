@@ -37,6 +37,7 @@ test("unexpected native server exit reports failure and revokes tunnel access", 
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
     fetchImpl: async () => new Response("ok"),
+    remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
       close: async () => { tunnelClosed = true; },
@@ -61,6 +62,7 @@ test("disconnected tunnel invalidates T3 service even if the native process is h
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
     fetchImpl: async () => new Response("ok"),
+    remoteProbe: async () => true,
     connect: () => ({
       open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
       close: async () => { stopped = true; },
@@ -83,6 +85,7 @@ test("Environment abort tears down T3 and rejects further Pairing", async t => {
     workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
     launch: (() => child as unknown as ChildProcess) as typeof spawn,
     fetchImpl: async () => new Response("ok"),
+    remoteProbe: async () => true,
     connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
       close: async () => {} }),
   });
@@ -93,4 +96,25 @@ test("Environment abort tears down T3 and rejects further Pairing", async t => {
   await assert.rejects(service.issuePairing("https://single-leaf.trycloudflare.com",
     new AbortController().signal), /T3_PAIRING_UNAVAILABLE/);
   await service.close();
+});
+
+test("public URL is not announced as ready until the T3 descriptor can be reached", async t => {
+  const root = await mkdtemp(join(tmpdir(), "t3-lifetime-probe-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const child = nativeChild();
+  let probes = 0;
+  let stopped = false;
+  const controller = new AbortController();
+  const service = new T3Service({
+    workspace: join(root, "project"), env: { HOME: root }, port: await unusedPort(),
+    launch: (() => child as unknown as ChildProcess) as typeof spawn,
+    fetchImpl: async () => new Response("ok"),
+    remoteProbe: async () => { probes++; controller.abort(); return false; },
+    connect: () => ({ open: async () => ({ origin: "https://single-leaf.trycloudflare.com" }),
+      close: async () => { stopped = true; } }),
+  });
+  await assert.rejects(service.start(controller.signal), /T3_STARTUP_UNAVAILABLE/);
+  assert.equal(service.read().status, "failed");
+  assert.equal(probes, 1);
+  assert.equal(stopped, true);
 });
