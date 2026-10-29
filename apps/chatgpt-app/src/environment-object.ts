@@ -419,7 +419,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const incoming = parsed.data;
       if (incoming.type === "pairing-result") {
         if (incoming.generation !== current.generation) return false;
-        return { type: "pairing-result-accepted" as const, ...incoming };
+        return { type: "pairing-result-accepted" as const,
+          requestId: incoming.requestId, generation: incoming.generation,
+          ok: incoming.ok, pairUrl: incoming.pairUrl };
       }
       if (incoming.type === "ready") {
         if (await this.ctx.storage.get("environment-ready-generation") === undefined &&

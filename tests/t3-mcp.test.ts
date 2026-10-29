@@ -1,64 +1,132 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-// Resolve the same official MCP client used by the Runner native agent fixture.
 const require = createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url));
 const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client") as
   typeof import("../.github/actions/agent-runtime/node_modules/@modelcontextprotocol/client/dist/esm/index.js");
 const execute = promisify(execFile);
 const enabled = process.env.T3_MCP_LIVE === "1";
+const baseUrl = "http://127.0.0.1:3773";
+type Json = Record<string, unknown>;
 
-type Issued = { sessionId: string; token: string };
-async function session(scopes: string[]): Promise<Issued> {
-  const args = ["auth", "session", "issue",
-    ...scopes.flatMap(scope => ["--scope", scope]), "--ttl", "5m", "--json"];
-  const { stdout } = await execute("t3", args, { timeout: 20_000, maxBuffer: 8192 });
-  const data: unknown = JSON.parse(stdout);
-  if (typeof data !== "object" || !data || !("sessionId" in data) || !("token" in data) ||
-      typeof data.sessionId !== "string" || typeof data.token !== "string") {
-    throw new Error("T3_SESSION_FORMAT_UNEXPECTED");
+async function cliJson(args: string[]): Promise<Json | Json[]> {
+  // Never include raw credential-bearing stdout in test errors or logs.
+  try {
+    const { stdout } = await execute("t3", args, { timeout: 15_000, maxBuffer: 8192 });
+    const parsed: unknown = JSON.parse(stdout);
+    if (!parsed || typeof parsed !== "object") throw new Error();
+    return parsed as Json;
+  } catch { throw new Error("T3_NATIVE_AUTH_CLI_FAILED"); }
+}
+
+async function nativeRevoke(kind: "pairing" | "session", id: string): Promise<void> {
+  await execute("t3", ["auth", kind, "revoke", id], { timeout: 15_000 }).catch(() => {});
+}
+
+async function api(path: string, init: RequestInit): Promise<Json> {
+  const response = await fetch(baseUrl + path, { ...init, redirect: "manual",
+    signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error("T3_OAUTH_REQUEST_FAILED_" + response.status);
+  const result: unknown = await response.json().catch(() => null);
+  if (!result || typeof result !== "object") throw new Error("T3_OAUTH_RESULT_INVALID");
+  return result as Json;
+}
+
+/** The real OAuth/PKCE protocol, approved through T3's native one-time pairing code. */
+async function oauthMcpAccess(clientName: string) {
+  const pairing = await cliJson(["auth", "pairing", "create",
+    "--scope", "orchestration:read", "--ttl", "5m", "--json"]) as Json;
+  if (typeof pairing.credential !== "string" || typeof pairing.id !== "string") {
+    throw new Error("T3_PAIRING_CLI_FORMAT_INVALID");
   }
-  return { sessionId: data.sessionId, token: data.token };
+  const redirectUri = "http://127.0.0.1:38888/callback";
+  const registered = await api("/oauth/mcp/register", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: clientName, redirect_uris: [redirectUri],
+      token_endpoint_auth_method: "none" }),
+  });
+  if (typeof registered.client_id !== "string") throw new Error("T3_OAUTH_CLIENT_ID_MISSING");
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const authorization = {
+    response_type: "code", client_id: registered.client_id, redirect_uri: redirectUri,
+    code_challenge: challenge, code_challenge_method: "S256", state: randomUUID(),
+    resource: baseUrl + "/mcp",
+  };
+  const requested = new URLSearchParams(authorization);
+  const authStart = await fetch(baseUrl + "/oauth/mcp/authorize?" + requested, {
+    redirect: "manual", signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(authStart.status, 302, "T3 must provide its native OAuth approval entry");
+  assert.ok(new URL(authStart.headers.get("location")!, baseUrl).pathname === "/connect-agent");
+
+  const approval = await api("/oauth/mcp/decision", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ authorization, decision: {
+      _tag: "pairing-code", access: "read-only", code: pairing.credential,
+    } }),
+  });
+  if (typeof approval.redirectTo !== "string") throw new Error("T3_OAUTH_APPROVAL_FAILED");
+  const callback = new URL(approval.redirectTo);
+  assert.equal(callback.origin, "http://127.0.0.1:38888");
+  assert.equal(callback.searchParams.get("state"), authorization.state);
+  const code = callback.searchParams.get("code");
+  if (!code) throw new Error("T3_OAUTH_CODE_MISSING");
+
+  const token = await api("/oauth/mcp/token", {
+    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code", code, client_id: registered.client_id,
+      redirect_uri: redirectUri, code_verifier: verifier, resource: authorization.resource,
+    }),
+  });
+  if (typeof token.access_token !== "string" || token.token_type !== "Bearer") {
+    throw new Error("T3_OAUTH_TOKEN_INVALID");
+  }
+  return { accessToken: token.access_token, pairingId: pairing.id };
 }
 
-async function revoke(sessionId: string) {
-  await execute("t3", ["auth", "session", "revoke", sessionId], { timeout: 20_000 });
-}
-
-test("independent standard MCP client accesses real T3 with native read-only bearer and revocation", {
+test("independent MCP SDK authenticates via T3 OAuth PKCE, enforces read-only access and revocation", {
   skip: !enabled && "Requires T3_MCP_LIVE=1 and a real local T3 server",
   timeout: 90_000,
 }, async t => {
-  const endpoint = new URL(process.env.T3_MCP_URL ?? "http://127.0.0.1:3773/mcp");
-  assert.equal(endpoint.hostname, "127.0.0.1", "test bearer tokens must never target an arbitrary host");
-  assert.equal(endpoint.protocol, "http:");
-  const issued = await session(["orchestration:read"]);
-  t.after(() => revoke(issued.sessionId).catch(() => {}));
-  const client = new Client({ name: "runner-native-t3-check", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(endpoint, {
-    requestInit: { headers: { Authorization: "Bearer " + issued.token } },
+  const name = "runner-native-t3-" + randomUUID().slice(0, 8);
+  const credential = await oauthMcpAccess(name);
+  t.after(() => nativeRevoke("pairing", credential.pairingId));
+  const client = new Client({ name: "runner-t3-oauth-probe", version: "1.0.0" });
+  const transport = new StreamableHTTPClientTransport(new URL(baseUrl + "/mcp"), {
+    requestInit: { headers: { Authorization: "Bearer " + credential.accessToken } },
   });
   await client.connect(transport);
   t.after(() => client.close());
+
+  const sessions = await cliJson(["auth", "session", "list", "--json"]);
+  assert.ok(Array.isArray(sessions), "native T3 session catalog must be queryable");
+  const owned = sessions.find((item: Json) => item.subject === "mcp-client" &&
+    typeof item.client === "object" && item.client !== null &&
+    "label" in item.client && item.client.label === name);
+  if (!owned || typeof owned.sessionId !== "string") throw new Error("T3_MCP_SESSION_ID_NOT_FOUND");
+  t.after(() => nativeRevoke("session", owned.sessionId as string));
+
   const tools = await client.listTools();
-  assert.ok(tools.tools.some((item: { name: string }) => item.name === "t3_project_list"),
-    "T3 must advertise the real project tool");
+  assert.ok(tools.tools.some((tool: { name: string }) => tool.name === "t3_project_list"));
   const projects = await client.callTool({ name: "t3_project_list", arguments: { cursor: 0, limit: 10 } });
-  assert.equal(projects.isError, undefined, "a read-only session should read native T3 projects");
+  assert.notEqual(projects.isError, true, "read-only OAuth client should read real projects");
   assert.ok(projects.structuredContent && "projects" in projects.structuredContent);
-  // A read-only token must not create a thread. Error is returned either as an
-  // MCP error response or as an unsuccessful tool result.
-  let unauthorized = false;
+
+  let denied = false;
   try {
-    const mutation = await client.callTool({ name: "t3_thread_launch", arguments: {
-      scratch: true, title: "Unauthorized launch", message: "Do not execute",
+    const response = await client.callTool({ name: "t3_thread_launch", arguments: {
+      scratch: true, title: "Unauthorized", message: "Do not execute",
     } });
-    unauthorized = mutation.isError === true;
-  } catch { unauthorized = true; }
-  assert.equal(unauthorized, true, "read-only session must not launch an agent");
-  await revoke(issued.sessionId);
-  await assert.rejects(client.listTools(), "revoked bearer session must be rejected");
+    denied = response.isError === true;
+  } catch { denied = true; }
+  assert.equal(denied, true, "read-only OAuth client must not launch any agent");
+
+  await nativeRevoke("session", owned.sessionId);
+  await assert.rejects(client.listTools(), "revoked OAuth client must be rejected");
 });

@@ -144,7 +144,7 @@ export async function completeAuthorizationCallback(
   if (authorization.payload?.kind === "mcp") {
     response = await completeGitHubUserAuthorization(
       env,
-      authorization,
+      { ...authorization, payload: authorization.payload },
       fetchImpl,
       logger,
     );
