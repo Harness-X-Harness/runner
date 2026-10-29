@@ -1,15 +1,15 @@
 import { z } from "zod";
 
 // This is a display projection, never a lifecycle or authorization authority.
+const t3Display = z.object({ status: z.enum(["starting", "ready", "failed", "stopped"]),
+  origin: z.string().url().optional(), observedAt: z.number().optional() });
+const servicesDisplay = z.object({ t3: t3Display });
 const environment = z.object({
   environmentId: z.string(), executor: z.string(), status: z.string(),
   expiresAt: z.number().nullable(), idleExpiresAt: z.number().nullable().optional(),
   reason: z.string().optional(), services: servicesDisplay.optional(),
 });
 const modelSelection = z.object({ model: z.string(), reasoningEffort: z.string() });
-const t3Display = z.object({ status: z.enum(["starting", "ready", "failed", "stopped"]),
-  origin: z.string().url().optional(), observedAt: z.number().optional() });
-const servicesDisplay = z.object({ t3: t3Display });
 const agentDisplay = z.object({
   state: z.object({ selection: modelSelection.nullable(), uncertain: z.boolean() }),
   current: z.boolean(),

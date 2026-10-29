@@ -160,7 +160,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           generation: number; observedAt: number;
         }>("environment-t3-state");
         snapshot.services = { t3: snapshot.status === "closed" ? { status: "stopped" }
-          : snapshot.status === "ready" && service?.generation === current?.generation
+          : snapshot.status === "ready" && service && current && service.generation === current.generation
             ? { ...service.t3, observedAt: service.observedAt }
             : { status: "starting" } };
       }
