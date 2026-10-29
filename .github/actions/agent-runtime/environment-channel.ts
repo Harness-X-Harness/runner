@@ -89,6 +89,9 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
   currentGeneration: () => number): Promise<void> {
   const { socket, generation } = connection;
   const pending = new Set<Promise<void>>();
+  // Unlike operations, a private pairing request cannot survive its socket.
+  const pairingLifetime = new AbortController();
+  const pairingSignal = AbortSignal.any([environment.signal, pairingLifetime.signal]);
   let ready = false;
   const reject = () => socket.close(1008, "Runtime message rejected");
   const stopped = () => socket.close(1000);
@@ -144,19 +147,16 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     if (message.type === "pairing-request") {
       const issue = environment.services?.issuePairing;
       if (pending.size >= 32) return reject();
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      environment.signal.addEventListener("abort", abort, { once: true });
       const answer = (ok: boolean, pairUrl?: string) => {
-        if (socket.readyState !== WebSocket.OPEN || currentGeneration() !== generation || environment.signal.aborted) return;
+        if (socket.readyState !== WebSocket.OPEN || currentGeneration() !== generation || pairingSignal.aborted) return;
         socket.send(JSON.stringify({ type: "pairing-result", generation, requestId: message.requestId, ok,
           ...(ok && pairUrl ? { pairUrl } : {}) }));
       };
       const delivery = Promise.resolve().then(() => {
-        if (!issue || controller.signal.aborted) throw new Error("T3_PAIRING_UNAVAILABLE");
-        return issue(message.origin, controller.signal);
+        if (!issue || pairingSignal.aborted) throw new Error("T3_PAIRING_UNAVAILABLE");
+        return issue(message.origin, pairingSignal);
       }).then(pairUrl => answer(true, pairUrl)).catch(() => answer(false))
-        .finally(() => { pending.delete(delivery); environment.signal.removeEventListener("abort", abort); });
+        .finally(() => { pending.delete(delivery); });
       pending.add(delivery);
       return;
     }
@@ -208,6 +208,7 @@ export async function serveEnvironmentConnection(connection: RuntimeConnection, 
     else socket.send(JSON.stringify({ type: "ready" }));
     await connection.closed;
   } finally {
+    pairingLifetime.abort();
     socket.off("message", receive);
     unsubscribeInputs();
     unsubscribeOutput();

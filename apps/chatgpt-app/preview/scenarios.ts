@@ -5,6 +5,9 @@ export const scenes = [
   { id: "list", label: "已有工作区", hint: "点击工作区打开卡片。" },
   { id: "opening", label: "启动中", hint: "点击卡片的刷新，取得就绪快照。" },
   { id: "ready", label: "就绪 / 发送", hint: "输入任意指令；返回演示结果，不调用模型。" },
+  { id: "t3-ready", label: "T3 已就绪", hint: "连接按钮仅记录宿主导航，不进行真实登录或配对。" },
+  { id: "t3-failed", label: "T3 服务异常", hint: "工作区可用，但 T3 无连接入口。" },
+  { id: "t3-unavailable", label: "T3 状态不可确认", hint: "断开连接时不显示过期的 T3 入口。" },
   { id: "working", label: "执行中 / 停止", hint: "查看进度、停止操作，或刷新取得结果。" },
   { id: "question", label: "等待回答", hint: "选择颜色并提交，或拒绝问题，再刷新。" },
   { id: "unsupported-question", label: "在对话中回答", hint: "演示无法在卡片内表达的问题；消息只写入下方记录。" },
@@ -74,6 +77,12 @@ function ready(executor: Executor, now: number): Snapshot {
       model: executor === "codex" ? "gpt-6.1-sol" : "grok-4.7", reasoningEffort: executor === "codex" ? "high" : "xhigh",
     } } } };
 }
+function t3Service(status: NonNullable<Snapshot["services"]>["t3"]["status"]): NonNullable<Snapshot["services"]> {
+  return {t3:{status, ...(status === "ready" ? {
+    origin:"https://preview-t3.example",
+    accessUrl:`https://preview-runner.example/t3/connect/${environmentId}`,
+  } : {})}};
+}
 function working(snapshot: Snapshot): Snapshot {
   return { ...snapshot, disposition: "accepted", workFinished: false, operationId, operationStatus: "working", activeOperationId: operationId,
     activeOperationStatus: "working", questions: [], outcome: undefined,
@@ -96,6 +105,11 @@ export class PreviewSession {
     this.scene = scene;
     this.now = now;
     let s = ready(executor, now);
+    if (scene.startsWith("t3-")) {
+      const status = scene === "t3-ready" ? "ready" : scene === "t3-failed" ? "failed" : "unavailable";
+      s = {...s, services:t3Service(status), idleExpiresAt:null,
+        ...(status === "unavailable" ? {environmentStatus:"unavailable", environmentReason:"runtime_disconnected"} : {})};
+    }
     if (["working", "question", "unsupported-question", "historical"].includes(scene)) s = working(s);
     if (["completed", "long-result", "closed", "historical"].includes(scene)) {
       const text = scene === "long-result"
@@ -171,6 +185,10 @@ export class PreviewSession {
     if (name === "open_environment") {
       this.snapshot = { ...ready(args.executor === "grok" ? "grok" : "codex", this.now), environmentStatus: "opening" };
       this.next = { ...this.snapshot, environmentStatus: "ready" };
+      if (Array.isArray(args.services) && args.services.includes("t3")) {
+        this.snapshot = {...this.snapshot, services:t3Service("starting"), idleExpiresAt:null};
+        this.next = {...this.next, services:t3Service("ready"), idleExpiresAt:null};
+      }
       return result(this.snapshot);
     }
     if (!this.snapshot) return rejected("ENVIRONMENT_NOT_FOUND");
@@ -192,10 +210,12 @@ export class PreviewSession {
       this.snapshot = working(this.snapshot);
       this.next = completed(this.snapshot);
     } else if (name === "close_environment") {
-      this.snapshot = { ...this.snapshot, environmentStatus: "closing", questions: [] };
+      this.snapshot = { ...this.snapshot, environmentStatus: "closing", questions: [],
+        ...(this.snapshot.services ? {services:t3Service("unavailable")} : {}) };
       this.next = { ...this.snapshot, environmentStatus: "closed", activeOperationId: null,
         activeOperationStatus: undefined, operationId: `${environmentId.replace("env_", "task_")}_close`,
-        operationStatus: "completed", workFinished: true, outcome: undefined };
+        operationStatus: "completed", workFinished: true, outcome: undefined,
+        ...(this.snapshot.services ? {services:t3Service("stopped")} : {}) };
     } else if (name === "update_operation") {
       if (args.action === "cancel") {
         this.next = { ...completed(this.snapshot), operationStatus: "cancelled", outcome: undefined };

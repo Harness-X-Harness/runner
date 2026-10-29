@@ -20,6 +20,64 @@ import type { ReconnectDiagnostic } from "../shared/environment-reconnect.ts";
 const { WebSocketServer }: typeof import("../.github/actions/agent-runtime/node_modules/@types/ws/index.d.ts") =
   createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url))("ws");
 
+test("socket loss aborts private pairing while preserving the Environment", { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const started = Promise.withResolvers<AbortSignal>();
+  const cancelled = Promise.withResolvers<void>();
+  const environment: EnvironmentPort = {
+    signal: controller.signal, inputs: new EnvironmentInput(), output: new EnvironmentOutput(),
+    ciWaits: new EnvironmentCiWaits(),
+    close: async () => { controller.abort(); },
+    command: async () => { throw new Error("unexpected command"); },
+    agent: async () => { throw new Error("unexpected model"); },
+    execute: async () => { throw new Error("unexpected operation"); },
+    cancel: async () => {},
+    services: {
+      read: () => ({t3:{status:"ready", origin:"https://quiet-leaf.trycloudflare.com"}}),
+      subscribe: () => () => {},
+      issuePairing: async (_origin, signal) => {
+        started.resolve(signal);
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener("abort", () => { cancelled.resolve(); reject(new Error("T3_PAIRING_UNAVAILABLE")); },
+            {once:true});
+        });
+      },
+    },
+  };
+  const server = new WebSocketServer({host:"127.0.0.1", port:0});
+  t.after(async () => {
+    controller.abort();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const received: string[] = [];
+  server.on("connection", socket => {
+    socket.send(JSON.stringify({type:"connected", generation:1, deadline:Date.now()+5000}));
+    socket.on("message", data => {
+      const message = JSON.parse(data.toString());
+      received.push(message.type);
+      if (message.type === "ready") {
+        socket.send(JSON.stringify({type:"ready-accepted"}));
+        socket.send(JSON.stringify({type:"pairing-request", generation:1,
+          requestId:"00000000-0000-4000-8000-000000000002", origin:"https://quiet-leaf.trycloudflare.com"}));
+      }
+    });
+  });
+  const connection = await connectEnvironment(new URL(`ws://127.0.0.1:${address.port}/connect`),
+    "00000000-0000-4000-8000-000000000001", async () => "fixture", AbortSignal.timeout(2000));
+  const serving = serveEnvironmentConnection(connection, environment, () => 1);
+  const pairSignal = await started.promise;
+  connection.socket.terminate();
+  await serving;
+  assert.equal(pairSignal.aborted, true, "pairing authority ends with its private socket");
+  await cancelled.promise;
+  assert.equal(environment.signal.aborted, false, "ordinary Environment work survives transport loss");
+  assert.ok(!received.includes("pairing-result"));
+});
+
 test("identity acquisition failure carries a safe connection category without upstream details", async () => {
   await assert.rejects(connectEnvironment(new URL("ws://127.0.0.1:1/connect"),
     "00000000-0000-4000-8000-000000000001", async () => {

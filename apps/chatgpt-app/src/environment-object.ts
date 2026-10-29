@@ -323,12 +323,14 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     if (snapshot?.status !== "ready" || service?.status !== "ready" || !service.origin) {
       throw new Error("T3_PAIRING_UNAVAILABLE");
     }
-    if (this.pairingRequests.size !== 0) throw new Error("T3_PAIRING_BUSY");
     const current = await this.ctx.storage.get<RuntimeBinding>("environment-runtime");
     const ready = await this.ctx.storage.get<number>("environment-ready-generation");
     if (!current || ready !== current.generation) throw new Error("T3_PAIRING_UNAVAILABLE");
     const socket = this.runtimeSocket(current);
     if (!socket) throw new Error("T3_PAIRING_UNAVAILABLE");
+    // Check after storage I/O so concurrent browser callbacks cannot both pass
+    // admission before either registers its pending request.
+    if (this.pairingRequests.size !== 0) throw new Error("T3_PAIRING_BUSY");
     const origin = service.origin;
     const requestId = crypto.randomUUID();
     return new Promise<string>((resolve, reject) => {
@@ -420,9 +422,18 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const incoming = parsed.data;
       if (incoming.type === "pairing-result") {
         if (incoming.generation !== current.generation) return false;
+        const request = this.pairingRequests.get(incoming.requestId);
+        const service = await this.ctx.storage.get<{
+          t3: NonNullable<EnvironmentSnapshot["services"]>["t3"]; generation: number;
+        }>("environment-t3-state");
+        // Native pairing is asynchronous. Its original ready observation can
+        // become invalid while the CLI is minting the credential.
+        const available = request?.runtimeId === current.runtimeId &&
+          request.generation === current.generation && service?.generation === current.generation &&
+          service.t3.status === "ready" && service.t3.origin === request.origin;
         return { type: "pairing-result-accepted" as const,
           requestId: incoming.requestId, generation: incoming.generation,
-          ok: incoming.ok, pairUrl: incoming.pairUrl };
+          ok: incoming.ok && available, pairUrl: available ? incoming.pairUrl : undefined };
       }
       if (incoming.type === "ready") {
         if (await this.ctx.storage.get("environment-ready-generation") === undefined &&
@@ -913,6 +924,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       return "closing";
     });
     if (status === null) return null;
+    this.failT3Pairing(null);
     this.environmentChanged();
     if (status === "release") {
       return this.releaseCapacity(await this.creation.read(ownerId));

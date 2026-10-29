@@ -20,7 +20,7 @@ test("T3 DO preserves owner pairing privacy, idle exemption and hard-deadline cl
     '  await this.ctx.storage.put("environment-ready-generation", 1);',
     '  await this.ctx.storage.put("environment-t3-state", {t3:{status:"ready", origin}, generation:1, observedAt:now});',
     "}",
-    'async fixtureKeys() {return [...(await this.ctx.storage.list()).keys()];}',
+    'async fixtureStorage() {return [...(await this.ctx.storage.list()).entries()];}',
     'async fixtureExpire() {await this.ctx.storage.put("environment-runtime-deadline",1); await this.alarm();}',
     "async fetch(request) {",
     '  if(new URL(request.url).pathname !== "/test-socket") return super.fetch(request);',
@@ -34,7 +34,7 @@ test("T3 DO preserves owner pairing privacy, idle exemption and hard-deadline cl
     "  const object=env.ENVIRONMENTS.getByName(input.environmentId);",
     '  if(input.op==="socket")return object.fetch(new Request("https://internal/test-socket",{headers:{upgrade:"websocket"}}));',
     '  if(input.op==="seed"){await object.fixtureSeed(input.environmentId,input.owner,input.origin);return Response.json({ok:true});}',
-    '  if(input.op==="keys")return Response.json(await object.fixtureKeys());',
+    '  if(input.op==="storage")return Response.json(await object.fixtureStorage());',
     '  if(input.op==="expire"){await object.fixtureExpire();return Response.json({ok:true});}',
     '  if(input.op==="snapshot")return Response.json(await object.readEnvironment(input.owner));',
     '  if(input.op==="pair"){try{return Response.json({url:await object.issueT3Pairing(input.owner)});}catch{return new Response(null,{status:403});}}',
@@ -97,13 +97,38 @@ test("T3 DO preserves owner pairing privacy, idle exemption and hard-deadline cl
   assert.equal(answer.status, 200);
   assert.deepEqual(await answer.json(), {url:origin+"/pair#token=PRIVATE_PAIR_TOKEN"});
   assert.equal(count, 1);
-  const keys = await (await call("keys")).json() as string[];
-  assert.ok(!JSON.stringify(keys).includes("PRIVATE_PAIR_TOKEN"));
-  assert.ok(!keys.some(key => key.includes("pairing")));
+  const stored = await (await call("storage")).json() as [string, unknown][];
+  assert.ok(!JSON.stringify(stored).includes("PRIVATE_PAIR_TOKEN"), "neither keys nor values may retain pairing secrets");
+  assert.ok(!stored.some(([key]) => key.includes("pairing")));
+  const nextMessage = () => new Promise<Record<string, unknown>>(resolve => socket.addEventListener("message",
+    event => resolve(JSON.parse(String(event.data))), { once: true }));
+  const serviceState = async (t3: Record<string, unknown>) => {
+    const accepted = nextMessage();
+    socket.send(JSON.stringify({type:"service-state", generation:1, t3}));
+    assert.equal((await accepted).type, "service-state-accepted");
+  };
+  for (const t3 of [{status:"failed"}, {status:"ready", origin:"https://other-leaf.trycloudflare.com"}]) {
+    const requested = nextMessage();
+    const pending = call("pair", {owner:"123"});
+    const request = await requested;
+    assert.equal(request.type, "pairing-request");
+    assert.equal((await call("pair", {owner:"123"})).status, 403, "only one private request may be outstanding");
+    await serviceState(t3);
+    socket.send(JSON.stringify({type:"pairing-result", requestId:request.requestId,
+      generation:1, ok:true, pairUrl:origin+"/pair#token=PRIVATE_STALE_TOKEN"}));
+    const denied = await pending;
+    assert.equal(denied.status, 403, "a changed or failed service cannot release an outstanding credential");
+    assert.doesNotMatch(await denied.text(), /PRIVATE_STALE_TOKEN/);
+    await serviceState({status:"ready", origin});
+  }
+  const requestedAtDeadline = nextMessage();
+  const pendingAtDeadline = call("pair", {owner:"123"});
+  assert.equal((await requestedAtDeadline).type, "pairing-request");
   const close = new Promise<string>(resolve => socket.addEventListener("message",
     event => resolve(JSON.parse(String(event.data)).type), { once: true }));
   assert.equal((await call("expire")).status, 200);
   assert.equal(await close, "close");
+  assert.equal((await pendingAtDeadline).status, 403, "close intent must immediately refuse pending pairing");
   assert.equal((await (await call("snapshot", {owner:"123"})).json() as {status:string}).status, "closing",
     "elapsed deadline is close intent, not confirmed remote job stop");
   assert.equal((await call("pair", {owner:"123"})).status, 403);
