@@ -15,7 +15,9 @@ const environmentId = z.string().regex(/^env_[a-f0-9]{32}$/);
 export async function startT3Access(request: Request, env: T3AccessEnvironment): Promise<Response> {
   const url = new URL(request.url);
   const match = /^\/t3\/connect\/(env_[a-f0-9]{32})$/.exec(url.pathname);
-  if (request.method !== "GET" || !match || url.search || url.hash) {
+  // Source attribution is inert and must not enter authorization state or redirects.
+  const unsupportedQuery = [...url.searchParams.keys()].some(name => name !== "utm_source");
+  if (request.method !== "GET" || !match || unsupportedQuery || url.hash) {
     return new Response(null, { status: 404 });
   }
   const id = environmentId.parse(match[1]);

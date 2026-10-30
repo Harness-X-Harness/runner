@@ -45,9 +45,15 @@ function fixture(owner = "123") {
 
 test("T3 entry requires a precise Environment id and initiates bound PKCE GitHub login", async () => {
   const { states, env } = fixture();
-  for (const bad of ["/t3/connect/unknown", "/t3/connect/" + environmentId + "?next=https://attacker.example"]) {
+  for (const bad of [
+    "/t3/connect/unknown",
+    "/t3/connect/" + environmentId + "?next=https://attacker.example",
+    "/t3/connect/" + environmentId + "?utm_source=chatgpt.com&next=https://attacker.example",
+    "/t3/connect/" + environmentId + "?utm_source=chatgpt.com&redirect_uri=https://attacker.example",
+  ]) {
     assert.equal((await startT3Access(new Request("https://runner.example" + bad), env)).status, 404);
   }
+  assert.equal(states.size(), 0, "Unsupported query parameters must not create authorization state");
   const response = await startT3Access(new Request("https://runner.example/t3/connect/" + environmentId), env);
   assert.equal(response.status, 302);
   const redirect = new URL(response.headers.get("location")!);
@@ -65,9 +71,31 @@ test("T3 entry requires a precise Environment id and initiates bound PKCE GitHub
   assert.equal(JSON.stringify(state).includes("PRIVATE_PAIR_SECRET"), false);
 });
 
+test("T3 entry ignores source attribution without forwarding it into authorization", async () => {
+  const { states, env, calls } = fixture();
+  const response = await startT3Access(new Request(
+    "https://runner.example/t3/connect/" + environmentId + "?utm_source=chatgpt.com",
+  ), env);
+  assert.equal(response.status, 302);
+  const redirect = new URL(response.headers.get("location")!);
+  assert.equal(redirect.origin, "https://github.com");
+  assert.equal(redirect.pathname, "/login/oauth/authorize");
+  assert.equal(redirect.searchParams.get("redirect_uri"), "https://runner.example/github/callback");
+  assert.equal(redirect.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(redirect.searchParams.has("utm_source"), false);
+  assert.equal(states.size(), 1);
+  const state = states.values()[0];
+  assert.ok(state && "payload" in state);
+  assert.deepEqual(state.payload, { kind: "t3", environmentId });
+  assert.equal(JSON.stringify(state).includes("chatgpt.com"), false);
+  assert.deepEqual(calls, [], "Entry must not issue pairing credentials before owner authentication");
+});
+
 test("only the GitHub owner receives a short-lived native Pairing redirect, once", async () => {
   const { env, states, calls, fetchImpl } = fixture();
-  const opened = await startT3Access(new Request("https://runner.example/t3/connect/" + environmentId), env);
+  const opened = await startT3Access(new Request(
+    "https://runner.example/t3/connect/" + environmentId + "?utm_source=chatgpt.com",
+  ), env);
   const authUrl = new URL(opened.headers.get("location")!);
   const oauthCookie = opened.headers.get("set-cookie")!.split(";")[0]!;
   const callback = "https://runner.example/github/callback?state=" +
