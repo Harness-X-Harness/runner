@@ -68,6 +68,23 @@ export function jsonObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** Native tool failures must identify authorization; arbitrary errors are not denial proof. */
+export function t3PermissionDenied(result: unknown): boolean {
+  const response = jsonObject(result);
+  if (response.isError !== true) return false;
+  const hasCode = (value: unknown, depth = 0): boolean => {
+    if (depth > 6 || value === null || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some(item => hasCode(item, depth + 1));
+    const record = value as Record<string, unknown>;
+    if (record.code === "capability_denied") return true;
+    if (record.type === "text" && typeof record.text === "string") {
+      try { if (hasCode(JSON.parse(record.text), depth + 1)) return true; } catch { /* Not a native JSON error. */ }
+    }
+    return Object.values(record).some(item => hasCode(item, depth + 1));
+  };
+  return hasCode(response.structuredContent) || hasCode(response.content);
+}
+
 /** Check exact provider, run and authoritative terminal state without printing model text. */
 export function verifyModelRun(result: unknown, state: unknown, provider: string, model: string, marker: string): void {
   const run = jsonObject(result);

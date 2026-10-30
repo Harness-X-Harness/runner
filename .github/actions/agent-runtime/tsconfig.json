@@ -22,6 +22,7 @@
     "../../../tests/t3-service.test.ts", "../../../tests/t3-live.test.ts",
     "../../../tests/t3-mcp.test.ts",
     "../../../tests/t3-lifecycle.test.ts", "../../../tests/t3-acceptance.test.ts",
-    "../../../tests/run-t3-acceptance.ts"
+    "../../../tests/run-t3-acceptance.ts", "../../../tests/prepare-t3-staging.ts",
+    "../../../tests/t3-staging.test.ts", "../../../tests/run-t3-staging-checks.ts"
   ]
 }

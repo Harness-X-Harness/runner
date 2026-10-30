@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { privateT3Json, privateT3Command, liveOrigin, t3McpFetch } from "./helpers/t3-live.ts";
+import { privateT3Json, privateT3Command, liveOrigin, t3McpFetch, t3PermissionDenied } from "./helpers/t3-live.ts";
 import { readT3Descriptor } from "../.github/actions/agent-runtime/t3-readiness.ts";
 
 const require = createRequire(new URL("../.github/actions/agent-runtime/package.json", import.meta.url));
@@ -51,7 +51,8 @@ async function api(path: string, init: RequestInit): Promise<Json> {
 }
 
 /** The real OAuth/PKCE protocol, approved through T3's native one-time pairing code. */
-async function oauthMcpAccess(clientName: string, cleanup: (fn: () => Promise<void>) => void) {
+async function oauthMcpAccess(clientName: string, cleanup: (fn: () => Promise<void>) => void,
+  access: "read-only" | "approval-required" = "read-only") {
   try {
     const resource = await api("/.well-known/oauth-protected-resource/mcp", { method: "GET" });
     const metadata = await api("/.well-known/oauth-authorization-server", { method: "GET" });
@@ -62,7 +63,8 @@ async function oauthMcpAccess(clientName: string, cleanup: (fn: () => Promise<vo
       metadata.registration_endpoint === baseUrl + "/oauth/mcp/register" &&
       Array.isArray(metadata.code_challenge_methods_supported) && metadata.code_challenge_methods_supported.includes("S256"));
     const pairing = await cliJson(["auth", "pairing", "create",
-      "--scope", "orchestration:read", "--ttl", "5m", "--json"]) as Json;
+      "--scope", "orchestration:read", ...(access === "approval-required" ? ["--scope", "orchestration:operate"] : []),
+      "--ttl", "5m", "--json"]) as Json;
     if (typeof pairing.credential !== "string" || typeof pairing.id !== "string") {
       throw new Error("T3_PAIRING_CLI_FORMAT_INVALID");
     }
@@ -92,7 +94,7 @@ async function oauthMcpAccess(clientName: string, cleanup: (fn: () => Promise<vo
     const approval = await api("/oauth/mcp/decision", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ authorization, decision: {
-        _tag: "pairing-code", access: "read-only", code: pairing.credential,
+        _tag: "pairing-code", access, code: pairing.credential,
       } }),
     });
     if (typeof approval.redirectTo !== "string") throw new Error("T3_OAUTH_APPROVAL_FAILED");
@@ -117,7 +119,7 @@ async function oauthMcpAccess(clientName: string, cleanup: (fn: () => Promise<vo
   } catch { throw new Error("T3_OAUTH_AUTHORIZATION_FAILED"); }
 }
 
-test("independent MCP SDK authenticates via T3 OAuth PKCE, enforces read-only access and revocation", {
+test("independent MCP SDK authenticates via T3 OAuth PKCE, enforces access and revocation", {
   skip: !enabled && "Requires T3_MCP_LIVE=1 and a real local T3 server",
   timeout: 90_000,
 }, async t => {
@@ -169,15 +171,54 @@ test("independent MCP SDK authenticates via T3 OAuth PKCE, enforces read-only ac
     let denied = false;
     try {
       const response = await client.callTool({ name: "t3_thread_launch", arguments: {
-        scratch: true, title: "Unauthorized", message: "Do not execute",
+        scratch: true, title: "Unauthorized idle thread",
       } });
-      denied = response.isError === true;
+      denied = t3PermissionDenied(response);
     } catch (error) {
       // A disconnected network is not proof of authorization enforcement.
       denied = !!error && typeof error === "object" && "code" in error &&
-        (error.code === -32601 || error.code === -32602);
+        (error.code === -32601 || error.code === -32602) &&
+        !tools.tools.some(tool => tool.name === "t3_thread_launch") &&
+        error instanceof Error && /(?:not found|unknown tool)/i.test(error.message) &&
+        error.message.includes("t3_thread_launch");
     }
     assert.equal(denied, true, "read-only OAuth client must not launch any agent");
+
+    // Mutations are limited to a fresh disposable harness, with a separate
+    // operate-scoped OAuth grant. No message or attachments: never start inference.
+    if (process.env.T3_MCP_DISPOSABLE_MUTATIONS === "1") {
+      const writeCredential = await oauthMcpAccess(name, fn => t.after(fn), "approval-required");
+      const writer = new Client({name:"runner-t3-idle-thread-probe", version:"1.0.0"});
+      t.after(async () => { try { await writer.close(); } catch { throw new Error("T3_MCP_CLOSE_FAILED"); } });
+      await writer.connect(new StreamableHTTPClientTransport(new URL(baseUrl + "/mcp"), {
+        requestInit:{headers:{Authorization:"Bearer " + writeCredential.accessToken}}, fetch:t3McpFetch(baseUrl),
+      }));
+      const call = async (tool: string, args: Json): Promise<Json> => {
+        const result = await writer.callTool({name:tool, arguments:args});
+        if (result.isError || !result.structuredContent) throw new Error("T3_MCP_IDLE_THREAD_TOOL_FAILED");
+        return result.structuredContent;
+      };
+      const catalog = await call("t3_project_list", {cursor:0,limit:10});
+      if (!Array.isArray(catalog.projects) || catalog.projects.length !== 1 ||
+          typeof catalog.projects[0].id !== "string") throw new Error("T3_MCP_DISPOSABLE_PROJECT_INVALID");
+      const created = await call("t3_thread_launch", {projectId:catalog.projects[0].id,
+        title:"Disposable MCP acceptance", clientRequestId:randomUUID(),
+        modelSelection:{instanceId:process.env.T3_MCP_IDLE_PROVIDER,model:process.env.T3_MCP_IDLE_MODEL}});
+      assert.ok(typeof created.threadId === "string" && created.runId === null);
+      const threadId = created.threadId;
+      await call("t3_thread_update", {threadId, action:"rename", title:"Renamed MCP acceptance"});
+      const shown = await call("t3_thread_read", {threadId, limit:10, maxCharsPerItem:1000});
+      const thread = shown.thread as Json;
+      assert.ok(thread.threadId === threadId && thread.title === "Renamed MCP acceptance" &&
+        thread.runCount === 0 && thread.activeRunId === null && thread.latestRunId === null &&
+        thread.pendingRequestCount === 0, "idle mutation must not launch a provider run");
+      const waited = await call("t3_thread_wait", {threadId, timeoutMs:1000});
+      assert.ok(waited.threadId === threadId && waited.runId === null &&
+        waited.status === "idle" && waited.timedOut === false);
+      await call("t3_thread_organize", {threadId,action:"archive"});
+      const archived = await call("t3_thread_read", {threadId,limit:1,maxCharsPerItem:100});
+      assert.ok((archived.thread as Json).archived === true);
+    }
 
     await nativeRevoke("session", owned.sessionId);
     const revoked = await fetch(baseUrl + "/mcp", { method: "POST", redirect: "error",

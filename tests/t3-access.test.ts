@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { startT3Access } from "../apps/chatgpt-app/src/t3-access.ts";
 import { completeAuthorizationCallback } from "../apps/chatgpt-app/src/authorization.ts";
 import { fakeAuthorizationStates } from "./helpers/authorization-state.ts";
@@ -101,4 +102,59 @@ test("wrong owner, missing browser binding and token exchange failure never issu
     assert.ok(!(await response.text()).includes("PRIVATE_PAIR_SECRET"));
     assert.deepEqual(calls, mode === "wrong-owner" ? [environmentId + ":123"] : []);
   }
+});
+
+test("owner callback sends the stored PKCE verifier only to GitHub and concurrent replay cannot pair twice", async () => {
+  const { env, states, calls, fetchImpl } = fixture();
+  const opened = await startT3Access(new Request("https://runner.example/t3/connect/" + environmentId), env);
+  const authUrl = new URL(opened.headers.get("location")!);
+  const state = states.values()[0];
+  assert.ok(state && "codeVerifier" in state);
+  assert.equal(authUrl.searchParams.get("code_challenge"),
+    createHash("sha256").update(state.codeVerifier).digest("base64url"));
+  assert.equal(authUrl.toString().includes(state.codeVerifier), false);
+  const cookie = opened.headers.get("set-cookie")!.split(";")[0]!;
+  const callback = "https://runner.example/github/callback?state=" +
+    encodeURIComponent(authUrl.searchParams.get("state")!) + "&code=fixture";
+  let exchanges = 0;
+  const capture: typeof fetch = async (input, init) => {
+    if (String(input) === "https://github.com/login/oauth/access_token") {
+      exchanges++;
+      const body = new URLSearchParams(String(init?.body));
+      assert.equal(body.get("code_verifier"), state.codeVerifier);
+      assert.equal(body.get("redirect_uri"), "https://runner.example/github/callback");
+    }
+    return fetchImpl(input, init);
+  };
+  const responses = await Promise.all([1, 2].map(() => completeAuthorizationCallback(
+    new Request(callback, {headers:{cookie}}), env, capture)));
+  assert.deepEqual(responses.map(response => response.status).sort(), [302, 400]);
+  assert.equal(exchanges, 1);
+  assert.deepEqual(calls, [environmentId + ":123"]);
+  assert.equal(states.size(), 0);
+});
+
+test("a mismatched browser and denied GitHub login cannot consume the owner's valid pairing callback", async () => {
+  const { env, states, calls, fetchImpl } = fixture();
+  const opened = await startT3Access(new Request("https://runner.example/t3/connect/" + environmentId), env);
+  const authUrl = new URL(opened.headers.get("location")!);
+  const state = encodeURIComponent(authUrl.searchParams.get("state")!);
+  for (const request of [
+    new Request("https://runner.example/github/callback?state=" + state + "&code=fixture", {
+      headers:{cookie:"__Host-RUNNER_GITHUB_STATE=another-browser"},
+    }),
+    new Request("https://runner.example/github/callback?state=" + state + "&error=access_denied"),
+  ]) {
+    const denied = await completeAuthorizationCallback(request, env, async () => assert.fail("must not contact GitHub"));
+    assert.equal(denied.status, 400);
+    assert.equal(denied.headers.has("location"), false);
+    assert.equal(states.size(), 1);
+    assert.deepEqual(calls, []);
+  }
+  const response = await completeAuthorizationCallback(new Request(
+    "https://runner.example/github/callback?state=" + state + "&code=fixture", {
+      headers:{cookie:opened.headers.get("set-cookie")!.split(";")[0]!},
+    }), env, fetchImpl);
+  assert.equal(response.status, 302);
+  assert.deepEqual(calls, [environmentId + ":123"]);
 });

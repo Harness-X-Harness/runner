@@ -104,6 +104,8 @@ async function main(): Promise<void> {
     if (model) {
       await enableDisposableT3Provider(process.env.T3_LIVE_PROVIDER as "codex" | "grok",
         process.env.T3_LIVE_MODEL_ID!, { binary, env: cliEnv, signal });
+    } else {
+      await enableDisposableT3Provider("codex", "runner-idle-fixture", { binary, env: cliEnv, signal });
     }
     const added = await privateT3Command(["project", "add", project], { binary, env: cliEnv, signal });
     if (added.exitCode !== 0) throw new Error("T3_ACCEPTANCE_PROJECT_FAILED");
@@ -111,6 +113,9 @@ async function main(): Promise<void> {
     const testEnv: NodeJS.ProcessEnv = { ...cliEnv,
       T3_LIVE_BINARY: binary, T3_LIVE: "1", T3_LOCAL_ORIGIN: "http://127.0.0.1:3773",
       T3_LIVE_ORIGIN: ready.origin, T3_MCP_URL: ready.origin + "/mcp", T3_MCP_LIVE: "1",
+      T3_MCP_DISPOSABLE_MUTATIONS: "1",
+      T3_MCP_IDLE_PROVIDER: model ? process.env.T3_LIVE_PROVIDER : "codex",
+      T3_MCP_IDLE_MODEL: model ? process.env.T3_LIVE_MODEL_ID : "runner-idle-fixture",
       T3_LIVE_PROJECT: project,
       ...(model ? { T3_LIVE_MODEL: "1", T3_LIVE_TRUSTED: "1",
         T3_LIVE_PROVIDER: process.env.T3_LIVE_PROVIDER, T3_LIVE_MODEL_ID: process.env.T3_LIVE_MODEL_ID } : {}),
@@ -131,6 +136,8 @@ async function main(): Promise<void> {
       if (file === "t3-live.test.ts") livePassed = passed;
       console.log(file + ": " + (passed ? `${expectedPassed} passed, ${expectedSkipped} skipped`
         : "FAILED (private diagnostics suppressed)"));
+      if (file === "t3-mcp.test.ts") console.log("OAuth MCP idle thread create/rename/read/wait/archive: " +
+        (passed ? "passed (no provider run)" : "FAILED"));
       if (signal.aborted) break;
     }
     console.log("Provider inference: " + (model ? process.env.T3_LIVE_PROVIDER + ": " + (livePassed ? "passed" : "FAILED")

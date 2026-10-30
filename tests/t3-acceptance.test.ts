@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
-import { privateT3Json, liveOrigin, requireTrustedModelContext, verifyModelRun, t3McpFetch } from "./helpers/t3-live.ts";
+import { privateT3Json, liveOrigin, requireTrustedModelContext, verifyModelRun, t3McpFetch, t3PermissionDenied } from "./helpers/t3-live.ts";
 import { readT3Descriptor } from "../.github/actions/agent-runtime/t3-readiness.ts";
 import { stopManagedProcess } from "../.github/actions/agent-runtime/t3-connection.ts";
 import { T3Service } from "../.github/actions/agent-runtime/t3-service.ts";
@@ -15,6 +15,18 @@ import { createServer } from "node:net";
 import { createServer as httpServer } from "node:http";
 
 const fixture = { environmentId: "local", serverVersion: "0.1.5", capabilities: { repositoryIdentity: true } };
+
+test("MCP denial evidence requires a native capability denial, not a tool, provider or transport failure", () => {
+  assert.equal(t3PermissionDenied({isError:true,structuredContent:{code:"capability_denied"}}), true);
+  assert.equal(t3PermissionDenied({isError:true,content:[{type:"text",text:JSON.stringify({code:"capability_denied"})}]}), true);
+  for (const result of [
+    {isError:true,structuredContent:{code:"invalid_request"}},
+    {isError:true,structuredContent:{code:"provider_unavailable"}},
+    {isError:true,content:[{type:"text",text:"connection failed"}]},
+    {isError:false,structuredContent:{code:"capability_denied"}},
+    {isError:true,content:[{type:"text",text:"capability_denied"}]},
+  ]) assert.equal(t3PermissionDenied(result), false);
+});
 
 test("live MCP fetch never forwards credentials or request bodies to a redirect target", async t => {
   let targetHits = 0;
