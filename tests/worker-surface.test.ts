@@ -15,7 +15,10 @@ async function createWorker(t: TestContext, fetchMock?: ReturnType<typeof create
   const mf = new Miniflare({ modules: true, script: built.outputFiles[0].text,
     compatibilityDate: "2026-07-23", compatibilityFlags: ["nodejs_compat", "global_fetch_strictly_public"], cf: false,
     fetchMock,
-    kvNamespaces: ["OAUTH_KV"], bindings: { TASK_CONTROL_PLANE_URL: "https://runner.example", ENVIRONMENT_STARTUP_MS: 600000 },
+    kvNamespaces: ["OAUTH_KV"], bindings: {
+      TASK_CONTROL_PLANE_URL: "https://runner.example", ENVIRONMENT_STARTUP_MS: 600000,
+      GITHUB_APP_CLIENT_ID: "Iv1.fixture",
+    },
     durableObjects: {
       AUTHORIZATION_STATES: { className: "AuthorizationStateObject", useSQLite: true },
       ENVIRONMENTS: { className: "BoundedEnvironmentObject", useSQLite: true },
@@ -46,6 +49,26 @@ test("deployed Worker entry shape serves Task OAuth metadata and rejects retired
       assert.equal((await mf.dispatchFetch(`https://runner.example${path}`, { method })).status, 404);
     }
   }
+});
+
+test("Worker T3 connection accepts source attribution and rejects redirect overrides", async (t) => {
+  const mf = await createWorker(t);
+  const path = "https://runner.example/t3/connect/env_" + "a".repeat(32);
+  const response = await mf.dispatchFetch(path + "?utm_source=chatgpt.com", { redirect: "manual" });
+  assert.equal(response.status, 302);
+  const location = new URL(response.headers.get("location")!);
+  assert.equal(location.origin, "https://github.com");
+  assert.equal(location.searchParams.get("redirect_uri"), "https://runner.example/github/callback");
+  assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(location.searchParams.has("utm_source"), false);
+  assert.match(response.headers.get("set-cookie") ?? "", /HttpOnly; Secure/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const denied = await mf.dispatchFetch(path + "?utm_source=chatgpt.com&next=https://attacker.example", {
+    redirect: "manual",
+  });
+  assert.equal(denied.status, 404);
+  assert.equal(denied.headers.has("location"), false);
+  assert.equal(denied.headers.has("set-cookie"), false);
 });
 
 const clientId = "https://client.example/oauth/client.json";
