@@ -68,6 +68,22 @@ jobs:
         if: steps.claim.outputs.executor == 'grok'
         run: curl -fsSL https://x.ai/cli/install.sh | bash
 
+      - name: Install optional T3 service
+        if: steps.claim.outputs.t3 == 'true'
+        shell: bash
+        env:
+          T3CODE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
+        run: |
+          set -euo pipefail
+          curl -fsSL https://t3.codes/install.sh | sh
+          test -x "$HOME/.local/bin/t3"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/t3" --version
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared noble main' | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends cloudflared
+
       - name: Serve Environment
         if: steps.claim.outputs.executor != ''
         env:

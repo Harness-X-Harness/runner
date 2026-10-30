@@ -89,3 +89,19 @@ test("owner capacity returns only owner-authorized identity and status without d
   readMode = "fault";
   await assert.rejects(openEnvironment(env, props, { executor: "codex" }), /PRIVATE_STORAGE_FAILURE/);
 });
+
+test("optional T3 selection is validated before any Environment dispatch", async () => {
+  let input: unknown;
+  const env = { ENVIRONMENTS: { getByName() { return {
+    async initialize(value: unknown) { input = value; return { admitted: true as const, environmentId: "env", executor: "codex", ownerId: "123", createdAt: 1, admitUntil: 100 }; },
+    async dispatchExecution() { return "accepted" as const; },
+    async readEnvironment() { return null; },
+    async requestClose() { return "closing" as const; },
+    async closeExecution() { return "closing" as const; },
+  }; } } };
+  await assert.rejects(openEnvironment(env, props, { executor: "codex", services: ["t3", "t3"] }));
+  await assert.rejects(openEnvironment(env, props, { executor: "codex", services: ["unknown"] }));
+  assert.equal(input, undefined);
+  await openEnvironment(env, props, { executor: "codex", services: ["t3"] });
+  assert.deepEqual((input as { services: string[] }).services, ["t3"]);
+});

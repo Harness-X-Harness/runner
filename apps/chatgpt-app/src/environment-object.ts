@@ -55,6 +55,8 @@ export type EnvironmentSnapshot = {
   agent?: { state: AgentModelState; observedAt: number; current: boolean };
   reconnectDiagnostic?: ReconnectDiagnostic;
   activeTaskId: string | null;
+  services?: { t3: { status: "starting" | "ready" | "failed" | "stopped" | "unavailable";
+  origin?: string; observedAt?: number } };
 };
 const operationId = z.string().regex(/^[\w-]{1,128}$/);
 const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text: z.string(), truncated: z.boolean() }).strict()
@@ -62,6 +64,13 @@ const outputSnapshot = z.object({ revision: z.number().int().nonnegative(), text
     (value.revision !== 0 || (value.text === "" && !value.truncated)));
 const runtimeMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent-state"), generation: z.number().int().positive(), state: agentModelState }).strict(),
+  z.object({ type: z.literal("pairing-result"), generation: z.number().int().positive(),
+    requestId: z.string().uuid(), ok: z.boolean(), pairUrl: z.string().max(2048).optional() }).strict(),
+  z.object({ type: z.literal("service-state"), generation: z.number().int().positive(),
+    t3: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("ready"), origin: z.string().regex(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/) }).strict(),
+      z.object({ status: z.enum(["starting", "failed", "stopped"]) }).strict(),
+    ]) }).strict(),
   z.object({ type: z.literal("ci-register"), generation: z.number().int().positive(), taskId: operationId,
     waitId: z.string().uuid(), target: githubRunInput }).strict(),
   z.object({ type: z.literal("ci-observed"), generation: z.number().int().positive(), taskId: operationId,
@@ -87,6 +96,11 @@ export class EnvironmentObject extends DurableObject<Bindings> {
   private readonly operationObservers = new Map<string, Set<() => void>>();
   private readonly outputObservers = new Map<string, Set<() => void>>();
   private readonly environmentObservers = new Set<() => void>();
+  /** Runtime-only owner pairing; no credentials persist in Durable Object storage. */
+  private readonly pairingRequests = new Map<string, {
+    runtimeId: string; generation: number; origin: string;
+    finish: (pairUrl?: string) => void;
+  }>();
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env);
     this.creation = new EnvironmentCreation(ctx.storage, env.ENVIRONMENT_STARTUP_MS);
@@ -147,6 +161,16 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         snapshot.status = "ready";
       } else if (ready !== undefined) {
         snapshot.status = "unavailable"; snapshot.reason = "runtime_disconnected";
+      }
+      if (creation.services?.includes("t3")) {
+        const service = await this.ctx.storage.get<{
+          t3: NonNullable<EnvironmentSnapshot["services"]>["t3"];
+          generation: number; observedAt: number;
+        }>("environment-t3-state");
+        snapshot.services = { t3: snapshot.status === "closed" ? { status: "stopped" }
+          : snapshot.status === "ready" && service && current && service.generation === current.generation
+            ? { ...service.t3, observedAt: service.observedAt }
+            : { status: snapshot.status === "opening" ? "starting" : "unavailable" } };
       }
       const agent = await this.ctx.storage.get<{ state: AgentModelState; observedAt: number; generation: number }>("environment-agent-state");
       if (agent) snapshot.agent = { state: agent.state, observedAt: agent.observedAt,
@@ -251,6 +275,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           }
         }
         await this.ctx.storage.delete("environment-agent-state");
+        await this.ctx.storage.delete("environment-t3-state");
         await this.ctx.storage.delete(["environment-event-latest", "environment-event-revision"]);
         await this.ctx.storage.deleteAlarm();
       });
@@ -290,13 +315,60 @@ export class EnvironmentObject extends DurableObject<Bindings> {
     }, signal));
   }
 
+
+  /** Only the owning GitHub identity may request a native, scoped T3 credential. */
+  async issueT3Pairing(ownerId: string): Promise<string> {
+    const snapshot = await this.readEnvironment(ownerId);
+    const service = snapshot?.services?.t3;
+    if (snapshot?.status !== "ready" || service?.status !== "ready" || !service.origin) {
+      throw new Error("T3_PAIRING_UNAVAILABLE");
+    }
+    const current = await this.ctx.storage.get<RuntimeBinding>("environment-runtime");
+    const ready = await this.ctx.storage.get<number>("environment-ready-generation");
+    if (!current || ready !== current.generation) throw new Error("T3_PAIRING_UNAVAILABLE");
+    const socket = this.runtimeSocket(current);
+    if (!socket) throw new Error("T3_PAIRING_UNAVAILABLE");
+    // Check after storage I/O so concurrent browser callbacks cannot both pass
+    // admission before either registers its pending request.
+    if (this.pairingRequests.size !== 0) throw new Error("T3_PAIRING_BUSY");
+    const origin = service.origin;
+    const requestId = crypto.randomUUID();
+    return new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const finish = (pairUrl?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.pairingRequests.delete(requestId);
+        if (pairUrl) resolve(pairUrl);
+        else reject(new Error("T3_PAIRING_UNAVAILABLE"));
+      };
+      const timeout = setTimeout(() => finish(), 15_000);
+      this.pairingRequests.set(requestId, { runtimeId: current.runtimeId, generation: current.generation,
+        origin, finish });
+      try { socket.send(JSON.stringify({ type: "pairing-request", generation: current.generation, requestId,
+        origin })); }
+      catch { finish(); }
+    });
+  }
+
+  private failT3Pairing(binding: RuntimeBinding | null): void {
+    for (const request of this.pairingRequests.values()) {
+      if (!binding || (request.runtimeId === binding.runtimeId && request.generation === binding.generation)) {
+        request.finish();
+      }
+    }
+  }
+
   async webSocketClose(socket: WebSocket): Promise<void> {
+    this.failT3Pairing(socket.deserializeAttachment() as RuntimeBinding | null);
     socket.close(1000);
     await this.recordRuntimeDiagnostic(socket, "transport_closed");
     this.environmentChanged();
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
+    this.failT3Pairing(socket.deserializeAttachment() as RuntimeBinding | null);
     socket.close(1011);
     await this.recordRuntimeDiagnostic(socket, "transport_failure");
     this.environmentChanged();
@@ -348,12 +420,28 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       const parsed = runtimeMessage.safeParse(payload);
       if (!parsed.success) return false;
       const incoming = parsed.data;
+      if (incoming.type === "pairing-result") {
+        if (incoming.generation !== current.generation) return false;
+        const request = this.pairingRequests.get(incoming.requestId);
+        const service = await this.ctx.storage.get<{
+          t3: NonNullable<EnvironmentSnapshot["services"]>["t3"]; generation: number;
+        }>("environment-t3-state");
+        // Native pairing is asynchronous. Its original ready observation can
+        // become invalid while the CLI is minting the credential.
+        const available = request?.runtimeId === current.runtimeId &&
+          request.generation === current.generation && service?.generation === current.generation &&
+          service.t3.status === "ready" && service.t3.origin === request.origin;
+        return { type: "pairing-result-accepted" as const,
+          requestId: incoming.requestId, generation: incoming.generation,
+          ok: incoming.ok && available, pairUrl: available ? incoming.pairUrl : undefined };
+      }
       if (incoming.type === "ready") {
         if (await this.ctx.storage.get("environment-ready-generation") === undefined &&
             (await this.creation.readInternal()).admitUntil <= Date.now()) return false;
         const idle = await this.ctx.storage.get<number>("environment-idle-deadline");
         if (idle !== undefined && idle <= Date.now()) return false;
-        if (idle === undefined && await this.ctx.storage.get("environment-active-operation") === undefined) {
+        if (idle === undefined && !(await this.creation.readInternal()).services?.includes("t3") &&
+            await this.ctx.storage.get("environment-active-operation") === undefined) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
         const previouslyReady = await this.ctx.storage.get("environment-ready-generation");
@@ -366,6 +454,14 @@ export class EnvironmentObject extends DurableObject<Bindings> {
           { kind: "environment", status: "ready" });
         await this.scheduleAlarm(await this.nextDeadline());
         return { type: "ready-accepted" };
+      }
+      if (incoming.type === "service-state") {
+        if (incoming.generation !== current.generation ||
+            await this.ctx.storage.get("environment-ready-generation") !== current.generation ||
+            !(await this.creation.readInternal()).services?.includes("t3")) return false;
+        await this.ctx.storage.put("environment-t3-state",
+          { t3: incoming.t3, observedAt: Date.now(), generation: current.generation });
+        return { type: "service-state-accepted", generation: current.generation };
       }
       if (incoming.type === "agent-state") {
         if (incoming.generation !== current.generation ||
@@ -436,7 +532,9 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             { kind: "operation", operationId: incoming.taskId, status: task.status });
         }
         await this.ctx.storage.delete("environment-active-operation");
-        await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
+        if (!(await this.creation.readInternal()).services?.includes("t3")) {
+          await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
+        }
         await this.scheduleAlarm(await this.nextDeadline());
       }
       return { type: "result-accepted", generation: current.generation, taskId: incoming.taskId };
@@ -447,13 +545,39 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       this.environmentChanged();
       return;
     }
+    if (acknowledgement.type === "pairing-result-accepted") {
+      if (typeof acknowledgement.requestId !== "string") {
+        socket.close(1008, "Invalid pairing result");
+        return;
+      }
+      const request = this.pairingRequests.get(acknowledgement.requestId);
+      if (!request || request.generation !== acknowledgement.generation ||
+          request.runtimeId !== attachment?.runtimeId) {
+        socket.close(1008, "Invalid pairing result");
+        return;
+      }
+      let pairUrl: string | undefined;
+      if (acknowledgement.ok && acknowledgement.pairUrl) {
+        try {
+          const candidate = new URL(acknowledgement.pairUrl);
+          if (candidate.origin === request.origin && candidate.pathname === "/pair" &&
+              candidate.search === "" && candidate.hash.startsWith("#token=") && candidate.hash.length > 13) {
+            pairUrl = candidate.toString();
+          }
+        } catch { /* Invalid native pairing result. */ }
+      }
+      request.finish(pairUrl);
+      return;
+    }
     if (acknowledgement.taskId !== undefined && acknowledgement.type !== "output-accepted") {
       for (const changed of this.operationObservers.get(acknowledgement.taskId) ?? []) changed();
     }
     if (acknowledgement.taskId !== undefined && ["output-accepted", "result-accepted"].includes(acknowledgement.type)) {
       for (const changed of this.outputObservers.get(acknowledgement.taskId) ?? []) changed();
     }
-    if (["ready-accepted", "result-accepted", "agent-state-accepted"].includes(acknowledgement.type)) this.environmentChanged();
+    if (["ready-accepted", "result-accepted", "agent-state-accepted", "service-state-accepted"].includes(acknowledgement.type)) {
+      this.environmentChanged();
+    }
     socket.send(JSON.stringify(acknowledgement));
     if (acknowledgement.type === "ready-accepted") await this.deliverRuntimeMessage();
   }
@@ -800,6 +924,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       return "closing";
     });
     if (status === null) return null;
+    this.failT3Pairing(null);
     this.environmentChanged();
     if (status === "release") {
       return this.releaseCapacity(await this.creation.read(ownerId));
@@ -858,7 +983,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
 
   // Internal policy comes from the workflow contract, never from MCP input.
   async claimRuntime(value: unknown, token: string): Promise<
-    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number }> {
+    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number;
+      services?: readonly "t3"[] }> {
     const execution = executionSchema.parse(value);
     if (!token) throw new Error("RUNNER_IDENTITY_UNAVAILABLE");
     if (await this.bindExecution(execution) === "stop") return { decision: "stop" };
@@ -871,7 +997,8 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         await this.ctx.storage.put("environment-close-requested", true);
         return { decision: "stop" as const };
       }
-      return { decision: "bound" as const, executor: creation.executor, deadline };
+      return { decision: "bound" as const, executor: creation.executor, deadline,
+        ...(creation.services?.length ? { services: creation.services } : {}) };
     });
     this.environmentChanged();
     return result;

@@ -1,0 +1,53 @@
+name: T3 service smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/agent-runtime/t3-*.ts'
+      - '.github/workflows/run-environment.yml'
+      - '.github/workflows/t3-smoke.yml'
+      - 'tests/t3-*.test.ts'
+      - 'tests/helpers/t3-live*.ts'
+      - 'tests/run-t3-acceptance.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t3-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install unmodified T3 Code
+        env:
+          T3CODE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://t3.codes/install.sh | sh
+          test -x "$HOME/.local/bin/t3"
+          "$HOME/.local/bin/t3" --version
+
+      - name: Install official MCP client for native interoperability checks
+        run: npm ci --prefix .github/actions/agent-runtime
+
+      - name: Prove native T3 and OAuth MCP with disposable state
+        env:
+          T3_ACCEPTANCE: '1'
+          T3_LIVE_MODEL: '0'
+          T3_ACCEPTANCE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          T3_LIVE_BINARY="$HOME/.local/bin/t3" node tests/run-t3-acceptance.ts

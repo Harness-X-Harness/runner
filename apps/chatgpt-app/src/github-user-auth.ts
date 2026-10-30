@@ -1,7 +1,7 @@
 import { githubHeaders } from "./github.ts";
 import { OAUTH_SCOPES } from "./oauth-scopes.ts";
 import { z } from "zod";
-import type { OAuthHelpers, TokenExchangeCallbackOptions, TokenExchangeCallbackResult } from "@cloudflare/workers-oauth-provider";
+import type { AuthRequest, OAuthHelpers, TokenExchangeCallbackOptions, TokenExchangeCallbackResult } from "@cloudflare/workers-oauth-provider";
 import type { consumeGitHubAuthorization } from "./github-oauth-state.ts";
 
 type AppCredentials = { GITHUB_APP_CLIENT_ID: string; GITHUB_APP_CLIENT_SECRET: string };
@@ -112,7 +112,9 @@ export async function scopeGitHubUserToken(
 
 export async function completeGitHubUserAuthorization(
   env: AuthorizationEnv,
-  githubAuthorization: Awaited<ReturnType<typeof consumeGitHubAuthorization>>,
+  githubAuthorization: Awaited<ReturnType<typeof consumeGitHubAuthorization>> & {
+    payload: { kind: "mcp"; authRequest: AuthRequest };
+  },
   fetchImpl = fetch,
   logger: Pick<Console, "error"> = console,
 ): Promise<Response> {

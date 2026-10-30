@@ -41,6 +41,38 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
   const idle = () => waitFor('d.querySelector("main")?.getAttribute("aria-busy") === "false"');
 
   try {
+    await t.test("optional T3 uses owner verification navigation and removes access on closure or failure", async () => {
+      await open("empty");
+      assert.equal(await evaluate(`${doc}.querySelector('#enable-t3').checked`), false);
+      await evaluate(`${doc}.querySelector('#enable-t3').click(); true`);
+      await click("Codex 打开 Codex");
+      await idle();
+      assert.deepEqual((await toolCalls())[0].args.services, ["t3"]);
+      assert.match(await text(), /正在启动/);
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.service-details button, .service-details a').length`), 0);
+      await click("刷新");
+      await idle();
+      await click("验证身份并连接 T3");
+      await click("已配对？打开 T3");
+      const links = await evaluate('Array.from(document.querySelectorAll("#log li")).filter(el => el.querySelector("strong").textContent.startsWith("链接 →")).map(el => JSON.parse(el.querySelector("pre").textContent).url)');
+      assert.deepEqual(links, [`https://preview-runner.example/t3/connect/env_${"a".repeat(32)}`, "https://preview-t3.example"]);
+      assert.equal((await toolCalls()).length, 2, "navigation must not mint credentials through MCP tools");
+      assert.doesNotMatch(JSON.stringify(links), /token=|\/pair/);
+      await click("关闭工作区");
+      await waitFor('d.querySelector("[role=alertdialog]")');
+      await click("关闭");
+      await idle();
+      assert.equal(await evaluate(`${doc}.querySelectorAll('.service-details button, .service-details a').length`), 0);
+      await click("刷新");
+      await idle();
+      assert.match(await text(), /已停止/);
+      for (const [scene, label] of [["t3-failed", "服务异常"], ["t3-unavailable", "状态不可确认"]]) {
+        await open(scene!);
+        assert.match(await text(), new RegExp(label!));
+        assert.equal(await evaluate(`${doc}.querySelectorAll('.service-details button, .service-details a').length`), 0);
+      }
+    });
+
     await t.test("open, send, inspect and close through the real bridge", async () => {
       await open("empty");
       await click("Codex 打开 Codex");

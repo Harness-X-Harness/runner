@@ -9,3 +9,4 @@ __pycache__/
 node_modules/
 apps/chatgpt-app/.wrangler/
 apps/chatgpt-app/dist/
+apps/chatgpt-app/wrangler.staging.generated.json

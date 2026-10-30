@@ -9,13 +9,15 @@ import {
   putAuthorizationState,
 } from "./authorization-state.ts";
 import { completeGitHubUserAuthorization } from "./github-user-auth.ts";
+import { completeT3Access, type T3AccessEnvironment } from "./t3-access.ts";
 import { consentScopes, describeScopes } from "./oauth-scopes.ts";
 import type { AuthorizationStateEnv } from "./authorization-state.ts";
 import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { ReactNode } from "react";
 import { authorizationDocument, consentView, paragraph } from "./authorization-view.ts";
 
-export type AuthorizationEnvironment = AuthorizationStateEnv & Parameters<typeof completeGitHubUserAuthorization>[0] & {
+export type AuthorizationEnvironment = AuthorizationStateEnv & T3AccessEnvironment &
+  Parameters<typeof completeGitHubUserAuthorization>[0] & {
   OAUTH_PROVIDER: Pick<OAuthHelpers, "parseAuthRequest" | "lookupClient" | "completeAuthorization">;
 };
 type ScopeDetails = ReturnType<typeof describeScopes>;
@@ -142,10 +144,12 @@ export async function completeAuthorizationCallback(
   if (authorization.payload?.kind === "mcp") {
     response = await completeGitHubUserAuthorization(
       env,
-      authorization,
+      { ...authorization, payload: authorization.payload },
       fetchImpl,
       logger,
     );
+  } else if (authorization.payload?.kind === "t3") {
+    response = await completeT3Access({ ...authorization, payload: authorization.payload }, env, fetchImpl);
   } else {
     response = html("授权错误", paragraph("未知的 GitHub 授权请求。"), 400);
   }

@@ -8,7 +8,8 @@ import type { EnvironmentPort } from "./environment.ts";
 const claimSchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("stop") }).strict(),
   z.object({ decision: z.literal("bound"), executor: z.enum(["codex", "grok"]),
-    deadline: z.number().int().positive() }).strict(),
+    deadline: z.number().int().positive(),
+    services: z.array(z.literal("t3")).max(1).optional() }).strict(),
 ]);
 
 function environmentUrl(origin: string, environmentId: string, phase: "claim" | "connect"): URL {

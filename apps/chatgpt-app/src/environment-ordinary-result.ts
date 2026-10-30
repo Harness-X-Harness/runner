@@ -15,6 +15,7 @@ export type OrdinaryView = {
   historical?: boolean;
   dispatch?: OrdinaryDispatch;
   output?: OutputSnapshot;
+  t3AccessUrl?: string;
 };
 type Assessment = {
   workFinished: boolean;
@@ -51,6 +52,10 @@ export function ordinaryToolResult(view: OrdinaryView): CallToolResultV2 {
       environmentId: view.environment.environmentId, environmentStatus: view.environment.status,
       expiresAt: view.environment.expiresAt, idleExpiresAt: view.environment.idleExpiresAt,
       executor: view.environment.executor,
+      services: (inspection || view.tool === "open_environment") && view.environment.services
+        ? { ...view.environment.services, ...(view.t3AccessUrl && view.environment.services.t3.status === "ready"
+          ? { t3: { ...view.environment.services.t3, accessUrl: view.t3AccessUrl } } : {}) }
+        : undefined,
       agent: inspection ? view.environment.agent : undefined,
       reconnectDiagnostic: inspection ? view.environment.reconnectDiagnostic : undefined,
       environmentReason: view.environment.reason, activeOperationId: view.environment.activeTaskId,

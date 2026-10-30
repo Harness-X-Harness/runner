@@ -26,6 +26,22 @@ runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用
 
 合入受保护分支并由可信 workflow 执行的 `.github/`、`apps/` 和 `shared/` 代码均在生产信任边界内。不得把可以运行任意恶意代码并持有可复用凭证的主机描述为隔离的多租户沙箱。
 
+## Optional T3 Service 的权限边界
+
+按需启用的原版 T3 Code 使用 Runner 自身的已配置 Provider CLI 和经筛选的环境变量。
+它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN` 或 Worker 控制面凭证。
+但 T3 Terminal、Agent 及 Runner 原生命令仍然共享临时主机用户，T3 可能
+访问获得明确授权的模型凭证和固定 Agent GitHub work token。这不是额外的进程隔离。
+只允许可信 Principal 启用，且需为 T3 的原生 Pairing 和 MCP 授予最小权限。
+
+T3 默认仅监听本地 loopback；临时 Cloudflare HTTPS origin 只是传输地址，不是授权凭证。
+Runner 可在经所有权核验的 Environment snapshot 中返回这个 origin，但不得把原生
+Pairing credential、模型 Key、原始 Tunnel 日志写入普通 MCP 输出、GitHub Actions
+日志、summary、artifact 或公共状态。原生 T3 Pairing 只能由拥有者在可信的私密
+途径完成。T3 的 URL 与授权都随临时 Environment 清理，不能承诺稳定域名或会话恢复。
+启用 T3 的 Environment 保留至明确关闭或 hard deadline，占用 Runner 容量；
+不使用普通的 15 分钟 idle 自动关闭策略。
+
 ## Environment 状态与输出
 
 Environment 及其操作按 Principal 检查所有权；ID 和 Resource URI 不是凭据。同一 Principal 的不同 grant 可以访问同一环境，但每次操作与订阅交付仍须有效授权。旧 scope 不升级为 `environments:use`。

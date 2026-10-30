@@ -6,8 +6,11 @@ import { claimRunnerEnvironment, serveRunnerEnvironment } from "./environment-id
 import { readExecutorReport } from "./agent-model.ts";
 import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
+import { T3Service } from "./t3-service.ts";
+import { t3ProviderEnvironment } from "./t3-provider.ts";
 
-const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok"]), deadline: z.number().int().positive() }).strict();
+const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok"]), deadline: z.number().int().positive(),
+  services: z.array(z.literal("t3")).max(1).optional() }).strict();
 const reconnectFact = z.object({
   event: z.literal("environment_reconnect_failure"),
   category: z.enum(["runner_identity", "handshake", "handshake_rejected", "control_plane_rejected",
@@ -34,15 +37,21 @@ export async function claimEnvironment(env: NodeJS.ProcessEnv = process.env, fet
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const file = path.join(directory, "claim.json");
-  await writeFile(file, JSON.stringify({ executor: claim.executor, deadline: claim.deadline }), { mode: 0o600 });
+  await writeFile(file, JSON.stringify({ executor: claim.executor, deadline: claim.deadline,
+    ...(claim.services?.length ? { services: claim.services } : {}) }), { mode: 0o600 });
   await chmod(file, 0o600);
-  await appendFile(env.GITHUB_OUTPUT, `executor=${claim.executor}\n`);
+  await appendFile(env.GITHUB_OUTPUT, `executor=${claim.executor}\n` +
+    (claim.services?.includes("t3") ? "t3=true\n" : ""));
 }
 
-async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
+async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
   const directory = location(env);
   const claim = bootstrapSchema.parse(JSON.parse(await readFile(path.join(directory, "claim.json"), "utf8")));
   if (claim.deadline <= Date.now()) return;
+  // Bound installation-independent startup as well as the serving phase. T3
+  // startup must not run past the already claimed Environment hard deadline.
+  const signal = AbortSignal.any([parentSignal,
+    AbortSignal.timeout(Math.max(1, Math.min(claim.deadline - Date.now(), 2_147_483_647)))]);
   signal.throwIfAborted();
   if (!env.GH_TOKEN) throw new Error("AGENT_GITHUB_AUTH_REQUIRED");
   await configureProvider(claim.executor, env);
@@ -50,7 +59,13 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
   await mkdir(workspace, { recursive: true, mode: 0o700 });
   const { withEnvironment } = await import("./environment.ts");
   const childEnv = agentEnvironment(env);
-  await withEnvironment(providerProcess(claim.executor, workspace, childEnv), claim.executor, claim.deadline,
+  const t3 = claim.services?.includes("t3") ? new T3Service({
+    workspace,
+    env: t3ProviderEnvironment(claim.executor, childEnv),
+  }) : undefined;
+  try {
+    if (t3) await t3.start(signal);
+    await withEnvironment(providerProcess(claim.executor, workspace, childEnv), claim.executor, claim.deadline,
     { PATH: childEnv.PATH, HOME: childEnv.HOME, TMPDIR: childEnv.TMPDIR, GH_TOKEN: childEnv.GH_TOKEN }, {
       sessionUpdate: () => {},
       requestPermission: request => {
@@ -61,7 +76,10 @@ async function serve(env: NodeJS.ProcessEnv, signal: AbortSignal) {
     }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline,
       env, fetch, fact => parentPort?.postMessage({ event: "environment_reconnect_failure", ...fact })), signal, {
       readAgentReport: (executor, reportSignal) => readExecutorReport(executor, env, fetch, reportSignal),
+      ...(t3 ? { services: { read: () => ({ t3: t3.read() }), subscribe: changed => t3.subscribe(changed),
+        issuePairing: (origin: string, pairSignal: AbortSignal) => t3.issuePairing(origin, pairSignal) } } : {}),
     });
+  } finally { await t3?.close(); }
 }
 
 async function main() {

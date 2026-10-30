@@ -17,6 +17,7 @@ import {
 import { AuthorizationStateObject } from "./authorization-state-object.ts";
 import { internalEnvironmentFetch } from "./environment-callback.ts";
 import { environmentWebhook } from "./environment-webhook.ts";
+import { startT3Access } from "./t3-access.ts";
 export { EnvironmentObject as BoundedEnvironmentObject, EnvironmentAdmissionObject } from "./environment-object.ts";
 import authorizationStyles from "@radix-ui/themes/styles.css";
 import pixelAuthStyles from "../ui/auth-pixel.css";
@@ -68,6 +69,7 @@ async function defaultFetch(request: Request, env: WorkerEnvironment): Promise<R
   }
 
   if (url.pathname.startsWith("/internal/environments/")) return internalEnvironmentFetch(request, env);
+  if (url.pathname.startsWith("/t3/connect/")) return startT3Access(request, env);
   if (url.pathname === "/github/events") return environmentWebhook(request, env);
 
   if (url.pathname === "/authorize" && request.method === "GET") {
