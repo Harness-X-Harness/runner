@@ -6,13 +6,13 @@ const props = { githubUserId: "123", oauthScopes: [ENVIRONMENT_SCOPE],
   githubAuthorizationKind: "github_app_scoped", environmentGithubAccessToken: "PRIVATE_TOKEN" };
 
 test("new Environment scope gates admission; deterministic identity is owner scoped", async () => {
-  const records = new Map<string, { environmentId: string; ownerId: string; executor: "codex" | "grok"; createdAt: number; admitUntil: number }>();
+  const records = new Map<string, { environmentId: string; ownerId: string; executor: "codex" | "grok" | "t3"; createdAt: number; admitUntil: number }>();
   const dispatched = new Set<string>();
   let lookups = 0;
   const env = { ENVIRONMENTS: { getByName(name: string) {
     lookups++;
     return {
-      async initialize(input: { environmentId: string; ownerId: string; executor: "codex" | "grok" }) {
+      async initialize(input: { environmentId: string; ownerId: string; executor: "codex" | "grok" | "t3" }) {
         const existing = records.get(name);
         if (existing && existing.executor !== input.executor) throw new Error("ENVIRONMENT_CREATION_CONFLICT");
         const record = existing ?? { ...input, createdAt: 1, admitUntil: 100 };
@@ -90,18 +90,21 @@ test("owner capacity returns only owner-authorized identity and status without d
   await assert.rejects(openEnvironment(env, props, { executor: "codex" }), /PRIVATE_STORAGE_FAILURE/);
 });
 
-test("optional T3 selection is validated before any Environment dispatch", async () => {
+test("standalone T3 is accepted and legacy optional-service flags are rejected before dispatch", async () => {
   let input: unknown;
   const env = { ENVIRONMENTS: { getByName() { return {
-    async initialize(value: unknown) { input = value; return { admitted: true as const, environmentId: "env", executor: "codex", ownerId: "123", createdAt: 1, admitUntil: 100 }; },
+    async initialize(value: unknown) { input = value; return { admitted: true as const, environmentId: "env", executor: "t3" as const, ownerId: "123", createdAt: 1, admitUntil: 100 }; },
     async dispatchExecution() { return "accepted" as const; },
     async readEnvironment() { return null; },
     async requestClose() { return "closing" as const; },
     async closeExecution() { return "closing" as const; },
   }; } } };
-  await assert.rejects(openEnvironment(env, props, { executor: "codex", services: ["t3", "t3"] }));
-  await assert.rejects(openEnvironment(env, props, { executor: "codex", services: ["unknown"] }));
+  await assert.rejects(openEnvironment(env, props, { executor: "codex", services: ["t3"] }));
+  await assert.rejects(openEnvironment(env, props, { executor: "t3", services: ["t3"] }));
+  await assert.rejects(openEnvironment(env, props, { executor: "unknown" }));
   assert.equal(input, undefined);
-  await openEnvironment(env, props, { executor: "codex", services: ["t3"] });
-  assert.deepEqual((input as { services: string[] }).services, ["t3"]);
+  const opened = await openEnvironment(env, props, { executor: "t3" });
+  assert.equal(opened.executor, "t3");
+  assert.equal((input as { executor: string }).executor, "t3");
+  assert.ok(!("services" in (input as object)));
 });
