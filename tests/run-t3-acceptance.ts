@@ -54,8 +54,10 @@ async function main(): Promise<void> {
   const binary = process.env.T3_LIVE_BINARY;
   if (!binary || !isAbsolute(binary)) throw new Error("T3_ACCEPTANCE_ABSOLUTE_BINARY_REQUIRED");
   const model = process.env.T3_LIVE_MODEL === "1";
-  const expectedVersion = process.env.T3_ACCEPTANCE_VERSION ?? "0.1.5";
-  if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(expectedVersion)) throw new Error("T3_ACCEPTANCE_VERSION_INVALID");
+  const pinnedVersion = process.env.T3_ACCEPTANCE_VERSION?.trim() ?? "";
+  if (pinnedVersion && !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(pinnedVersion)) {
+    throw new Error("T3_ACCEPTANCE_VERSION_INVALID");
+  }
   // Check before creating resources or passing a provider credential anywhere.
   if (model) requireTrustedModelContext({ ...process.env, T3_LIVE: "1", T3_LIVE_PROJECT: "/disposable" });
   const root = await mkdtemp(join(tmpdir(), "runner-t3-acceptance-"));
@@ -73,9 +75,11 @@ async function main(): Promise<void> {
     const cliEnv = { HOME: home, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR };
     await execute("git", ["init", "-q", project], { env: cliEnv, signal });
     const version = await privateT3Command(["--version"], { binary, env: cliEnv, signal });
-    if (version.exitCode !== 0 || version.stdout.trim() !== "t3 v" + expectedVersion) {
+    const reported = /^t3 v(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)$/.exec(version.stdout.trim());
+    if (version.exitCode !== 0 || !reported || (pinnedVersion ? reported[1] !== pinnedVersion : !/^\d+\.\d+\.\d+$/.test(reported[1]))) {
       throw new Error("T3_ACCEPTANCE_VERSION_MISMATCH");
     }
+    const expectedVersion = reported[1];
     let env: NodeJS.ProcessEnv = cliEnv;
     if (model) {
       const provider = process.env.T3_LIVE_PROVIDER as "codex" | "grok";

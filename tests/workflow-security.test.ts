@@ -94,7 +94,10 @@ test("T3 pull-request smoke stays credential-free and disables paid acceptance e
   assert.match(source, /persist-credentials: false/);
   assert.match(source, /T3_LIVE_MODEL: '0'/);
   assert.match(source, /node tests\/run-t3-acceptance\.ts/);
-  assert.match(source, /vars\.T3CODE_VERSION \|\| '0\.1\.5'/);
+  assert.match(source, /T3CODE_CHANNEL: stable/);
+  assert.match(source, /T3CODE_VERSION: \$\{\{ vars\.T3CODE_VERSION \}\}/);
+  assert.match(source, /T3_ACCEPTANCE_VERSION: \$\{\{ vars\.T3CODE_VERSION \}\}/);
+  assert.doesNotMatch(source, /0\.1\.5/);
 });
 
 test("T3 installs five independent agent CLIs without native ACP startup gates", async () => {
@@ -120,6 +123,10 @@ test("T3 installs five independent agent CLIs without native ACP startup gates",
   }
   assert.ok(steps.indexOf(t3) < steps.indexOf(install));
   assert.ok(steps.indexOf(install) < steps.findIndex(step => step.name === "Serve Environment"));
+  const environment = await workflow("run-environment");
+  assert.match(environment, /T3CODE_CHANNEL: stable/);
+  assert.match(environment, /T3CODE_VERSION: \$\{\{ vars\.T3CODE_VERSION \}\}/);
+  assert.doesNotMatch(environment, /0\.1\.5/);
   for (const provider of ["codex", "grok"]) {
     const name = provider === "codex" ? "Install Codex" : "Install Grok";
     assert.equal(steps.find(step => step.name === name)?.if,
