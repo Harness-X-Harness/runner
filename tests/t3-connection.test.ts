@@ -3,7 +3,7 @@ import test from "node:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, spawn } from "node:child_process";
-import { T3Connection, t3PublicOrigin } from "../.github/actions/agent-runtime/t3-connection.ts";
+import { T3Connection, T3_CONNECTION_TIMEOUT_MS, t3PublicOrigin } from "../.github/actions/agent-runtime/t3-connection.ts";
 
 function mockChild() {
   const child = Object.assign(new EventEmitter(), {
@@ -57,4 +57,8 @@ test("cancelled tunnel acquisition does not spawn or disclose credentials", asyn
   await assert.rejects(connection.open(ctl.signal));
   assert.equal(called, false);
   assert.equal(t3PublicOrigin("PRIVATE_PAIRING_SECRET"), null);
+});
+
+test("T3 Cloudflare tunnel shares the 120-second startup budget", () => {
+  assert.equal(T3_CONNECTION_TIMEOUT_MS, 120_000);
 });
