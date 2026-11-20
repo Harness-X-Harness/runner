@@ -80,7 +80,7 @@ export async function withEnvironment<T>(
   };
   try {
     lifetime.signal.throwIfAborted();
-    ciTool = await startGithubWaitTool(async (input, toolSignal) => {
+    if (providerExecutor) ciTool = await startGithubWaitTool(async (input, toolSignal) => {
       const active = operations?.current();
       if (!active || active.cancelling) throw new Error("CI_WAIT_WITHOUT_ACTIVE_TASK");
       return waitForGithubRun(input, commandEnv.GH_TOKEN ?? "", AbortSignal.any([lifetime.signal, toolSignal]),

@@ -122,7 +122,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         onClick={() => onCall("inspect_environment", { environmentId: view.existing!.environmentId })}>打开</Button>}
       {view.capacityKind === "global" && view.executor && view.idempotencyKey && <Button variant="primary" disabled={!canCall}
         onClick={() => onCall("open_environment", { executor: view.executor, idempotencyKey: view.idempotencyKey,
-          ...(view.services ? { services: view.services } : {}) })}>重试</Button>}
+          })}>重试</Button>}
     </section>}
     {snapshot && <section className="workspace" aria-label="工作内容">
       {snapshot.services?.t3 && <div className="service-details" role="region" aria-label="T3 Code 服务">
