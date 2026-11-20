@@ -43,22 +43,24 @@ submission; a new key is new work. There is no T3, Lark or widget dependency.
 Environment access requires `environments:use` consent. See the
 [MCP contract](docs/chatgpt-app.md).
 
-## Optional T3 Code service
+## Standalone T3 Code Environment
 
-A new Environment can optionally host **unmodified T3 Code** with its native
-Web UI, provider runtime and orchestration MCP:
+T3 Code is a **separate Environment type** alongside Codex and Grok, exposing
+the unmodified T3 Web UI, provider runtime and orchestration MCP:
 
 ```text
 open_environment({ executor: "t3", idempotencyKey: "<unique key>" })
 ```
 
-The service is independent of the native Runner Agent and survives individual
-`command`/`agent` operations. It reports its observed status and a temporary
-HTTPS origin through the owner-private Environment snapshot. T3's own pairing,
+T3 starts independently of the native Runner Codex/Grok ACP agents, and survives
+individual `command` operations. It reports its observed service status and a
+temporary HTTPS origin through the owner-private Environment snapshot. T3's own pairing,
 OAuth, permissions and approvals remain authoritative. No native pairing token
-is returned by Runner. A requested T3 service uses the full Environment hard
-lifetime, rather than the ordinary 15-minute idle deadline. See [T3 service
-operations](docs/t3.md). Unselected Environments retain their previous behavior.
+is returned by Runner. A T3 Environment uses the full Environment hard lifetime rather than
+the ordinary 15-minute idle deadline, and its startup probe is bounded to 120
+seconds. It preinstalls the current Codex, Grok Build, Claude Code, Antigravity
+(`agy`) and Pi agent CLIs; each still requires native authorization.
+See [T3 service operations](docs/t3.md). Unselected Environments retain their previous behavior.
 
 ## Runtime and credentials
 
