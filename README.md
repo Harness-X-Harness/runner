@@ -60,7 +60,9 @@ is returned by Runner. A T3 Environment uses the full Environment hard lifetime 
 the ordinary 15-minute idle deadline, and its startup probe is bounded to 120
 seconds. It preinstalls the current Codex, Grok Build, Claude Code, Antigravity
 (`agy`) and Pi agent CLIs; each still requires native authorization.
-See [T3 service operations](docs/t3.md). Unselected Environments retain their previous behavior.
+Initialization runs `t3 browser setup` (with the runner `PATH` preserved under
+`sudo`) before the server starts, so the headless browser sandbox is allowed
+on Ubuntu 24.04. See [T3 service operations](docs/t3.md). Unselected Environments retain their previous behavior.
 
 ## Runtime and credentials
 

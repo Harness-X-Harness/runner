@@ -133,3 +133,26 @@ test("T3 installs five independent agent CLIs without native ACP startup gates",
       `steps.claim.outputs.executor == '${provider}'`);
   }
 });
+
+test("T3 browser setup runs during environment initialization, before serve, without credentials", async () => {
+  type Step = { name?: string; if?: string; env?: Record<string, string>; run?: string };
+  const source = parse(await workflow("run-environment")) as {
+    jobs: { environment: { steps: Step[] } };
+  };
+  const steps = source.jobs.environment.steps;
+  const install = steps.find(step => step.name === "Install T3 service");
+  const browser = steps.find(step => step.name === "Prepare T3 browser");
+  const serve = steps.findIndex(step => step.name === "Serve Environment");
+  assert.ok(install);
+  assert.ok(browser);
+  assert.equal(browser!.if, "steps.claim.outputs.executor == 't3'");
+  assert.equal(browser!.env, undefined);
+  assert.match(browser!.run ?? "", /set -euo pipefail/);
+  assert.match(browser!.run ?? "", /sudo env "PATH=\$PATH" t3 browser setup/);
+  assert.match(browser!.run ?? "", /apparmor_restrict_unprivileged_userns/);
+  assert.match(browser!.run ?? "", /\/etc\/apparmor\.d\/t3-chrome-headless-shell/);
+  assert.ok(steps.indexOf(install!) < steps.indexOf(browser!));
+  assert.ok(steps.indexOf(browser!) < serve);
+  assert.doesNotMatch(browser!.run ?? "", /secrets\.|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN|T3CODE_SERVER_BROWSER_SANDBOX=0/);
+  assert.doesNotMatch(JSON.stringify(steps.slice(0, serve)), /secrets\./);
+});
