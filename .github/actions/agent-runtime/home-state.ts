@@ -55,9 +55,9 @@ async function run(command: string, args: string[], home: string, errorCode: str
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
-    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stdout!.on("data", chunk => { stdout += chunk; });
     // Git may include a private repository or the credential header in errors.
-    child.stderr.resume();
+    child.stderr!.resume();
     if (options.stdin !== undefined) child.stdin!.end(options.stdin);
     child.once("error", () => reject(new Error(errorCode)));
     child.once("close", code => {
