@@ -77,7 +77,7 @@ jobs:
           curl -fsSL https://x.ai/cli/install.sh | bash
           curl -fsSL https://claude.ai/install.sh | bash
           curl -fsSL https://antigravity.google/cli/install.sh | bash
-          npm install --global @mariozechner/pi-coding-agent@latest
+          npm install --global --prefix "$HOME/.local" --ignore-scripts @earendil-works/pi-coding-agent@latest
           export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
           codex --version
           grok --version

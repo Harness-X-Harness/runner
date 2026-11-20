@@ -112,7 +112,7 @@ test("T3 installs five independent agent CLIs without native ACP startup gates",
   }
   for (const cli of ["https://chatgpt.com/codex/install.sh", "https://x.ai/cli/install.sh",
     "https://claude.ai/install.sh", "https://antigravity.google/cli/install.sh",
-    "@mariozechner/pi-coding-agent@latest"]) {
+    "@earendil-works/pi-coding-agent@latest"]) {
     assert.ok(t3.run!.includes(cli), `missing ${cli}`);
   }
   for (const binary of ["codex", "grok", "claude", "agy", "pi"]) {
