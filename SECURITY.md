@@ -29,14 +29,22 @@ runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用
 ## Optional T3 Service 的权限边界
 
 按需启用的原版 T3 Code 使用 Runner 自身的已配置 Provider CLI 和经筛选的环境变量。
-它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN`、Worker 控制面凭证、
-`T3_RESTORE_RUNNER_HOME` 或 `T3_RUNNER_STORE_TOKEN`。
+它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN` 或 Worker 控制面凭证。
 
-workflow 输入 `restore_runner_home` 为真且 executor 为 `t3` 时，serve 与 publish
-步骤才接收两个 Repository Secret。`T3_RESTORE_RUNNER_HOME` 的值是 `owner/name`，
-指出要覆盖的私有 home 备份仓库。`T3_RUNNER_STORE_TOKEN` 是对该仓库的读写 token。
-源码不写死仓库名。flag 为假时这两个 secret 不进入步骤。该仓库包含会话和登录材料。
-日志不得打印 token 或仓库名。runner 虚拟机被直接销毁时，这次 push 不会发生。
+可选的 HOME 备份仅当 `github.actor_id == 490285`、claimed executor 为 `t3`，
+且 workflow input `restore_runner_home` 或仓库变量 `T3_RESTORE_RUNNER_HOME=true`
+启用时执行。存储仓库由 Repository Secret `T3_RUNNER_STORE_REPOSITORY` 提供
+(`owner/name`)，读写 token 是 `T3_RUNNER_STORE_TOKEN`。这两个 secret 只进入
+独立的 Restore / Publish workflow 步骤；长期 `Serve Environment` 步骤和
+T3 子进程均不接收它们。不会把 Git 仓库的 `.git` 目录迁入 HOME；备份时不运行
+HOME 提供的 Git hooks。使用源仓库的可信忽略规则，并为 SQLite WAL 数据建立在线
+快照，以免把未 checkpoint 的主数据库错认成 clean。
+
+这些步骤减少凭证暴露时间，**不是同 UID 进程的安全隔离**：runner 上保留的后台
+进程理论上仍能在短生命周期步骤运行时读取可访问的进程信息。此功能只允许可信
+单用户使用。备份仓库包含敏感会话材料，secret 应仅授权这一私有仓库的 contents
+读写。日志禁止输出 token 或仓库名。虚拟机被销毁、强制取消或执行预算耗尽时，
+`if: always()` 无法保证推送，最终备份仅为 best effort。
 
 但 T3 Terminal、Agent 及 Runner 原生命令仍然共享临时主机用户，T3 可能
 访问获得明确授权的模型凭证和固定 Agent GitHub work token。这不是额外的进程隔离。

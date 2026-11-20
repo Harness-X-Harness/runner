@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       restore_runner_home:
-        description: Before T3 starts, overlay HOME from the repository in secret T3_RESTORE_RUNNER_HOME and push it back on teardown
+        description: Overlay the owner's private T3 HOME for this dispatch (also enabled by repo variable T3_RESTORE_RUNNER_HOME)
         type: boolean
         default: false
 
@@ -118,15 +118,21 @@ jobs:
             test -s /etc/apparmor.d/t3-chrome-headless-shell
           fi
 
-      # Browser setup runs first so the overlay is the last write of tracked home files.
-      # The flag is the only switch. open_environment does not send it, so its default is off.
-      - name: Prepare runner home state
-        if: inputs.restore_runner_home && steps.claim.outputs.executor == 't3'
+      # Only the verified owner may enable this; routine open_environment dispatches only environment_id.
+      # Restore AFTER the browser setup and BEFORE T3 starts; secrets never enter Serve.
+      - name: Restore runner home state
+        if: (inputs.restore_runner_home || vars.T3_RESTORE_RUNNER_HOME == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
+        env:
+          T3_RUNNER_STORE_REPOSITORY: ${{ secrets.T3_RUNNER_STORE_REPOSITORY }}
+          T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install --yes --no-install-recommends sqlite3
+          if ! command -v sqlite3 >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install --yes --no-install-recommends sqlite3
+          fi
+          node .github/actions/agent-runtime/home-state-cli.ts restore
 
       - name: Serve Environment
         if: steps.claim.outputs.executor != ''
@@ -135,15 +141,11 @@ jobs:
           MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
           MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
           GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          T3_RESTORE_HOME: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && '1' || '' }}
-          T3_RESTORE_RUNNER_HOME: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && secrets.T3_RESTORE_RUNNER_HOME || '' }}
-          T3_RUNNER_STORE_TOKEN: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && secrets.T3_RUNNER_STORE_TOKEN || '' }}
         run: node .github/actions/agent-runtime/environment-entry.ts serve
 
       - name: Publish runner home state
-        if: always() && inputs.restore_runner_home && steps.claim.outputs.executor == 't3'
+        if: always() && (inputs.restore_runner_home || vars.T3_RESTORE_RUNNER_HOME == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
         env:
-          T3_RESTORE_HOME: "1"
-          T3_RESTORE_RUNNER_HOME: ${{ secrets.T3_RESTORE_RUNNER_HOME }}
+          T3_RUNNER_STORE_REPOSITORY: ${{ secrets.T3_RUNNER_STORE_REPOSITORY }}
           T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
-        run: node .github/actions/agent-runtime/home-state-cli.ts
+        run: node .github/actions/agent-runtime/home-state-cli.ts publish

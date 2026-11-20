@@ -154,5 +154,5 @@ test("T3 browser setup runs during environment initialization, before serve, wit
   assert.ok(steps.indexOf(install!) < steps.indexOf(browser!));
   assert.ok(steps.indexOf(browser!) < serve);
   assert.doesNotMatch(browser!.run ?? "", /secrets\.|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN|T3CODE_SERVER_BROWSER_SANDBOX=0/);
-  assert.doesNotMatch(JSON.stringify(steps.slice(0, serve)), /secrets\./);
+  assert.doesNotMatch(JSON.stringify(steps.slice(0, steps.indexOf(browser!))), /secrets\./);
 });
