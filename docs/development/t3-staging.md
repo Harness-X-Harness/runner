@@ -36,7 +36,7 @@ From the repository root, with Node 24:
 npm ci --prefix apps/chatgpt-app
 npm ci --prefix .github/actions/agent-runtime
 node tests/run-t3-staging-checks.ts
-# Optional: official T3 0.1.5 already installed at an absolute path
+# Optional: current official stable T3 already installed at an absolute path
 node tests/run-t3-staging-checks.ts --native /absolute/path/to/t3
 ```
 
