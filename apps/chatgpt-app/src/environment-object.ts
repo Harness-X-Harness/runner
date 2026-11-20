@@ -46,7 +46,7 @@ const RESULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const IDLE_MS = 15 * 60 * 1000;
 export type EnvironmentSnapshot = {
   environmentId: string;
-  executor: "codex" | "grok";
+  executor: "codex" | "grok" | "t3";
   status: "opening" | "ready" | "unavailable" | "closing" | "closed";
   reason?: "startup_expired" | "runtime_expired" | "idle_expired" | "runtime_disconnected";
   createdAt: number;
@@ -162,7 +162,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       } else if (ready !== undefined) {
         snapshot.status = "unavailable"; snapshot.reason = "runtime_disconnected";
       }
-      if (creation.services?.includes("t3")) {
+      if (creation.executor === "t3") {
         const service = await this.ctx.storage.get<{
           t3: NonNullable<EnvironmentSnapshot["services"]>["t3"];
           generation: number; observedAt: number;
@@ -440,7 +440,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             (await this.creation.readInternal()).admitUntil <= Date.now()) return false;
         const idle = await this.ctx.storage.get<number>("environment-idle-deadline");
         if (idle !== undefined && idle <= Date.now()) return false;
-        if (idle === undefined && !(await this.creation.readInternal()).services?.includes("t3") &&
+        if (idle === undefined && (await this.creation.readInternal()).executor !== "t3" &&
             await this.ctx.storage.get("environment-active-operation") === undefined) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
@@ -458,7 +458,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       if (incoming.type === "service-state") {
         if (incoming.generation !== current.generation ||
             await this.ctx.storage.get("environment-ready-generation") !== current.generation ||
-            !(await this.creation.readInternal()).services?.includes("t3")) return false;
+            (await this.creation.readInternal()).executor !== "t3") return false;
         await this.ctx.storage.put("environment-t3-state",
           { t3: incoming.t3, observedAt: Date.now(), generation: current.generation });
         return { type: "service-state-accepted", generation: current.generation };
@@ -532,7 +532,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             { kind: "operation", operationId: incoming.taskId, status: task.status });
         }
         await this.ctx.storage.delete("environment-active-operation");
-        if (!(await this.creation.readInternal()).services?.includes("t3")) {
+        if ((await this.creation.readInternal()).executor !== "t3") {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
         await this.scheduleAlarm(await this.nextDeadline());
@@ -983,8 +983,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
 
   // Internal policy comes from the workflow contract, never from MCP input.
   async claimRuntime(value: unknown, token: string): Promise<
-    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok"; deadline: number;
-      services?: readonly "t3"[] }> {
+    { decision: "stop" } | { decision: "bound"; executor: "codex" | "grok" | "t3"; deadline: number }> {
     const execution = executionSchema.parse(value);
     if (!token) throw new Error("RUNNER_IDENTITY_UNAVAILABLE");
     if (await this.bindExecution(execution) === "stop") return { decision: "stop" };
@@ -997,8 +996,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
         await this.ctx.storage.put("environment-close-requested", true);
         return { decision: "stop" as const };
       }
-      return { decision: "bound" as const, executor: creation.executor, deadline,
-        ...(creation.services?.length ? { services: creation.services } : {}) };
+      return { decision: "bound" as const, executor: creation.executor, deadline };
     });
     this.environmentChanged();
     return result;
