@@ -8,6 +8,7 @@ import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
 import { T3Service } from "./t3-service.ts";
 import { t3StandaloneEnvironment } from "./t3-provider.ts";
+import { homeStateRequested, publishHomeState, restoreHomeState } from "./home-state.ts";
 
 const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok", "t3"]),
   deadline: z.number().int().positive() }).strict();
@@ -57,6 +58,7 @@ async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
   await mkdir(workspace, { recursive: true, mode: 0o700 });
   const { withEnvironment } = await import("./environment.ts");
   const childEnv = agentEnvironment(env);
+  if (claim.executor === "t3" && homeStateRequested(env)) await restoreHomeState(env);
   const t3Env = claim.executor === "t3" ? t3StandaloneEnvironment(childEnv) : undefined;
   const t3 = t3Env ? new T3Service({ workspace, env: t3Env }) : undefined;
   // T3 is standalone: its readiness probe cannot delay or kill a Codex/Grok ACP session.
@@ -82,7 +84,12 @@ async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
         issuePairing: (origin: string, pairSignal: AbortSignal) => t3.issuePairing(origin, pairSignal) } } : {}),
     });
   } finally {
-    try { await t3?.close(); } finally { await t3Startup; }
+    try { await t3?.close(); }
+    finally {
+      await t3Startup;
+      // Publish after T3 has stopped writing. A killed runner never reaches this.
+      if (homeStateRequested(env)) await publishHomeState(env);
+    }
   }
 }
 
