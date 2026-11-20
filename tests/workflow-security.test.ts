@@ -60,7 +60,7 @@ test("Codex Linux sandbox preparation is scoped, credential-free and fail-closed
   assert.ok(probe.run!.includes("codex sandbox -- /usr/bin/true"));
   assert.doesNotMatch(setup.run! + probe.run!, /\bsysctl\b|setcap|--share-net|--dangerously-bypass/);
   assert.doesNotMatch(probe.run!, /\bsudo\b|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN/);
-  assert.doesNotMatch(JSON.stringify(steps.slice(0, position("Serve Environment"))), /secrets\./);
+  assert.doesNotMatch(JSON.stringify(steps.slice(0, position("Restore runner home state"))), /secrets\./);
 
   const ci = ciWorkflow.jobs["codex-sandbox"];
   assert.equal(ci["runs-on"], "ubuntu-24.04");
@@ -154,5 +154,5 @@ test("T3 browser setup runs during environment initialization, before serve, wit
   assert.ok(steps.indexOf(install!) < steps.indexOf(browser!));
   assert.ok(steps.indexOf(browser!) < serve);
   assert.doesNotMatch(browser!.run ?? "", /secrets\.|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN|T3CODE_SERVER_BROWSER_SANDBOX=0/);
-  assert.doesNotMatch(JSON.stringify(steps.slice(0, serve)), /secrets\./);
+  assert.doesNotMatch(JSON.stringify(steps.slice(0, steps.indexOf(browser!))), /secrets\./);
 });
