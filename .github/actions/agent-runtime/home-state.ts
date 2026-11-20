@@ -22,14 +22,20 @@ function storeUrl(env: NodeJS.ProcessEnv, options: HomeStateOptions): string {
   return `https://github.com/${repo}.git`;
 }
 
-function authArgs(env: NodeJS.ProcessEnv, options: HomeStateOptions): string[] {
-  if (options.repositoryUrl !== undefined) return [];
+function authEnvironment(env: NodeJS.ProcessEnv, options: HomeStateOptions): NodeJS.ProcessEnv {
+  if (options.repositoryUrl !== undefined) return {};
   if (!env.T3_RUNNER_STORE_TOKEN) throw new Error("T3_RUNNER_STORE_TOKEN_REQUIRED");
-  return ["-c", `http.extraheader=AUTHORIZATION: bearer ${env.T3_RUNNER_STORE_TOKEN}`];
+  // GitHub HTTPS Git uses PAT-as-password Basic auth. Keep it out of argv and .git/config.
+  const credential = Buffer.from(`x-access-token:${env.T3_RUNNER_STORE_TOKEN}`).toString("base64");
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${credential}`,
+  };
 }
 
 /** Do not inherit workflow credentials or user-controlled Git configuration. */
-function processEnvironment(home: string): NodeJS.ProcessEnv {
+function processEnvironment(home: string, gitAuth: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: home,
@@ -37,14 +43,15 @@ function processEnvironment(home: string): NodeJS.ProcessEnv {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     LC_ALL: "C",
+    ...gitAuth,
   };
 }
 
 async function run(command: string, args: string[], home: string, errorCode: string,
-  options: { stdin?: string; accepted?: number[] } = {}): Promise<string> {
+  options: { stdin?: string; accepted?: number[]; gitAuth?: NodeJS.ProcessEnv } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      env: processEnvironment(home),
+      env: processEnvironment(home, options.gitAuth),
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -63,8 +70,8 @@ async function run(command: string, args: string[], home: string, errorCode: str
 async function cloneStore(env: NodeJS.ProcessEnv, options: HomeStateOptions, home: string,
   staging: string): Promise<void> {
   const url = storeUrl(env, options);
-  await run("git", [...authArgs(env, options), "clone", "--depth", "1", "--branch", "main", url, staging],
-    home, "T3_RUNNER_STORE_CLONE_FAILED");
+  await run("git", ["clone", "--depth", "1", "--branch", "main", url, staging],
+    home, "T3_RUNNER_STORE_CLONE_FAILED", { gitAuth: authEnvironment(env, options) });
 }
 
 /** Refuse link entries that could redirect archived HOME files outside HOME. */
@@ -187,11 +194,12 @@ export async function publishHomeState(env: NodeJS.ProcessEnv, options: HomeStat
         "-c", "user.email=t3-runner-store@users.noreply.github.com",
         "commit", "-m", "Backup T3 state and provider sessions"], home,
       "T3_RUNNER_STORE_COMMIT_FAILED");
-      const pushArgs = [...authArgs(env, options), ...git, "push", storeUrl(env, options), "HEAD:main"];
+      const pushArgs = [...git, "push", storeUrl(env, options), "HEAD:main"];
       let pushed = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          await run("git", pushArgs, home, "T3_RUNNER_STORE_PUSH_FAILED");
+          await run("git", pushArgs, home, "T3_RUNNER_STORE_PUSH_FAILED",
+            { gitAuth: authEnvironment(env, options) });
           pushed = true;
           break;
         } catch {
