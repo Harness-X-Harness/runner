@@ -7,6 +7,8 @@ export const environmentCreationInput = z.object({
   executor: z.enum(["codex", "grok", "t3"]),
 }).strict();
 const recordSchema = environmentCreationInput.extend({
+  // Read-only compatibility with Environments created before standalone T3.
+  services: z.array(z.literal("t3")).max(1).optional(),
   createdAt: z.number().int().nonnegative(),
   admitUntil: z.number().int().positive(),
 });
@@ -33,7 +35,7 @@ export class EnvironmentCreation {
       if (stored !== undefined) {
         const record = recordSchema.parse(stored);
         if (record.ownerId !== input.ownerId || record.environmentId !== input.environmentId ||
-            record.executor !== input.executor) {
+            record.executor !== input.executor || record.services?.length) {
           throw new Error("ENVIRONMENT_CREATION_CONFLICT");
         }
         return record;

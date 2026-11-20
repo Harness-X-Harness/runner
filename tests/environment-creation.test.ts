@@ -41,3 +41,12 @@ test("standalone T3 is immutable and legacy optional-service input is rejected",
   await assert.rejects(creation.create({ ...t3, services: ["t3"] }));
   await assert.rejects(creation.create({ ...t3, executor: "unknown" }));
 });
+
+test("previously persisted Codex plus optional T3 remains readable but cannot be silently replayed", async () => {
+  const storage = taskStorage();
+  const old = { ...input, createdAt: 100, admitUntil: 1100, services: ["t3"] };
+  await storage.put("environment-creation", old);
+  const creation = new EnvironmentCreation(storage, 1000, () => 200);
+  assert.deepEqual(await creation.read("1"), old);
+  await assert.rejects(creation.create(input), /ENVIRONMENT_CREATION_CONFLICT/);
+});

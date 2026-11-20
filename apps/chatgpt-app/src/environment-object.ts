@@ -89,6 +89,10 @@ const runtimeMessage = z.discriminatedUnion("type", [
   }).strict(),
 ]);
 
+function hasT3Service(creation: { executor: string; services?: readonly "t3"[] }): boolean {
+  return creation.executor === "t3" || creation.services?.includes("t3") === true;
+}
+
 // RPC methods are internal; HTTP runtime access is gated by the Worker OIDC handler.
 export class EnvironmentObject extends DurableObject<Bindings> {
   private readonly creation: EnvironmentCreation;
@@ -162,7 +166,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       } else if (ready !== undefined) {
         snapshot.status = "unavailable"; snapshot.reason = "runtime_disconnected";
       }
-      if (creation.executor === "t3") {
+      if (hasT3Service(creation)) {
         const service = await this.ctx.storage.get<{
           t3: NonNullable<EnvironmentSnapshot["services"]>["t3"];
           generation: number; observedAt: number;
@@ -440,7 +444,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             (await this.creation.readInternal()).admitUntil <= Date.now()) return false;
         const idle = await this.ctx.storage.get<number>("environment-idle-deadline");
         if (idle !== undefined && idle <= Date.now()) return false;
-        if (idle === undefined && (await this.creation.readInternal()).executor !== "t3" &&
+        if (idle === undefined && !hasT3Service(await this.creation.readInternal()) &&
             await this.ctx.storage.get("environment-active-operation") === undefined) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
@@ -458,7 +462,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
       if (incoming.type === "service-state") {
         if (incoming.generation !== current.generation ||
             await this.ctx.storage.get("environment-ready-generation") !== current.generation ||
-            (await this.creation.readInternal()).executor !== "t3") return false;
+            !hasT3Service(await this.creation.readInternal())) return false;
         await this.ctx.storage.put("environment-t3-state",
           { t3: incoming.t3, observedAt: Date.now(), generation: current.generation });
         return { type: "service-state-accepted", generation: current.generation };
@@ -532,7 +536,7 @@ export class EnvironmentObject extends DurableObject<Bindings> {
             { kind: "operation", operationId: incoming.taskId, status: task.status });
         }
         await this.ctx.storage.delete("environment-active-operation");
-        if ((await this.creation.readInternal()).executor !== "t3") {
+        if (!hasT3Service(await this.creation.readInternal())) {
           await this.ctx.storage.put("environment-idle-deadline", Date.now() + IDLE_MS);
         }
         await this.scheduleAlarm(await this.nextDeadline());
