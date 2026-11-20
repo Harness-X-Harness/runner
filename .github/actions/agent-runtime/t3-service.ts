@@ -8,6 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { T3Connection, stopManagedProcess } from "./t3-connection.ts";
 import { readT3Descriptor, type T3Descriptor } from "./t3-readiness.ts";
 
+export const T3_STARTUP_TIMEOUT_MS = 120_000;
+
 export type T3ServiceState =
   | { status: "starting" | "failed" | "stopped" }
   | { status: "ready"; origin: string };
@@ -94,7 +96,7 @@ export class T3Service {
     const abort = () => { void this.close().catch(() => {}); };
     parentSignal.addEventListener("abort", abort, { once: true });
     this.lifetime.signal.addEventListener("abort", () => parentSignal.removeEventListener("abort", abort), { once: true });
-    const signal = AbortSignal.any([parentSignal, this.lifetime.signal, AbortSignal.timeout(90_000)]);
+    const signal = AbortSignal.any([parentSignal, this.lifetime.signal, AbortSignal.timeout(T3_STARTUP_TIMEOUT_MS)]);
     try {
       await mkdir(this.options.workspace, { recursive: true, mode: 0o700 });
       await requireUnusedPort(this.port);
@@ -143,7 +145,7 @@ export class T3Service {
       const { origin } = await this.connection.open(signal);
       // A tunnel URL in cloudflared stderr does not prove public T3 reachability.
       let publicReady = false;
-      const publicDeadline = Date.now() + 30_000;
+      const publicDeadline = Date.now() + T3_STARTUP_TIMEOUT_MS;
       while (!signal.aborted && !exited && Date.now() < publicDeadline) {
         if (await this.remoteReady(origin, local, signal)) { publicReady = true; break; }
         await delay(500, undefined, { signal }).catch(() => {});

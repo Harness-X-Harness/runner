@@ -12,8 +12,7 @@ export type OpenCapacityRejection =
   | { admitted: false; capacityKind: "owner"; retryable: false;
       existingEnvironment: { environmentId: string; status?: EnvironmentSnapshot["status"] } }
   | { admitted: false; capacityKind: "global"; retryable: true };
-export const openInput = z.object({ executor: z.enum(["codex", "grok"]),
-  services: z.array(z.literal("t3")).max(1).optional(),
+export const openInput = z.object({ executor: z.enum(["codex", "grok", "t3"]),
   idempotencyKey: z.string().min(1).max(256).optional() }).strict();
 export const environmentIdentity = z.object({ environmentId: z.string().regex(/^env_[a-f0-9]{32}$/) }).strict();
 
@@ -27,8 +26,7 @@ export async function openEnvironment(env: EnvironmentService, props: unknown, v
       JSON.stringify(["environment-open", ownerId, input.idempotencyKey])))).slice(0, 16);
   const environmentId = `env_${[...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
   const object = env.ENVIRONMENTS.getByName(environmentId);
-  const creation = await object.initialize({ environmentId, ownerId, executor: input.executor,
-    ...(input.services ? { services: input.services } : {}) });
+  const creation = await object.initialize({ environmentId, ownerId, executor: input.executor });
   if (!creation.admitted) {
     if (creation.capacityKind === "global") return creation;
     const existing = await env.ENVIRONMENTS.getByName(creation.existingEnvironmentId).readEnvironment(ownerId);

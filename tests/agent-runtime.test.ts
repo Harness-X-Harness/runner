@@ -262,3 +262,22 @@ test("a failed native model change leaves the agent configuration uncertain", as
     { prompt: "correct", model: "gpt-6.1-sol", reasoningEffort: "high" }), /AGENT_MODEL_UNCERTAIN/);
   assert.equal(prompts(), 0);
 });
+
+test("standalone T3 skips native ACP and still serves commands when T3 itself fails", async () => {
+  const handlers = { sessionUpdate: () => {}, requestPermission: () =>
+    ({ outcome: { outcome: "cancelled" as const } }) };
+  const served = await withEnvironment(null, "t3", Date.now() + 30_000,
+    { PATH: process.env.PATH, HOME: process.env.HOME }, handlers, async environment => {
+      assert.equal(environment.agentState, undefined);
+      assert.equal(environment.services?.read().t3.status, "failed");
+      await assert.rejects(environment.agent("native ACP unavailable in T3"), /AGENT_UNAVAILABLE/);
+      const output = await environment.command({ argv: [process.execPath, "-e",
+        "process.stdout.write('STANDALONE_COMMAND_OK')"], timeoutSeconds: 5 });
+      assert.equal(output.stdout, "STANDALONE_COMMAND_OK");
+      return "T3_ENV_ALIVE";
+    }, undefined, { workspace: process.cwd(), services: {
+      read: () => ({ t3: { status: "failed" as const } }),
+      subscribe: () => () => {},
+    } });
+  assert.equal(served, "T3_ENV_ALIVE");
+});

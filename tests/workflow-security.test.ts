@@ -96,3 +96,33 @@ test("T3 pull-request smoke stays credential-free and disables paid acceptance e
   assert.match(source, /node tests\/run-t3-acceptance\.ts/);
   assert.match(source, /vars\.T3CODE_VERSION \|\| '0\.1\.5'/);
 });
+
+test("T3 installs five independent agent CLIs without native ACP startup gates", async () => {
+  const source = parse(await workflow("run-environment")) as {
+    jobs: { environment: { steps: Array<{ name: string; if?: string; run?: string }> } };
+  };
+  const steps = source.jobs.environment.steps;
+  const t3 = steps.find(step => step.name === "Preinstall T3 agent CLIs")!;
+  const install = steps.find(step => step.name === "Install T3 service")!;
+  assert.ok(t3);
+  assert.ok(install);
+  for (const step of [t3, install]) {
+    assert.equal(step.if, "steps.claim.outputs.executor == 't3'");
+    assert.doesNotMatch(JSON.stringify(step), /secrets\.|MINI_END_USER_KEY|AGENT_GITHUB_TOKEN/);
+  }
+  for (const cli of ["https://chatgpt.com/codex/install.sh", "https://x.ai/cli/install.sh",
+    "https://claude.ai/install.sh", "https://antigravity.google/cli/install.sh",
+    "@earendil-works/pi-coding-agent@latest"]) {
+    assert.ok(t3.run!.includes(cli), `missing ${cli}`);
+  }
+  for (const binary of ["codex", "grok", "claude", "agy", "pi"]) {
+    assert.ok(t3.run!.includes(`${binary} --version`), `missing ${binary} verification`);
+  }
+  assert.ok(steps.indexOf(t3) < steps.indexOf(install));
+  assert.ok(steps.indexOf(install) < steps.findIndex(step => step.name === "Serve Environment"));
+  for (const provider of ["codex", "grok"]) {
+    const name = provider === "codex" ? "Install Codex" : "Install Grok";
+    assert.equal(steps.find(step => step.name === name)?.if,
+      `steps.claim.outputs.executor == '${provider}'`);
+  }
+});

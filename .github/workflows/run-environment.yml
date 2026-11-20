@@ -68,8 +68,25 @@ jobs:
         if: steps.claim.outputs.executor == 'grok'
         run: curl -fsSL https://x.ai/cli/install.sh | bash
 
-      - name: Install optional T3 service
-        if: steps.claim.outputs.t3 == 'true'
+      - name: Preinstall T3 agent CLIs
+        if: steps.claim.outputs.executor == 't3'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://chatgpt.com/codex/install.sh | sh
+          curl -fsSL https://x.ai/cli/install.sh | bash
+          curl -fsSL https://claude.ai/install.sh | bash
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          npm install --global --prefix "$HOME/.local" --ignore-scripts @earendil-works/pi-coding-agent@latest
+          export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
+          codex --version
+          grok --version
+          claude --version
+          agy --version
+          pi --version
+
+      - name: Install T3 service
+        if: steps.claim.outputs.executor == 't3'
         shell: bash
         env:
           T3CODE_VERSION: ${{ vars.T3CODE_VERSION || '0.1.5' }}

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import type { ChildProcess, spawn } from "node:child_process";
-import { T3Service } from "../.github/actions/agent-runtime/t3-service.ts";
+import { T3Service, T3_STARTUP_TIMEOUT_MS } from "../.github/actions/agent-runtime/t3-service.ts";
 
 async function unusedPort(): Promise<number> {
   const server = createServer();
@@ -142,4 +142,8 @@ setTimeout(() => console.log(JSON.stringify({pairUrl:'https://quiet-leaf.tryclou
   assert.equal(started, true);
   await service.close();
   await rejected;
+});
+
+test("T3 startup budget is 120 seconds for local and public readiness", () => {
+  assert.equal(T3_STARTUP_TIMEOUT_MS, 120_000);
 });

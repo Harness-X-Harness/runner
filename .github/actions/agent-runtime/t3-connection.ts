@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
 export type T3PublicConnection = { origin: string };
+export const T3_CONNECTION_TIMEOUT_MS = 120_000;
 
 type Spawn = typeof spawn;
 const ORIGIN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com(?![.a-z0-9-])/i;
@@ -74,7 +75,7 @@ export class T3Connection {
     return () => { this.disconnected.delete(onDisconnect); };
   }
 
-  async open(signal: AbortSignal, timeoutMs = 45_000): Promise<T3PublicConnection> {
+  async open(signal: AbortSignal, timeoutMs = T3_CONNECTION_TIMEOUT_MS): Promise<T3PublicConnection> {
     if (this.child || this.closing) throw new Error("T3_CONNECTION_ALREADY_STARTED");
     signal.throwIfAborted();
     // Never forward model or GitHub work credentials to an unrelated tunnel binary.

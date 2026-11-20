@@ -31,14 +31,22 @@ test("concurrent conflicting creates cannot change owner or executor", async () 
   await assert.rejects(creation.create({ ...input, ownerId: "2" }), /CREATION_CONFLICT/);
 });
 
-test("optional native services are immutable across idempotent Environment replay", async () => {
+test("standalone T3 is immutable and legacy optional-service input is rejected", async () => {
   const creation = new EnvironmentCreation(taskStorage(), 1000, () => 100);
-  const value = { ...input, services: ["t3"] as const };
-  const first = await creation.create({ ...input, services: ["t3"] });
-  assert.deepEqual(first.services, ["t3"]);
-  assert.deepEqual(await creation.create({ ...input, services: ["t3"] }), first);
+  const t3 = { ...input, executor: "t3" };
+  const first = await creation.create(t3);
+  assert.equal(first.executor, "t3");
+  assert.deepEqual(await creation.create(t3), first);
   await assert.rejects(creation.create(input), /ENVIRONMENT_CREATION_CONFLICT/);
-  await assert.rejects(creation.create({ ...input, services: [] }), /ENVIRONMENT_CREATION_CONFLICT/);
-  await assert.rejects(creation.create({ ...input, services: ["unknown"] }));
-  await assert.rejects(creation.create({ ...input, services: ["t3", "t3"] }));
+  await assert.rejects(creation.create({ ...t3, services: ["t3"] }));
+  await assert.rejects(creation.create({ ...t3, executor: "unknown" }));
+});
+
+test("previously persisted Codex plus optional T3 remains readable but cannot be silently replayed", async () => {
+  const storage = taskStorage();
+  const old = { ...input, createdAt: 100, admitUntil: 1100, services: ["t3"] };
+  await storage.put("environment-creation", old);
+  const creation = new EnvironmentCreation(storage, 1000, () => 200);
+  assert.deepEqual(await creation.read("1"), old);
+  await assert.rejects(creation.create(input), /ENVIRONMENT_CREATION_CONFLICT/);
 });

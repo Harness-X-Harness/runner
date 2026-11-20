@@ -28,3 +28,21 @@ export function t3ProviderEnvironment(executor: T3Executor, source: NodeJS.Proce
     ...(source.GH_TOKEN ? { GH_TOKEN: source.GH_TOKEN } : {}),
   };
 }
+
+
+/**
+ * Standalone T3 does not inherit a Codex/Grok backend credential.
+ * T3 handles each provider's authentication through its own settings.
+ */
+export function t3StandaloneEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const home = source.HOME;
+  if (!home || !isAbsolute(home)) throw new Error("T3_PROVIDER_UNAVAILABLE");
+  return {
+    HOME: home,
+    PATH: [join(home, ".local", "bin"), join(home, ".grok", "bin"), source.PATH].filter(Boolean).join(":"),
+    ...(source.TMPDIR ? { TMPDIR: source.TMPDIR } : {}),
+    ...(source.LANG ? { LANG: source.LANG } : {}),
+    ...(source.CI ? { CI: source.CI } : {}),
+    ...(source.GH_TOKEN ? { GH_TOKEN: source.GH_TOKEN } : {}),
+  };
+}

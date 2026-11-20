@@ -15,7 +15,7 @@ for (const closeMode of ["explicit", "deadline"] as const) test(`T3 DO preserves
     "export class TestT3Environment extends EnvironmentObject {",
     "async fixtureSeed(id, owner, origin) {",
     "  const now = Date.now();",
-    '  await this.ctx.storage.put("environment-creation", {environmentId:id, ownerId:owner, executor:"codex", services:["t3"], createdAt:now-16*60000, admitUntil:now+60000});',
+    '  await this.ctx.storage.put("environment-creation", {environmentId:id, ownerId:owner, executor:"t3", createdAt:now-16*60000, admitUntil:now+60000});',
     '  await this.env.ENVIRONMENT_ADMISSION.getByName("global").reserve({environmentId:id,ownerId:owner,admitUntil:now+60000});',
     '  await this.ctx.storage.put("environment-execution", {ownerId:owner,repository:"fixture/runner",runId:"100",runAttempt:"2"});',
     '  await this.ctx.storage.put("environment-dispatch-issued", true);',

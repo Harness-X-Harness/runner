@@ -7,10 +7,10 @@ import { readExecutorReport } from "./agent-model.ts";
 import { agentEnvironment, configureProvider } from "./provider-config.ts";
 import { providerProcess } from "./provider-process.ts";
 import { T3Service } from "./t3-service.ts";
-import { t3ProviderEnvironment } from "./t3-provider.ts";
+import { t3StandaloneEnvironment } from "./t3-provider.ts";
 
-const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok"]), deadline: z.number().int().positive(),
-  services: z.array(z.literal("t3")).max(1).optional() }).strict();
+const bootstrapSchema = z.object({ executor: z.enum(["codex", "grok", "t3"]),
+  deadline: z.number().int().positive() }).strict();
 const reconnectFact = z.object({
   event: z.literal("environment_reconnect_failure"),
   category: z.enum(["runner_identity", "handshake", "handshake_rejected", "control_plane_rejected",
@@ -37,11 +37,9 @@ export async function claimEnvironment(env: NodeJS.ProcessEnv = process.env, fet
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const file = path.join(directory, "claim.json");
-  await writeFile(file, JSON.stringify({ executor: claim.executor, deadline: claim.deadline,
-    ...(claim.services?.length ? { services: claim.services } : {}) }), { mode: 0o600 });
+  await writeFile(file, JSON.stringify({ executor: claim.executor, deadline: claim.deadline }), { mode: 0o600 });
   await chmod(file, 0o600);
-  await appendFile(env.GITHUB_OUTPUT, `executor=${claim.executor}\n` +
-    (claim.services?.includes("t3") ? "t3=true\n" : ""));
+  await appendFile(env.GITHUB_OUTPUT, `executor=${claim.executor}\n`);
 }
 
 async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
@@ -54,19 +52,21 @@ async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
     AbortSignal.timeout(Math.max(1, Math.min(claim.deadline - Date.now(), 2_147_483_647)))]);
   signal.throwIfAborted();
   if (!env.GH_TOKEN) throw new Error("AGENT_GITHUB_AUTH_REQUIRED");
-  await configureProvider(claim.executor, env);
+  if (claim.executor !== "t3") await configureProvider(claim.executor, env);
   const workspace = path.join(directory, "workspace");
   await mkdir(workspace, { recursive: true, mode: 0o700 });
   const { withEnvironment } = await import("./environment.ts");
   const childEnv = agentEnvironment(env);
-  const t3 = claim.services?.includes("t3") ? new T3Service({
-    workspace,
-    env: t3ProviderEnvironment(claim.executor, childEnv),
-  }) : undefined;
+  const t3Env = claim.executor === "t3" ? t3StandaloneEnvironment(childEnv) : undefined;
+  const t3 = t3Env ? new T3Service({ workspace, env: t3Env }) : undefined;
+  // T3 is standalone: its readiness probe cannot delay or kill a Codex/Grok ACP session.
+  // A failed T3 start is reported as a service-state observation, not a fatal Worker error.
+  const t3Startup = t3 ? t3.start(signal).catch(() => {}) : Promise.resolve();
   try {
-    if (t3) await t3.start(signal);
-    await withEnvironment(providerProcess(claim.executor, workspace, childEnv), claim.executor, claim.deadline,
-    { PATH: childEnv.PATH, HOME: childEnv.HOME, TMPDIR: childEnv.TMPDIR, GH_TOKEN: childEnv.GH_TOKEN }, {
+    await withEnvironment(claim.executor === "t3" ? null : providerProcess(claim.executor, workspace, childEnv),
+      claim.executor, claim.deadline,
+    { PATH: t3Env?.PATH ?? childEnv.PATH, HOME: childEnv.HOME, TMPDIR: childEnv.TMPDIR,
+      GH_TOKEN: childEnv.GH_TOKEN }, {
       sessionUpdate: () => {},
       requestPermission: request => {
         const option = request.options.find(value => value.kind === "allow_once" || value.kind === "allow_always");
@@ -75,11 +75,15 @@ async function serve(env: NodeJS.ProcessEnv, parentSignal: AbortSignal) {
       grokExitPlan: async () => ({ outcome: "approved", feedback: null }),
     }, environment => serveRunnerEnvironment(environment, env.TASK_CONTROL_PLANE_URL ?? "", env.ENVIRONMENT_ID!, claim.deadline,
       env, fetch, fact => parentPort?.postMessage({ event: "environment_reconnect_failure", ...fact })), signal, {
-      readAgentReport: (executor, reportSignal) => readExecutorReport(executor, env, fetch, reportSignal),
+      workspace,
+      ...(claim.executor !== "t3" ? { readAgentReport: (executor: "codex" | "grok", reportSignal: AbortSignal) =>
+        readExecutorReport(executor, env, fetch, reportSignal) } : {}),
       ...(t3 ? { services: { read: () => ({ t3: t3.read() }), subscribe: changed => t3.subscribe(changed),
         issuePairing: (origin: string, pairSignal: AbortSignal) => t3.issuePairing(origin, pairSignal) } } : {}),
     });
-  } finally { await t3?.close(); }
+  } finally {
+    try { await t3?.close(); } finally { await t3Startup; }
+  }
 }
 
 async function main() {

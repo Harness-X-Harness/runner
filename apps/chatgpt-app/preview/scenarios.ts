@@ -31,7 +31,7 @@ export const scenes = [
   { id: "capacity-global", label: "全局容量已满", hint: "刷新列表后，可重新选择助手。" },
 ] as const;
 export type SceneId = typeof scenes[number]["id"];
-export type Executor = "codex" | "grok";
+export type Executor = "codex" | "grok" | "t3";
 export type PreviewResult = {
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: Record<string, unknown>;
@@ -72,10 +72,16 @@ const markdownExample = [
 
 function ready(executor: Executor, now: number): Snapshot {
   return { contract: "ordinary", environmentId, executor, environmentStatus: "ready", disposition: "accepted",
-    workFinished: false, expiresAt: now + 6 * 60 * 60_000, idleExpiresAt: now + 15 * 60_000,
-    activeOperationId: null, agent: { current: true, state: { uncertain: false, selection: {
-      model: executor === "codex" ? "gpt-6.1-sol" : "grok-4.7", reasoningEffort: executor === "codex" ? "high" : "xhigh",
-    } } } };
+    workFinished: false, expiresAt: now + 6 * 60 * 60_000,
+    idleExpiresAt: executor === "t3" ? null : now + 15 * 60_000,
+    activeOperationId: null,
+    ...(executor === "t3" ? { services: t3Service("ready") } : {
+      agent: { current: true, state: { uncertain: false, selection: {
+        model: executor === "codex" ? "gpt-6.1-sol" : "grok-4.7",
+        reasoningEffort: executor === "codex" ? "high" : "xhigh",
+      } } },
+    }),
+  };
 }
 function t3Service(status: NonNullable<Snapshot["services"]>["t3"]["status"]): NonNullable<Snapshot["services"]> {
   return {t3:{status, ...(status === "ready" ? {
@@ -107,7 +113,7 @@ export class PreviewSession {
     let s = ready(executor, now);
     if (scene.startsWith("t3-")) {
       const status = scene === "t3-ready" ? "ready" : scene === "t3-failed" ? "failed" : "unavailable";
-      s = {...s, services:t3Service(status), idleExpiresAt:null,
+      s = {...s, executor:"t3", agent:undefined, services:t3Service(status), idleExpiresAt:null,
         ...(status === "unavailable" ? {environmentStatus:"unavailable", environmentReason:"runtime_disconnected"} : {})};
     }
     if (["working", "question", "unsupported-question", "historical"].includes(scene)) s = working(s);
@@ -183,9 +189,9 @@ export class PreviewSession {
       ? result(this.snapshot) : this.list();
     if (name === "list_environments") return this.list();
     if (name === "open_environment") {
-      this.snapshot = { ...ready(args.executor === "grok" ? "grok" : "codex", this.now), environmentStatus: "opening" };
+      this.snapshot = { ...ready(args.executor === "grok" ? "grok" : args.executor === "t3" ? "t3" : "codex", this.now), environmentStatus: "opening" };
       this.next = { ...this.snapshot, environmentStatus: "ready" };
-      if (Array.isArray(args.services) && args.services.includes("t3")) {
+      if (args.executor === "t3") {
         this.snapshot = {...this.snapshot, services:t3Service("starting"), idleExpiresAt:null};
         this.next = {...this.next, services:t3Service("ready"), idleExpiresAt:null};
       }

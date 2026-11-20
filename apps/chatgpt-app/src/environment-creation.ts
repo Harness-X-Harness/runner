@@ -4,10 +4,11 @@ import { z } from "zod";
 export const environmentCreationInput = z.object({
   environmentId: z.string().regex(/^env_[a-f0-9]{32}$/),
   ownerId: z.string().regex(/^[1-9]\d{0,19}$/),
-  executor: z.enum(["codex", "grok"]),
-  services: z.array(z.literal("t3")).max(1).optional(),
+  executor: z.enum(["codex", "grok", "t3"]),
 }).strict();
 const recordSchema = environmentCreationInput.extend({
+  // Read-only compatibility with Environments created before standalone T3.
+  services: z.array(z.literal("t3")).max(1).optional(),
   createdAt: z.number().int().nonnegative(),
   admitUntil: z.number().int().positive(),
 });
@@ -34,8 +35,7 @@ export class EnvironmentCreation {
       if (stored !== undefined) {
         const record = recordSchema.parse(stored);
         if (record.ownerId !== input.ownerId || record.environmentId !== input.environmentId ||
-            record.executor !== input.executor ||
-            (record.services ?? []).join(",") !== (input.services ?? []).join(",")) {
+            record.executor !== input.executor || record.services?.length) {
           throw new Error("ENVIRONMENT_CREATION_CONFLICT");
         }
         return record;
