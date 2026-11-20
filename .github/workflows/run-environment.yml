@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       restore_runner_home:
-        description: Before T3 starts, overlay HOME from ronhuafeng/t3-runner-store and push it back on teardown
+        description: Before T3 starts, overlay HOME from the repository in secret T3_RESTORE_RUNNER_HOME and push it back on teardown
         type: boolean
         default: false
 
@@ -118,27 +118,15 @@ jobs:
             test -s /etc/apparmor.d/t3-chrome-headless-shell
           fi
 
-      # open_environment dispatches only environment_id. The repository variable
-      # turns restoration on for that path. The dispatch input covers one run.
-      # Either way, only actor 490285 receives the private home. Browser setup
-      # runs first so the overlay is the last write of tracked home files.
+      # Browser setup runs first so the overlay is the last write of tracked home files.
+      # The flag is the only switch. open_environment does not send it, so its default is off.
       - name: Prepare runner home state
-        id: home
-        if: steps.claim.outputs.executor == 't3'
+        if: inputs.restore_runner_home && steps.claim.outputs.executor == 't3'
         shell: bash
-        env:
-          RESTORE_INPUT: ${{ inputs.restore_runner_home }}
-          RESTORE_VAR: ${{ vars.T3_RESTORE_RUNNER_HOME }}
-          ACTOR_ID: ${{ github.actor_id }}
         run: |
           set -euo pipefail
-          enabled=0
-          if [ "$ACTOR_ID" = "490285" ] && { [ "$RESTORE_INPUT" = "true" ] || [ "$RESTORE_VAR" = "true" ]; }; then
-            enabled=1
-            sudo apt-get update -qq
-            sudo apt-get install --yes --no-install-recommends sqlite3
-          fi
-          echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends sqlite3
 
       - name: Serve Environment
         if: steps.claim.outputs.executor != ''
@@ -147,13 +135,15 @@ jobs:
           MINI_CODEX_BASE_URL: ${{ secrets.MINI_CODEX_BASE_URL }}
           MINI_GROK_BASE_URL: ${{ secrets.MINI_GROK_BASE_URL }}
           GH_TOKEN: ${{ secrets.AGENT_GITHUB_TOKEN }}
-          T3_RESTORE_HOME: ${{ steps.home.outputs.enabled == '1' && '1' || '' }}
-          T3_RUNNER_STORE_TOKEN: ${{ steps.home.outputs.enabled == '1' && secrets.T3_RUNNER_STORE_TOKEN || '' }}
+          T3_RESTORE_HOME: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && '1' || '' }}
+          T3_RESTORE_RUNNER_HOME: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && secrets.T3_RESTORE_RUNNER_HOME || '' }}
+          T3_RUNNER_STORE_TOKEN: ${{ inputs.restore_runner_home && steps.claim.outputs.executor == 't3' && secrets.T3_RUNNER_STORE_TOKEN || '' }}
         run: node .github/actions/agent-runtime/environment-entry.ts serve
 
       - name: Publish runner home state
-        if: always() && steps.home.outputs.enabled == '1'
+        if: always() && inputs.restore_runner_home && steps.claim.outputs.executor == 't3'
         env:
           T3_RESTORE_HOME: "1"
+          T3_RESTORE_RUNNER_HOME: ${{ secrets.T3_RESTORE_RUNNER_HOME }}
           T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
         run: node .github/actions/agent-runtime/home-state-cli.ts

@@ -3,15 +3,6 @@ import { mkdtemp, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-/** The private home backup this flag restores. The token is a repository secret. */
-export const T3_RUNNER_STORE_REPOSITORY = "ronhuafeng/t3-runner-store";
-
-/**
- * GitHub user id allowed to receive that backup. The workflow checks
- * `github.actor_id` before it injects the token; this module does not.
- */
-export const T3_RUNNER_STORE_OWNER_ID = "490285";
-
 export function homeStateRequested(env: NodeJS.ProcessEnv): boolean {
   return env.T3_RESTORE_HOME === "1";
 }
@@ -22,8 +13,14 @@ function homeOf(env: NodeJS.ProcessEnv): string {
   return home;
 }
 
+function storeRepository(env: NodeJS.ProcessEnv): string {
+  const repository = env.T3_RESTORE_RUNNER_HOME?.trim() ?? "";
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("T3_RESTORE_RUNNER_HOME_REQUIRED");
+  return repository;
+}
+
 function storeUrl(env: NodeJS.ProcessEnv): string {
-  return env.T3_RUNNER_STORE_URL ?? `https://github.com/${T3_RUNNER_STORE_REPOSITORY}.git`;
+  return env.T3_RUNNER_STORE_URL ?? `https://github.com/${storeRepository(env)}.git`;
 }
 
 function authArgs(env: NodeJS.ProcessEnv): string[] {
@@ -34,13 +31,16 @@ function authArgs(env: NodeJS.ProcessEnv): string[] {
   return ["-c", `http.extraheader=AUTHORIZATION: bearer ${token}`];
 }
 
-function redact(text: string, token: string | undefined): string {
-  if (!token) return text;
-  return text.split(token).join("[redacted]");
+function redact(text: string, env: NodeJS.ProcessEnv | undefined): string {
+  let out = text;
+  for (const secret of [env?.T3_RUNNER_STORE_TOKEN, env?.T3_RESTORE_RUNNER_HOME]) {
+    if (secret) out = out.split(secret).join("[redacted]");
+  }
+  return out;
 }
 
 function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
-  const token = options.env?.T3_RUNNER_STORE_TOKEN;
+  const env = options.env;
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -51,10 +51,10 @@ function run(command: string, args: string[], options: { cwd?: string; env?: Nod
     let stderr = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.on("data", chunk => { stderr += chunk; });
-    child.on("error", error => reject(new Error(redact(error.message, token))));
+    child.on("error", error => reject(new Error(redact(error.message, env))));
     child.on("close", code => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(redact(stderr.trim() || `${command} exited ${code}`, token)));
+      else reject(new Error(redact(stderr.trim() || `${command} exited ${code}`, env)));
     });
   });
 }

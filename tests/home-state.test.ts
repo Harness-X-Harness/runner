@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { T3_RUNNER_STORE_OWNER_ID, T3_RUNNER_STORE_REPOSITORY, publishHomeState, restoreHomeState } from "../.github/actions/agent-runtime/home-state.ts";
+import { publishHomeState, restoreHomeState } from "../.github/actions/agent-runtime/home-state.ts";
 
 const execute = promisify(execFile);
 
@@ -62,11 +62,16 @@ test("home restore is inert unless the flag is set", async () => {
   await restoreHomeState({ HOME: "/tmp", T3_RUNNER_STORE_TOKEN: "unused" });
   await publishHomeState({ HOME: "/tmp" });
   await assert.rejects(() => restoreHomeState({ HOME: "/tmp", T3_RESTORE_HOME: "1",
-    T3_RUNNER_STORE_URL: `https://github.com/${T3_RUNNER_STORE_REPOSITORY}.git` }),
+    T3_RUNNER_STORE_URL: "https://github.com/example/store.git" }),
   /T3_RUNNER_STORE_TOKEN_REQUIRED/);
+  await assert.rejects(() => restoreHomeState({ HOME: "/tmp", T3_RESTORE_HOME: "1",
+    T3_RUNNER_STORE_TOKEN: "token" }), /T3_RESTORE_RUNNER_HOME_REQUIRED/);
+  await assert.rejects(() => restoreHomeState({ HOME: "/tmp", T3_RESTORE_HOME: "1",
+    T3_RESTORE_RUNNER_HOME: "not a repo", T3_RUNNER_STORE_TOKEN: "token" }),
+  /T3_RESTORE_RUNNER_HOME_REQUIRED/);
 });
 
-test("workflow keeps the store token behind the owner gate and out of setup steps", async () => {
+test("workflow flag gates home setup and teardown and does not name a repository", async () => {
   const source = await readFile(new URL("../.github/workflows/run-environment.yml", import.meta.url), "utf8");
   const serveAt = source.indexOf("- name: Serve Environment");
   const homeAt = source.indexOf("- name: Prepare runner home state");
@@ -75,9 +80,10 @@ test("workflow keeps the store token behind the owner gate and out of setup step
   assert.ok(homeAt > browserAt);
   assert.ok(serveAt > homeAt);
   assert.doesNotMatch(source.slice(0, serveAt), /secrets\./);
-  assert.match(source, new RegExp(`\\[ "\\$ACTOR_ID" = "${T3_RUNNER_STORE_OWNER_ID}" \\]`));
+  assert.doesNotMatch(source, /ronhuafeng|490285|vars\.T3_RESTORE_RUNNER_HOME/);
   assert.match(source, /restore_runner_home:/);
-  assert.match(source, /vars\.T3_RESTORE_RUNNER_HOME/);
+  assert.match(source, /if: inputs\.restore_runner_home && steps\.claim\.outputs\.executor == 't3'/);
+  assert.match(source, /if: always\(\) && inputs\.restore_runner_home && steps\.claim\.outputs\.executor == 't3'/);
+  assert.match(source, /secrets\.T3_RESTORE_RUNNER_HOME/);
   assert.match(source, /secrets\.T3_RUNNER_STORE_TOKEN/);
-  assert.match(source, /T3_RUNNER_STORE_TOKEN: \$\{\{ steps\.home\.outputs\.enabled == '1' && secrets\.T3_RUNNER_STORE_TOKEN \|\| '' \}\}/);
 });

@@ -29,15 +29,14 @@ runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用
 ## Optional T3 Service 的权限边界
 
 按需启用的原版 T3 Code 使用 Runner 自身的已配置 Provider CLI 和经筛选的环境变量。
-它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN`、Worker 控制面凭证，或
-`T3_RUNNER_STORE_TOKEN`。
+它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN`、Worker 控制面凭证、
+`T3_RESTORE_RUNNER_HOME` 或 `T3_RUNNER_STORE_TOKEN`。
 
-`restore_runner_home` 或仓库变量 `T3_RESTORE_RUNNER_HOME=true` 时，Repository
-Secret `T3_RUNNER_STORE_TOKEN` 只代表对私有仓库 `ronhuafeng/t3-runner-store` 的
-读写。workflow 仅在 executor 为 `t3` 且 `github.actor_id` 为 `490285` 时，把该
-secret 注入 serve 与 publish 步骤：启动前覆盖该仓库已跟踪的 home 状态，环境关闭后
-推回。其他 Principal 的步骤拿不到这个 token。该仓库包含会话和登录材料。日志不得
-打印 token。runner 虚拟机被直接销毁时，这次 push 不会发生。
+workflow 输入 `restore_runner_home` 为真且 executor 为 `t3` 时，serve 与 publish
+步骤才接收两个 Repository Secret。`T3_RESTORE_RUNNER_HOME` 的值是 `owner/name`，
+指出要覆盖的私有 home 备份仓库。`T3_RUNNER_STORE_TOKEN` 是对该仓库的读写 token。
+源码不写死仓库名。flag 为假时这两个 secret 不进入步骤。该仓库包含会话和登录材料。
+日志不得打印 token 或仓库名。runner 虚拟机被直接销毁时，这次 push 不会发生。
 
 但 T3 Terminal、Agent 及 Runner 原生命令仍然共享临时主机用户，T3 可能
 访问获得明确授权的模型凭证和固定 Agent GitHub work token。这不是额外的进程隔离。
