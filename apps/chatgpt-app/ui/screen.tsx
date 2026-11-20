@@ -31,13 +31,13 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
   const [prompt, setPrompt] = useState("");
   const [lease, setLease] = useState<PromptLease>();
   const [mode, setMode] = useState("agent");
-  const [enableT3, setEnableT3] = useState(false);
   const [commandDraft, setCommandDraft] = useState("");
   const [timeout, setTimeoutSeconds] = useState(30);
   const [commandLease, setCommandLease] = useState<PromptLease>();
   const [commandError, setCommandError] = useState("");
   const [operationDraft, setOperationDraft] = useState("");
   const snapshot = view?.kind === "environment" ? view.snapshot : undefined;
+  const effectiveMode = snapshot?.executor === "t3" && mode === "agent" ? "command" : mode;
   const environmentId = snapshot?.environmentId;
   const previousEnvironment = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -98,16 +98,11 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       {view.environments.length === 0 ? <>
         <h1>选择助手</h1>
         <p>同时只能有一个工作区。</p>
-        <label className="service-option" htmlFor="enable-t3">
-          <input id="enable-t3" type="checkbox" checked={enableT3} disabled={!canCall}
-            onChange={event => setEnableT3(event.target.checked)} />
-          <span>同时启动 T3 Code 服务（可连接原生 Web 与 MCP，持续占用工作区至关闭）</span>
-        </label>
         <div className="choices">
-          {(["codex", "grok"] as const).map(executor => <Button className="choice" key={executor} disabled={!canCall}
-            onClick={() => onCall("open_environment", { executor, idempotencyKey: creationKey,
-              ...(enableT3 ? { services: ["t3"] } : {}) })}>
-            <strong>{executorName(executor)}</strong><small>{executor === "codex" ? "打开 Codex" : "打开 Grok"}</small>
+          {(["codex", "grok", "t3"] as const).map(executor => <Button className="choice" key={executor} disabled={!canCall}
+            onClick={() => onCall("open_environment", { executor, idempotencyKey: creationKey })}>
+            <strong>{executorName(executor)}</strong><small>{executor === "t3" ? "打开 T3 Code" :
+              executor === "codex" ? "打开 Codex" : "打开 Grok"}</small>
           </Button>)}
         </div>
       </> : <>
@@ -174,13 +169,13 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
       </div>}
       <div className="workbench-actions">
         <label className="sr-only" htmlFor="workbench-mode">输入模式</label>
-        <select id="workbench-mode" value={mode} disabled={!canCall || Boolean(lease || commandLease)} onChange={event => setMode(event.target.value)}>
-          <option value="agent">助手指令</option><option value="command">运行命令</option><option value="result">查看操作结果</option>
+        <select id="workbench-mode" value={effectiveMode} disabled={!canCall || Boolean(lease || commandLease)} onChange={event => setMode(event.target.value)}>
+          {snapshot.executor !== "t3" && <option value="agent">助手指令</option>}<option value="command">运行命令</option><option value="result">查看操作结果</option>
         </select>
         {onUseInChat && <Button variant="quiet" disabled={!connected || busy || phase === "closed"} onClick={onUseInChat}>在对话中使用此工作区</Button>}
       </div>
       {contextFeedback && <p className="notice" role="status">{contextFeedback}</p>}
-      {mode === "result" && <form className="prompt" onSubmit={event => {
+      {effectiveMode === "result" && <form className="prompt" onSubmit={event => {
         event.preventDefault();
         const args = selectedOperationArguments(snapshot.environmentId, operationDraft.trim());
         if (args && canCall) onCall("inspect_environment", args);
@@ -190,7 +185,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         <Button type="submit" disabled={!canCall || !selectedOperationArguments(snapshot.environmentId, operationDraft.trim())}>查看结果</Button>
         <p className="muted">使用对话工具返回的操作 ID。查看旧结果不会改变停止目标。</p>
       </form>}
-      {showPrompt && mode === "command" && <form className="prompt" onSubmit={event => {
+      {showPrompt && effectiveMode === "command" && <form className="prompt" onSubmit={event => {
         event.preventDefault();
         if (!canCall || !onCommand) return;
         try {
@@ -214,7 +209,7 @@ export function Screen({ view, error, busy, connected, canCall, canMessage, now,
         <input id="command-timeout" type="number" min={1} max={300} step={1} value={timeout} disabled={!canCall} onChange={event => setTimeoutSeconds(Number(event.target.value))} />
         {commandError && <p className="error" role="alert">{commandError}</p>}
       </form>}
-      {showPrompt && mode === "agent" && <form className="prompt" onSubmit={event => {
+      {showPrompt && effectiveMode === "agent" && <form className="prompt" onSubmit={event => {
         event.preventDefault();
         const text = prompt.trim();
         if (!text || !canCall) return;

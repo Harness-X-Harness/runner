@@ -48,8 +48,8 @@ async function call(name: string, args: Record<string, unknown>): Promise<CallOu
     if (name === "open_environment" && latest?.kind === "environment" && !result.isError) creationKey = crypto.randomUUID();
     if (name === "open_environment" && latest?.kind === "capacity") {
       latest = { ...latest,
-        executor: args.executor === "grok" ? "grok" : args.executor === "codex" ? "codex" : undefined,
-        services: Array.isArray(args.services) && args.services.length === 1 && args.services[0] === "t3" ? ["t3"] : undefined,
+        executor: args.executor === "grok" ? "grok" : args.executor === "codex" ? "codex" :
+          args.executor === "t3" ? "t3" : undefined,
         idempotencyKey: typeof args.idempotencyKey === "string" ? args.idempotencyKey : undefined };
     }
   } catch {

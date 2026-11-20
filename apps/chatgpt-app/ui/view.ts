@@ -45,7 +45,7 @@ export type View = { kind: "list"; environments: Environment[]; receivedAt: numb
   | { kind: "environment"; snapshot: Snapshot; receivedAt: number }
   | { kind: "capacity"; capacityKind: "owner" | "global"; retryable: boolean;
       existing?: { environmentId: string; status?: string };
-      executor?: "codex" | "grok"; services?: readonly "t3"[]; idempotencyKey?: string; receivedAt: number };
+      executor?: "codex" | "grok" | "t3"; idempotencyKey?: string; receivedAt: number };
 
 export function readView(result: Result, now: number): View {
   const snapshot = snapshotSchema.safeParse(result.structuredContent);
@@ -239,6 +239,7 @@ export function listStatus(env: Environment, now: number): string {
 export function executorName(value: string): string {
   if (value === "codex") return "Codex";
   if (value === "grok") return "Grok";
+  if (value === "t3") return "T3 Code";
   return value;
 }
 

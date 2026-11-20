@@ -49,7 +49,7 @@ A new Environment can optionally host **unmodified T3 Code** with its native
 Web UI, provider runtime and orchestration MCP:
 
 ```text
-open_environment({ executor: "codex", services: ["t3"], idempotencyKey: "<unique key>" })
+open_environment({ executor: "t3", idempotencyKey: "<unique key>" })
 ```
 
 The service is independent of the native Runner Agent and survives individual
