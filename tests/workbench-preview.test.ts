@@ -22,7 +22,7 @@ test("local preview serves the production artifact, not a second card implementa
 
 test("every preview scene is accepted by the production display contract", () => {
   for (const scene of scenes) {
-    for (const executor of ["codex", "grok"] as const) {
+    for (const executor of ["codex", "grok", "t3"] as const) {
       const session = new PreviewSession(scene.id, executor, 1000);
       assert.doesNotThrow(() => readView(session.initial(), 1000), scene.id);
     }

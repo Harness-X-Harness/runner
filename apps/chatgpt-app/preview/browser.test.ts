@@ -41,13 +41,13 @@ test("production card interactions in a local MCP Apps host", { timeout: 360_000
   const idle = () => waitFor('d.querySelector("main")?.getAttribute("aria-busy") === "false"');
 
   try {
-    await t.test("optional T3 uses owner verification navigation and removes access on closure or failure", async () => {
+    await t.test("standalone T3 uses owner verification navigation and removes access on closure or failure", async () => {
       await open("empty");
-      assert.equal(await evaluate(`${doc}.querySelector('#enable-t3').checked`), false);
-      await evaluate(`${doc}.querySelector('#enable-t3').click(); true`);
-      await click("Codex 打开 Codex");
+      assert.equal(await evaluate(`${doc}.querySelector('#enable-t3')`), null);
+      await click("T3 Code 打开 T3 Code");
       await idle();
-      assert.deepEqual((await toolCalls())[0].args.services, ["t3"]);
+      assert.equal((await toolCalls())[0].args.executor, "t3");
+      assert.equal("services" in (await toolCalls())[0].args, false);
       assert.match(await text(), /正在启动/);
       assert.equal(await evaluate(`${doc}.querySelectorAll('.service-details button, .service-details a').length`), 0);
       await click("刷新");

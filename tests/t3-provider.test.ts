@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { t3ProviderEnvironment } from "../.github/actions/agent-runtime/t3-provider.ts";
+import { t3ProviderEnvironment, t3StandaloneEnvironment } from "../.github/actions/agent-runtime/t3-provider.ts";
 
 test("T3 consumes existing provider configuration without inheriting job control authority", () => {
   const source = {
@@ -30,4 +30,22 @@ test("T3 consumes existing provider configuration without inheriting job control
     /T3_PROVIDER_UNAVAILABLE/);
   assert.throws(() => t3ProviderEnvironment("grok", { ...source, HOME: "relative" }),
     /T3_PROVIDER_UNAVAILABLE/);
+});
+
+test("standalone T3 inherits only CLI paths and explicitly allowed work token", () => {
+  const parent = { HOME: "/tmp/t3-runner", PATH: "/usr/bin", GH_TOKEN: "PRIVATE_WORK_TOKEN",
+    MINI_END_USER_KEY: "PRIVATE_PROVIDER_KEY", MINI_CODEX_BASE_URL: "https://codex.example",
+    MINI_GROK_BASE_URL: "https://grok.example", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "PRIVATE_OIDC",
+    GITHUB_TOKEN: "PRIVATE_ACTIONS_TOKEN" };
+  const child = t3StandaloneEnvironment(parent);
+  assert.equal(child.HOME, parent.HOME);
+  assert.equal(child.GH_TOKEN, parent.GH_TOKEN);
+  assert.match(child.PATH!, /\.local\/bin/);
+  assert.match(child.PATH!, /\.grok\/bin/);
+  for (const secret of ["MINI_END_USER_KEY", "MINI_CODEX_BASE_URL", "MINI_GROK_BASE_URL",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "GITHUB_TOKEN"]) {
+    assert.equal(child[secret], undefined);
+  }
+  assert.doesNotMatch(JSON.stringify(child), /PRIVATE_PROVIDER_KEY|PRIVATE_OIDC|PRIVATE_ACTIONS_TOKEN/);
+  assert.throws(() => t3StandaloneEnvironment({ HOME: "relative" }), /T3_PROVIDER_UNAVAILABLE/);
 });
