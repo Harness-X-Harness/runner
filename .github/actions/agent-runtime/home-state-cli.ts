@@ -1,5 +1,8 @@
 import { publishHomeState, restoreHomeState } from "./home-state.ts";
 
+// Keep restored session files private to the runner user.
+process.umask(0o077);
+
 try {
   if (process.argv[2] === "restore") await restoreHomeState(process.env);
   else if (process.argv[2] === "publish") await publishHomeState(process.env);
