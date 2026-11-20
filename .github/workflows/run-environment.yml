@@ -102,6 +102,18 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install --yes --no-install-recommends cloudflared
 
+      - name: Prepare T3 browser
+        if: steps.claim.outputs.executor == 't3'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # sudo drops PATH; keep the runner PATH so this finds ~/.local/bin/t3
+          # and setup attributes T3's home to SUDO_USER, not root.
+          sudo env "PATH=$PATH" t3 browser setup
+          if [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" == "1" ]]; then
+            test -s /etc/apparmor.d/t3-chrome-headless-shell
+          fi
+
       - name: Serve Environment
         if: steps.claim.outputs.executor != ''
         env:
