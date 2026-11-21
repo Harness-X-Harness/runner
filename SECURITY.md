@@ -31,8 +31,8 @@ runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用
 按需启用的原版 T3 Code 使用 Runner 自身的已配置 Provider CLI 和经筛选的环境变量。
 它不接收 GitHub Actions 的 OIDC、job `GITHUB_TOKEN` 或 Worker 控制面凭证。
 
-可选的 HOME 备份仅当 `github.actor_id == 490285`、claimed executor 为 `t3`，
-且 workflow input `restore_runner_home` 或仓库变量 `T3_RESTORE_RUNNER_HOME=true`
+可选的 HOME 持久化（恢复、周期性备份及结束发布）仅当 `github.actor_id == 490285`、claimed executor 为 `t3`，
+且 workflow input `restore_runner_home` 或仓库变量 `T3_RUNNER_HOME_PERSISTENCE_ENABLED=true`
 启用时执行。存储仓库由 Repository Secret `T3_RUNNER_STORE_REPOSITORY` 提供
 (`owner/name`)，读写 token 是 `T3_RUNNER_STORE_TOKEN`。这两个 secret 只作为 workflow 环境变量提供给 Restore / Publish 步骤；
 长期 `Serve Environment` 步骤和 T3 子进程均不直接接收它们。
