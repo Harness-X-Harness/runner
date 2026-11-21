@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { restoreHomeState, publishHomeState } from "../.github/actions/agent-runtime/home-state.ts";
+import { checkpointPath, runCheckpointLoop, HOME_CHECKPOINT_INTERVAL_MS } from
+  "../.github/actions/agent-runtime/home-state-checkpoint.ts";
 
 const execute = promisify(execFile);
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -153,13 +155,72 @@ test("WAL-only transactions are snapshotted even if the main SQLite file is unch
   }
 });
 
+test("periodic checkpoints publish selected state while keeping final teardown available", async () => {
+  const f = await fixture();
+  let stop: (() => void) | undefined;
+  try {
+    assert.equal(HOME_CHECKPOINT_INTERVAL_MS, 15 * 60 * 1000);
+    await restoreHomeState(f.env, opts(f.bare));
+    let resolveFirst!: () => void;
+    const first = new Promise<void>(resolve => { resolveFirst = resolve; });
+    const loop = runCheckpointLoop(f.env, async () => {
+      await publishHomeState(f.env, { ...opts(f.bare), retainRestoreMarker: true });
+      resolveFirst();
+    }, 60);
+    stop = () => { void writeFile(checkpointPath(f.env, "stop"), "stop\n"); };
+    await writeFile(join(f.home, "keep.txt"), "intermediate\n");
+    await Promise.race([
+      first,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("periodic checkpoint did not finish")), 8_000)),
+    ]);
+    assert.equal(await git(f.work, ["--git-dir", f.bare, "show", "main:keep.txt"]), "intermediate\n");
+    await access(join(f.env.RUNNER_TEMP!, "t3-runner-home-restored"));
+    await writeFile(checkpointPath(f.env, "stop"), "stop\n");
+    await loop;
+    stop = undefined;
+    await writeFile(join(f.home, "keep.txt"), "final\n");
+    await publishHomeState(f.env, opts(f.bare));
+    assert.equal(await git(f.work, ["--git-dir", f.bare, "show", "main:keep.txt"]), "final\n");
+    await assert.rejects(access(join(f.env.RUNNER_TEMP!, "t3-runner-home-restored")));
+  } finally {
+    stop?.();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a failed checkpoint is retried on the next interval without exposing its error", async () => {
+  const f = await fixture();
+  try {
+    await restoreHomeState(f.env, opts(f.bare));
+    await writeFile(join(f.home, "keep.txt"), "recovered\n");
+    let attempts = 0;
+    await runCheckpointLoop(f.env, async () => {
+      attempts++;
+      if (attempts === 1) throw new Error("PRIVATE_STORE_TOKEN_DO_NOT_LOG");
+      await publishHomeState(f.env, { ...opts(f.bare), retainRestoreMarker: true });
+      await writeFile(checkpointPath(f.env, "stop"), "stop\n");
+    }, 30);
+    assert.equal(attempts, 2);
+    assert.equal(await git(f.work, ["--git-dir", f.bare, "show", "main:keep.txt"]), "recovered\n");
+    const status = await readFile(checkpointPath(f.env, "status"), "utf8");
+    assert.match(status, /^success /);
+    assert.doesNotMatch(status, /PRIVATE_STORE_TOKEN/);
+    await access(join(f.env.RUNNER_TEMP!, "t3-runner-home-restored"));
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("the workflow gates restoration on the real owner and keeps backup credentials out of Serve", async () => {
   const source = await readFile(new URL("../.github/workflows/run-environment.yml", import.meta.url), "utf8");
   const browser = source.indexOf("- name: Prepare T3 browser");
   const restore = source.indexOf("- name: Restore runner home state");
   const serve = source.indexOf("- name: Serve Environment");
+  const restoreStep = source.slice(restore, serve);
   const publish = source.indexOf("- name: Publish runner home state");
   assert.ok(browser !== -1 && browser < restore && restore < serve && serve < publish);
+  assert.match(restoreStep, /home-state-cli\\.ts checkpoint-start/);
+  assert.match(source.slice(publish), /home-state-cli\\.ts checkpoint-stop/);
+  assert.match(source.slice(publish), /flock --exclusive --wait 120/);
   assert.match(source, /vars\.T3_RESTORE_RUNNER_HOME == 'true'/);
   assert.match(source, /github\.actor_id == '490285'/);
   assert.match(source, /if: always\(\)/);
