@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       restore_runner_home:
-        description: Overlay the owner's private T3 HOME for this dispatch (also enabled by repo variable T3_RESTORE_RUNNER_HOME)
+        description: Overlay the owner's private T3 HOME for this dispatch (also enabled by repo variable T3_RUNNER_HOME_PERSISTENCE_ENABLED)
         type: boolean
         default: false
 
@@ -121,7 +121,7 @@ jobs:
       # Only the verified owner may enable this; routine open_environment dispatches only environment_id.
       # Restore AFTER the browser setup and BEFORE T3 starts; secrets never enter Serve.
       - name: Restore runner home state
-        if: (inputs.restore_runner_home || vars.T3_RESTORE_RUNNER_HOME == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
+        if: (inputs.restore_runner_home || vars.T3_RUNNER_HOME_PERSISTENCE_ENABLED == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
         env:
           T3_RUNNER_STORE_REPOSITORY: ${{ secrets.T3_RUNNER_STORE_REPOSITORY }}
           T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
@@ -147,7 +147,7 @@ jobs:
         run: node .github/actions/agent-runtime/environment-entry.ts serve
 
       - name: Publish runner home state
-        if: always() && (inputs.restore_runner_home || vars.T3_RESTORE_RUNNER_HOME == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
+        if: always() && (inputs.restore_runner_home || vars.T3_RUNNER_HOME_PERSISTENCE_ENABLED == 'true') && github.actor_id == '490285' && steps.claim.outputs.executor == 't3'
         env:
           T3_RUNNER_STORE_REPOSITORY: ${{ secrets.T3_RUNNER_STORE_REPOSITORY }}
           T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
