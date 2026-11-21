@@ -218,8 +218,8 @@ test("the workflow gates restoration on the real owner and keeps backup credenti
   const restoreStep = source.slice(restore, serve);
   const publish = source.indexOf("- name: Publish runner home state");
   assert.ok(browser !== -1 && browser < restore && restore < serve && serve < publish);
-  assert.match(restoreStep, /home-state-cli\\.ts checkpoint-start/);
-  assert.match(source.slice(publish), /home-state-cli\\.ts checkpoint-stop/);
+  assert.match(restoreStep, /home-state-cli\.ts checkpoint-start/);
+  assert.match(source.slice(publish), /home-state-cli\.ts checkpoint-stop/);
   assert.match(source.slice(publish), /flock --exclusive --wait 120/);
   assert.match(source, /vars\.T3_RESTORE_RUNNER_HOME == 'true'/);
   assert.match(source, /github\.actor_id == '490285'/);
