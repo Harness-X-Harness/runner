@@ -221,7 +221,8 @@ test("the workflow gates restoration on the real owner and keeps backup credenti
   assert.match(restoreStep, /home-state-cli\.ts checkpoint-start/);
   assert.match(source.slice(publish), /home-state-cli\.ts checkpoint-stop/);
   assert.match(source.slice(publish), /flock --exclusive --wait 120/);
-  assert.match(source, /vars\.T3_RESTORE_RUNNER_HOME == 'true'/);
+  assert.equal((source.match(/vars\.T3_RUNNER_HOME_PERSISTENCE_ENABLED == 'true'/g) ?? []).length, 2);
+  assert.doesNotMatch(source, /T3_RESTORE_RUNNER_HOME/);
   assert.match(source, /github\.actor_id == '490285'/);
   assert.match(source, /if: always\(\)/);
   assert.match(source, /T3_RUNNER_STORE_REPOSITORY: \$\{\{ secrets\.T3_RUNNER_STORE_REPOSITORY \}\}/);

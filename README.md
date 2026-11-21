@@ -62,8 +62,8 @@ seconds. It preinstalls the current Codex, Grok Build, Claude Code, Antigravity
 (`agy`) and Pi agent CLIs; each still requires native authorization.
 Initialization runs `t3 browser setup` (with the runner `PATH` preserved under
 `sudo`) before the server starts, so the headless browser sandbox is allowed
-on Ubuntu 24.04. Optional, owner-gated T3 HOME restoration is enabled by
-repository variable `T3_RESTORE_RUNNER_HOME=true` and requires dedicated
+on Ubuntu 24.04. Optional, owner-gated T3 HOME persistence is enabled by
+repository variable `T3_RUNNER_HOME_PERSISTENCE_ENABLED=true` and requires dedicated
 private-store repository/token secrets. When enabled, selected HOME files are
 checkpointed every 15 minutes and once more at teardown (best effort).
 The background checkpoint worker retains the store token during Serve, though
