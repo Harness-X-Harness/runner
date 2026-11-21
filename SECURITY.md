@@ -34,14 +34,16 @@ runner 不是进程级沙箱。Agent、用户代码和工具以相同 runner 用
 可选的 HOME 备份仅当 `github.actor_id == 490285`、claimed executor 为 `t3`，
 且 workflow input `restore_runner_home` 或仓库变量 `T3_RESTORE_RUNNER_HOME=true`
 启用时执行。存储仓库由 Repository Secret `T3_RUNNER_STORE_REPOSITORY` 提供
-(`owner/name`)，读写 token 是 `T3_RUNNER_STORE_TOKEN`。这两个 secret 只进入
-独立的 Restore / Publish workflow 步骤；长期 `Serve Environment` 步骤和
-T3 子进程均不接收它们。不会把 Git 仓库的 `.git` 目录迁入 HOME；备份时不运行
+(`owner/name`)，读写 token 是 `T3_RUNNER_STORE_TOKEN`。这两个 secret 只作为 workflow 环境变量提供给 Restore / Publish 步骤；
+长期 `Serve Environment` 步骤和 T3 子进程均不直接接收它们。
+Restore 成功后会启动一个独立的后台 checkpoint 工作进程，每 15 分钟备份一次。
+**该后台进程在整个 Serve 期间保留存储 token**，这是相比仅 teardown 备份新增的凭证暴露窗口。不会把 Git 仓库的 `.git` 目录迁入 HOME；备份时不运行
 HOME 提供的 Git hooks。使用源仓库的可信忽略规则，并为 SQLite WAL 数据建立在线
-快照，以免把未 checkpoint 的主数据库错认成 clean。
+快照，以免把未 checkpoint 的主数据库错认成 clean。周期性 checkpoint
+和最终 publish 共享 `flock` 文件锁，避免同一 Runner 内并发推送。
 
-这些步骤减少凭证暴露时间，**不是同 UID 进程的安全隔离**：runner 上保留的后台
-进程理论上仍能在短生命周期步骤运行时读取可访问的进程信息。此功能只允许可信
+这**不是同 UID 进程的安全隔离**：runner 上的 T3、Agent 和命令可能读取后台
+checkpoint 进程持有的 token，须视为单用户可信执行环境。此功能只允许可信
 单用户使用。备份仓库包含敏感会话材料，secret 应仅授权这一私有仓库的 contents
 读写。日志禁止输出 token 或仓库名。虚拟机被销毁、强制取消或执行预算耗尽时，
 `if: always()` 无法保证推送，最终备份仅为 best effort。

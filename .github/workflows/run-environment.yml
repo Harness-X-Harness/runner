@@ -133,6 +133,9 @@ jobs:
             sudo apt-get install --yes --no-install-recommends sqlite3
           fi
           node .github/actions/agent-runtime/home-state-cli.ts restore
+          # Background checkpoints run with a minimal separate environment. The
+          # store token is not passed to Serve or any T3/provider subprocess.
+          node .github/actions/agent-runtime/home-state-cli.ts checkpoint-start
 
       - name: Serve Environment
         if: steps.claim.outputs.executor != ''
@@ -148,4 +151,10 @@ jobs:
         env:
           T3_RUNNER_STORE_REPOSITORY: ${{ secrets.T3_RUNNER_STORE_REPOSITORY }}
           T3_RUNNER_STORE_TOKEN: ${{ secrets.T3_RUNNER_STORE_TOKEN }}
-        run: node .github/actions/agent-runtime/home-state-cli.ts publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/actions/agent-runtime/home-state-cli.ts checkpoint-stop || true
+          # Serializes with any in-flight periodic checkpoint.
+          flock --exclusive --wait 120 "$RUNNER_TEMP/t3-home-checkpoint-lock" \
+            node .github/actions/agent-runtime/home-state-cli.ts publish

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 /** Tests use a local bare repository; production always uses the repository secret. */
-export type HomeStateOptions = { repositoryUrl?: string };
+export type HomeStateOptions = { repositoryUrl?: string; retainRestoreMarker?: boolean };
 
 function requiredDirectory(value: string | undefined): string {
   if (!value || !isAbsolute(value)) throw new Error("INVALID_HOME_STATE");
@@ -208,7 +208,7 @@ export async function publishHomeState(env: NodeJS.ProcessEnv, options: HomeStat
       }
       if (!pushed) throw new Error("T3_RUNNER_STORE_PUSH_FAILED");
     }
-    await rm(marker, { force: true });
+    if (!options.retainRestoreMarker) await rm(marker, { force: true });
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
